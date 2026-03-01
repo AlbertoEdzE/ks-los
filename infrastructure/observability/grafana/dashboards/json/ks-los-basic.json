@@ -25,6 +25,16 @@
     },
     {
       "type": "graph",
+      "title": "API Errors by Endpoint (rate)",
+      "targets": [
+        {
+          "expr": "sum by (endpoint) (rate(request_errors_total[5m]))",
+          "legendFormat": "{{endpoint}}"
+        }
+      ]
+    },
+    {
+      "type": "graph",
       "title": "Inference Latency (seconds)",
       "targets": [
         {

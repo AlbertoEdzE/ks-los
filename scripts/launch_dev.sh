@@ -9,6 +9,7 @@ docker compose -f "$COMPOSE_FILE" up -d postgres redis mlflow prometheus grafana
 
 echo "[KS LOS] Starting FastAPI (backend) on :8000..."
 export LOG_JSON=1
+export OTLP_URL="http://localhost:4317"
 (
   cd "$ROOT_DIR"
   uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
@@ -39,4 +40,3 @@ echo "  MLflow:     http://localhost:5000/"
 echo "  Prometheus: http://localhost:9090/"
 echo "  Grafana:    http://localhost:3000/"
 echo "  Drift Report: http://localhost:8000/training/drift/report"
-

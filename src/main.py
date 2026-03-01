@@ -4,6 +4,12 @@ import logging
 import os
 from src.shared.logging import setup_json_logging
 from src.shared.correlation import set_correlation_id
+from src.shared.metrics import request_counter, request_errors_total
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry import trace
 
 from src.api.routers.scdg_router import router as scdg_router
 from src.api.routers.agent_router import router as agent_router
@@ -16,6 +22,16 @@ if os.getenv("LOG_JSON", "1") == "1":
     setup_json_logging(logging.INFO)
 else:
     logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+# OpenTelemetry exporter initialization (optional via OTLP_URL)
+OTLP_URL = os.getenv("OTLP_URL")
+if OTLP_URL:
+    resource = Resource(attributes={"service.name": "ks-los-api", "environment": os.getenv("ENV", "local")})
+    provider = TracerProvider(resource=resource)
+    exporter = OTLPSpanExporter(endpoint=OTLP_URL, insecure=True)
+    processor = BatchSpanProcessor(exporter)
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -44,7 +60,13 @@ app.include_router(observability_router)
 async def correlation_middleware(request: Request, call_next):
     cid = request.headers.get("X-Correlation-ID")
     set_correlation_id(cid)
-    response = await call_next(request)
+    endpoint = request.url.path
+    request_counter.labels(endpoint=endpoint).inc()
+    try:
+        response = await call_next(request)
+    except Exception:
+        request_errors_total.labels(endpoint=endpoint).inc()
+        raise
     return response
 @app.get("/health")
 async def health_check():

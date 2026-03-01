@@ -1,0 +1,23 @@
+name: Frontend CI
+on:
+  push:
+    branches: [ "poc", "main" ]
+  pull_request:
+    branches: [ "poc", "main" ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          if [ -f package.json ]; then
+            npm ci
+            npm run build || npm run build
+          else
+            echo "No frontend package.json; skipping"
+          fi

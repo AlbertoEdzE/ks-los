@@ -1,0 +1,28 @@
+name: Performance Baseline
+on:
+  workflow_dispatch:
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    services:
+      api:
+        image: python:3.11
+        ports:
+          - 8000:8000
+        options: >-
+          --health-cmd="curl -f http://localhost:8000/observability/summary || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+        env:
+          LOG_JSON: "0"
+        command: >
+          bash -lc "
+          pip install -r requirements.txt &&
+          uvicorn src.main:app --host 0.0.0.0 --port 8000"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run k6 test
+        uses: grafana/k6-action@v0.2.0
+        with:
+          filename: perf/k6/summary.js
