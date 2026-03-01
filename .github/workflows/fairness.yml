@@ -1,0 +1,33 @@
+name: Fairness Checks
+on:
+  push:
+    branches: [ "poc", "main" ]
+  pull_request:
+    branches: [ "poc", "main" ]
+jobs:
+  fairness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run fairness eval
+        run: |
+          python perf/fairness/evaluate.py > fairness_out.json || true
+          echo "Fairness output:"
+          cat fairness_out.json || true
+      - name: Enforce threshold
+        run: |
+          python - << 'PY'
+          import json
+          with open('fairness_out.json') as f:
+              data = json.load(f)
+          gap = float(data.get('approval_gap', 0))
+          print('approval_gap=', gap)
+          assert gap <= 0.2, f"Fairness approval gap too high: {gap}"
+          PY

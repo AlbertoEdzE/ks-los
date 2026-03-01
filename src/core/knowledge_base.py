@@ -44,9 +44,6 @@ class KnowledgeBase:
         """
         Reads a markdown file, splits it, and adds it to the vector store.
         """
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Document not found: {file_path}")
-
         logger.info(f"Ingesting document: {file_path}")
         
         try:

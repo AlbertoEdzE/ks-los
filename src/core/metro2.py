@@ -57,7 +57,7 @@ class Metro2Generator:
     def _format_date(self, d: Optional[date]) -> str:
         """Formats date as MMDDYYYY."""
         if not d:
-            return "00000000" # Standard empty date
+            return "        "
         return d.strftime("%m%d%Y")
 
     def _format_amount(self, amount: float) -> str:
@@ -66,7 +66,7 @@ class Metro2Generator:
             return "0" * 9
         return str(int(amount)).zfill(9)
 
-    def _generate_header(self, activity_status: str, reporter_name: str) -> str:
+    def _generate_header(self, activity_status: str = "EXP", reporter_name: str = "KS_LOS_DEMO") -> str:
         """
         Generates the Header Record (426 bytes).
         """

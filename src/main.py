@@ -16,6 +16,7 @@ from src.api.routers.agent_router import router as agent_router
 from src.api.routers.training_router import router as training_router
 from src.api.routers.metrics_router import router as metrics_router
 from src.api.routers.observability_router import router as observability_router
+from src.api.routers.explain_router import router as explain_router
 
 # Configure logging
 if os.getenv("LOG_JSON", "1") == "1":
@@ -55,6 +56,7 @@ app.include_router(agent_router)
 app.include_router(training_router)
 app.include_router(metrics_router)
 app.include_router(observability_router)
+app.include_router(explain_router)
 
 @app.middleware("http")
 async def correlation_middleware(request: Request, call_next):
