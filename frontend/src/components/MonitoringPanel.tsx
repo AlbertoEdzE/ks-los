@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { getCorrelationId } from "../lib/correlation"
 
 type Summary = {
   training_runs: number
@@ -15,7 +16,7 @@ export function MonitoringPanel() {
   const load = async () => {
     setError(null)
     try {
-      const res = await fetch("http://localhost:8000/observability/summary")
+      const res = await fetch("http://localhost:8000/observability/summary", { headers: { "X-Correlation-ID": getCorrelationId() } })
       if (!res.ok) throw new Error("Failed to load summary")
       const data = await res.json()
       setSummary(data)

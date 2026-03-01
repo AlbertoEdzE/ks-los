@@ -4,7 +4,7 @@ import logging
 import os
 from src.shared.logging import setup_json_logging
 from src.shared.correlation import set_correlation_id
-from src.shared.metrics import request_counter, request_errors_total
+from src.shared.metrics import request_counter, request_errors_total, request_latency_seconds
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -62,11 +62,16 @@ async def correlation_middleware(request: Request, call_next):
     set_correlation_id(cid)
     endpoint = request.url.path
     request_counter.labels(endpoint=endpoint).inc()
+    import time
+    start = time.monotonic()
     try:
         response = await call_next(request)
     except Exception:
         request_errors_total.labels(endpoint=endpoint).inc()
         raise
+    finally:
+        duration = time.monotonic() - start
+        request_latency_seconds.labels(endpoint=endpoint).observe(duration)
     return response
 @app.get("/health")
 async def health_check():

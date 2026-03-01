@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { getCorrelationId } from "../lib/correlation"
 
 type Plan = {
   hyperparameters: Record<string, any>
@@ -20,7 +21,7 @@ export function TrainingPanel() {
     try {
       const res = await fetch("http://localhost:8000/training/plan", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Correlation-ID": getCorrelationId() },
         body: JSON.stringify({ rationale: "Operator requested refresh" })
       })
       if (!res.ok) throw new Error("Failed to generate plan")
@@ -40,7 +41,7 @@ export function TrainingPanel() {
     try {
       const res = await fetch("http://localhost:8000/training/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Correlation-ID": getCorrelationId() },
         body: JSON.stringify(plan)
       })
       if (!res.ok) throw new Error("Failed to run training")
@@ -55,7 +56,7 @@ export function TrainingPanel() {
   const runDrift = async () => {
     setError(null)
     try {
-      const res = await fetch("http://localhost:8000/training/drift", { method: "POST" })
+      const res = await fetch("http://localhost:8000/training/drift", { method: "POST", headers: { "X-Correlation-ID": getCorrelationId() } })
       if (!res.ok) throw new Error("Failed to run drift")
       const data = await res.json()
       setDriftUrl("http://localhost:8000" + data.report_endpoint)

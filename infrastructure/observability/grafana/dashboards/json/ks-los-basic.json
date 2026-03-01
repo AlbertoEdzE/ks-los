@@ -45,6 +45,16 @@
     },
     {
       "type": "graph",
+      "title": "API Latency by Endpoint (seconds)",
+      "targets": [
+        {
+          "expr": "sum by (endpoint) (rate(request_latency_seconds_sum[5m])) / sum by (endpoint) (rate(request_latency_seconds_count[5m]))",
+          "legendFormat": "{{endpoint}}"
+        }
+      ]
+    },
+    {
+      "type": "graph",
       "title": "Training Runs Total",
       "targets": [
         {

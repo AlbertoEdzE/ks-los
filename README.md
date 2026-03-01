@@ -33,23 +33,28 @@ The system relies on a **Synthetic Credit Data Generator (SCDG)** for developmen
 
 ## Quick Start
 
-### Master Launch Script
-To start all services (Infrastructure, KB Init, Backend, Frontend) in one go:
+### Observability & Dev Launch
+To start API, observability stack (MLflow, Prometheus, Grafana), and frontend:
 ```bash
-./scripts/start_all.sh
+bash scripts/launch_dev.sh
 ```
-This will:
-1.  Start Postgres and Redis via Docker.
-2.  Initialize the Knowledge Base (ingest `doc/policies/credit_policy_v1.md`).
-3.  Start the FastAPI backend on port 8000.
-4.  Start the React frontend on port 5173.
+Stack URLs:
+- API: http://localhost:8000/health
+- Metrics: http://localhost:8000/metrics
+- Observability Summary: http://localhost:8000/observability/summary
+- MLflow: http://localhost:5000/
+- Prometheus: http://localhost:9090/
+- Grafana: http://localhost:3000/
+- Drift Report: http://localhost:8000/training/drift/report
 
-Access the UI at: http://localhost:5173
+Correlation IDs:
+- Send `X-Correlation-ID` in requests to correlate logs, traces, and MLflow runs.
+  Example: `curl -H "X-Correlation-ID: test-123" http://localhost:8000/health`
 
-### Cleaning Up
-To stop services and clean the database:
+### Stop Dev Stack
+To stop API/frontend and observability stack:
 ```bash
-./scripts/clean_db.sh
+bash scripts/stop_dev.sh
 ```
 
 ## Manual Setup
