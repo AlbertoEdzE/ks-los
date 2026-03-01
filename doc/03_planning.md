@@ -420,7 +420,7 @@
 
 ### 6.2 Phase One Execution (Weeks 3-8)
 
-- [ ] **6.2.1** Implement SCDG (Weeks 3-4)
+- [x] **6.2.1** Implement SCDG (Weeks 3-4)
   - Eight archetype parameter tables
   - Markov chain generator
   - Deterministic seeding
@@ -431,15 +431,17 @@
   - Docling integration
   - Bank statement normalization
 
-- [ ] **6.2.3** Implement Data Synthesizer Agent + Risk Model (Weeks 5-6)
+- [x] **6.2.3** Implement Data Synthesizer Agent + Risk Model (Weeks 5-6)
   - Base XGBoost model
   - Trained on SCDG portfolio
+  - [x] RAG-based Risk Engine (Implemented in Phase 3)
 
-- [ ] **6.2.4** Implement Advisory Agent + Compliance Agent (Week 7)
+- [x] **6.2.4** Implement Advisory Agent + Compliance Agent (Week 7)
   - Local LLM + RAG
   - Compliance rules engine
+  - [x] Metro 2 Generator (Implemented in Phase 3)
 
-- [ ] **6.2.5** Implement Journey Coach + UIs (Week 8)
+- [x] **6.2.5** Implement Journey Coach + UIs (Week 8)
   - Applicant Chat UI
   - Executive Terminal
   - Go-Live: fully functional system

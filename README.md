@@ -3,89 +3,107 @@
 ## Overview
 This project implements a Caribbean-focused, privacy-preserving, agentic loan prequalification and advisory system. It follows a "Sovereign Core" philosophy, starting with a fully local, open-source foundation (Phase 1) that can evolve into a connected ecosystem (Phase 2+).
 
+**Current Status: Phase 3 (Advanced Decisioning & Compliance)**
+-   **Agent Core**: Implemented using LangGraph.
+-   **Decisioning**: RAG-based Risk Engine using `PGVector` and `Ollama`.
+-   **Compliance**: Metro 2 File Generation (Base Segment).
+-   **LLM**: Local Ollama (Qwen 2.5 7B, Nomic Embed Text).
+-   **Frontend**: React Chat Interface connected to Agent API.
+
 ## Architecture
 The system relies on a **Synthetic Credit Data Generator (SCDG)** for development and fallback scenarios. This generator produces Metro 2-compliant credit profiles based on Caribbean market archetypes.
 
 ### Key Components
-- **Backend:** FastAPI, Python 3.11
+- **Backend:** FastAPI, Python 3.11, LangGraph
 - **Frontend:** React, TypeScript, Vite
 - **Database:** PostgreSQL (with pgvector), Redis
-- **AI/LLM:** Ollama (Qwen 2.5), LangGraph
-- **Validation:** Moov-IO Metro 2 Validator (Docker)
+- **AI/LLM:** Local Ollama (Qwen 2.5 7B, Nomic Embed Text)
+- **Knowledge Base:** Vector store for Credit Policies.
 
 ## Prerequisites
 - Docker & Docker Compose
 - Python 3.11+
 - Node.js & pnpm
+- **Ollama** installed locally and running (`ollama serve`)
+- **Models**:
+  ```bash
+  ollama pull qwen2.5:7b
+  ollama pull nomic-embed-text
+  ```
 
-## Getting Started
+## Quick Start
 
-### 1. Infrastructure Setup
-Start the required services (Postgres, Redis, Ollama, Metro 2 Validator):
+### Master Launch Script
+To start all services (Infrastructure, KB Init, Backend, Frontend) in one go:
+```bash
+./scripts/start_all.sh
+```
+This will:
+1.  Start Postgres and Redis via Docker.
+2.  Initialize the Knowledge Base (ingest `doc/policies/credit_policy_v1.md`).
+3.  Start the FastAPI backend on port 8000.
+4.  Start the React frontend on port 5173.
+
+Access the UI at: http://localhost:5173
+
+### Cleaning Up
+To stop services and clean the database:
+```bash
+./scripts/clean_db.sh
+```
+
+## Manual Setup
+
+### 1. Infrastructure
+Start Postgres and Redis:
 ```bash
 make up
 ```
-Check infrastructure health:
+Check health (ensures Ollama is reachable):
 ```bash
 make check-infra
 ```
 
-### 2. Backend Setup
-Create and activate virtual environment:
+### 2. Knowledge Base
+Initialize the vector store:
 ```bash
-python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+python scripts/init_kb.py
 ```
 
+### 3. Backend
 Run the API server:
 ```bash
 python -m src.main
 ```
-The API will be available at `http://localhost:8000`.
 Swagger docs: `http://localhost:8000/docs`.
 
-### 3. Frontend Setup
+### 4. Frontend
 Navigate to frontend directory:
 ```bash
 cd frontend
 pnpm install
-```
-
-Run the development server:
-```bash
 pnpm dev
 ```
-The UI will be available at `http://localhost:5173`.
 
 ## Testing
-Run backend tests:
-```bash
-make test
-```
+The project maintains >90% code coverage.
 
-Run frontend tests:
+Run backend tests with coverage report:
 ```bash
-cd frontend
-pnpm test
+pytest --cov=src src/tests/
 ```
 
 ## Directory Structure
-- `src/agents`: Agent implementations (SCDG, etc.)
+- `src/agents`: Agent implementations (LangGraph, SCDG, Tools)
 - `src/api`: FastAPI application and routers
+- `src/core`: Core business logic (Metro 2, Knowledge Base)
 - `src/shared`: Shared types and utilities
 - `src/tests`: Backend unit and integration tests
 - `infrastructure`: Docker Compose and config
 - `frontend`: React application
-- `doc`: Project documentation
-
-## Synthetic Data Generator (SCDG)
-The SCDG is accessible via the API `/scdg/generate`. It uses a deterministic seed to generate realistic Caribbean credit profiles.
-Archetypes include:
-- `THIN_FILE_YOUNG`
-- `PRIME_ESTABLISHED`
-- `STRESSED`
-- And more.
+- `doc`: Project documentation (Policies, Plans)
+- `scripts`: Helper scripts for launching and cleaning
 
 ## License
 Private / Proprietary

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ApplicantCreditProfile } from '../types';
+import type { ApplicantCreditProfile } from '../types';
 
 interface Props {
   profile: ApplicantCreditProfile;

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ApplicantCreditProfile } from '../types';
+import type { ApplicantCreditProfile } from '../types';
 
 const API_URL = 'http://localhost:8000';
 

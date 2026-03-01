@@ -81,3 +81,4 @@ class ApplicantCreditProfile(BaseModel):
     trade_lines: List[TradeLine]
     inquiries: List[Inquiry]
     flags: Flags
+    associated_consumers: List[Identity] = []

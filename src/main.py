@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 from src.api.routers.scdg_router import router as scdg_router
+from src.api.routers.agent_router import router as agent_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +26,7 @@ app.add_middleware(
 
 # Include Routers
 app.include_router(scdg_router)
+app.include_router(agent_router)
 
 @app.get("/health")
 async def health_check():

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 import { CreditProfileView } from './CreditProfileView';
-import { ApplicantCreditProfile } from '../types';
+import type { ApplicantCreditProfile } from '../types';
 
 const mockProfile: ApplicantCreditProfile = {
   metadata: {
