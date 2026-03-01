@@ -32,6 +32,13 @@ class KnowledgeBase:
             connection=self.connection_string,
             use_jsonb=True,
         )
+        
+        # Ensure tables and collection exist
+        try:
+            self.vector_store.create_tables_if_not_exists()
+            self.vector_store.create_collection()
+        except Exception as e:
+            logger.warning(f"Could not initialize PGVector tables/collection (might already exist or connection failed): {e}")
 
     def ingest_document(self, file_path: str):
         """
@@ -82,6 +89,8 @@ class KnowledgeBase:
         """Clears the collection to ensure a clean state for experiments."""
         try:
             self.vector_store.delete_collection()
+            # Recreate collection immediately after deletion so future operations work
+            self.vector_store.create_collection()
             logger.info("Knowledge Base collection cleared.")
         except Exception as e:
             logger.error(f"Failed to clear collection: {e}")

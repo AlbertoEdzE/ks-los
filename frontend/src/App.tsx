@@ -3,6 +3,7 @@ import type { ApplicantCreditProfile } from './types';
 import { CreditProfileView } from './components/CreditProfileView';
 import { ChatInterface } from './components/ChatInterface';
 import './App.css';
+import { TrainingPanel } from './components/TrainingPanel';
 
 function App() {
   const [profile, setProfile] = useState<ApplicantCreditProfile | null>(null);
@@ -37,6 +38,9 @@ function App() {
             </div>
           )}
         </div>
+      </div>
+      <div style={{ maxWidth: '1400px', margin: '20px auto' }}>
+        <TrainingPanel />
       </div>
     </div>
   );

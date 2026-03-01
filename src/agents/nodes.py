@@ -15,6 +15,9 @@ from src.agents.tools import GenerateProfileTool
 from src.shared.types import ApplicantCreditProfile
 from src.core.knowledge_base import KnowledgeBase
 from src.ml.inference import CreditRiskModel
+import mlflow
+import os
+from src.ml.ml_config import MLFLOW_TRACKING_URI, EXPERIMENT_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -139,11 +142,54 @@ def risk_engine_node(state: AgentState):
             decision = "MANUAL_REVIEW"
             reasoning += f" [SYSTEM OVERRIDE] Downgraded to Manual Review due to high ML predicted default risk ({ml_prob:.1%})."
         
-        return {
+        result_obj = {
             "risk_decision": decision,
             "risk_score": float(result.get("risk_score", ml_score)),
             "risk_reasoning": reasoning
         }
+        
+        # Inference logging to MLflow and file
+        try:
+            mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+            mlflow.set_experiment(EXPERIMENT_NAME)
+            with mlflow.start_run(run_name="inference", nested=True):
+                mlflow.log_params({
+                    "age": profile.identity.age if hasattr(profile.identity, "age") else None,
+                    "credit_score": profile.summary.credit_score,
+                    "utilization_ratio": profile.summary.utilization_ratio,
+                    "total_debt": profile.summary.total_current_balance_xcd,
+                    "history_length_months": profile.summary.months_oldest_account,
+                    "derogatory_marks": profile.summary.derogatory_marks,
+                    "thin_file_flag": 1 if profile.summary.thin_file else 0
+                })
+                mlflow.log_metrics({
+                    "ml_prob_good": ml_prob,
+                    "ml_score": ml_score,
+                    "risk_score": result_obj["risk_score"]
+                })
+                mlflow.set_tags({"decision": decision})
+        except Exception as e:
+            logger.error(f"MLflow inference logging failed: {e}")
+        
+        # Append to local inference log CSV
+        try:
+            os.makedirs("data", exist_ok=True)
+            with open("data/inference_log.csv", "a", encoding="utf-8") as f:
+                f.write(",".join([
+                    str(profile.summary.credit_score),
+                    str(profile.summary.utilization_ratio),
+                    str(profile.summary.total_current_balance_xcd),
+                    str(profile.summary.months_oldest_account),
+                    str(profile.summary.derogatory_marks),
+                    str(1 if profile.summary.thin_file else 0),
+                    f"{ml_prob:.6f}",
+                    f"{ml_score:.2f}",
+                    decision
+                ]) + "\n")
+        except Exception as e:
+            logger.error(f"Local inference logging failed: {e}")
+        
+        return result_obj
         
     except Exception as e:
         logger.error(f"Risk Engine Analysis failed: {e}")

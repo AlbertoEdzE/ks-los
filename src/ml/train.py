@@ -80,7 +80,7 @@ def generate_training_data(n_samples: int = 1000) -> pd.DataFrame:
         
     return pd.DataFrame(data)
 
-def train_model():
+def train_model(params: dict | None = None, n_samples: int = 2000):
     """
     Main training pipeline.
     """
@@ -90,7 +90,7 @@ def train_model():
     
     with mlflow.start_run():
         # 2. Data Generation
-        df = generate_training_data(n_samples=2000)
+        df = generate_training_data(n_samples=n_samples)
         
         X = df[FEATURES]
         y = df[TARGET]
@@ -100,15 +100,17 @@ def train_model():
         
         # 4. Train XGBoost
         logger.info("Training XGBoost model...")
-        params = {
+        default_params = {
             "objective": "binary:logistic",
             "eval_metric": "logloss",
             "max_depth": 4,
             "learning_rate": 0.1,
             "n_estimators": 100
         }
+        if params:
+            default_params.update(params)
         
-        model = xgb.XGBClassifier(**params)
+        model = xgb.XGBClassifier(**default_params)
         model.fit(X_train, y_train)
         
         # 5. Evaluate
@@ -123,7 +125,7 @@ def train_model():
         logger.info(f"Metrics: Accuracy={acc:.4f}, AUC={auc:.4f}")
         
         # 6. Log to MLflow
-        mlflow.log_params(params)
+        mlflow.log_params(default_params)
         mlflow.log_metrics({
             "accuracy": acc,
             "auc": auc,
@@ -139,6 +141,7 @@ def train_model():
         )
         
         logger.info("Training complete. Model logged to MLflow.")
+        return {"accuracy": acc, "auc": auc, "precision": prec, "recall": rec}
 
 if __name__ == "__main__":
     train_model()
