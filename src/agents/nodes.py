@@ -21,6 +21,7 @@ from src.ml.ml_config import MLFLOW_TRACKING_URI, EXPERIMENT_NAME
 import time
 from src.shared.metrics import risk_inference_total, inference_latency_seconds
 from opentelemetry import trace
+from src.shared.correlation import get_correlation_id
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,7 @@ def risk_engine_node(state: AgentState):
             mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
             mlflow.set_experiment(EXPERIMENT_NAME)
             with mlflow.start_run(run_name="inference", nested=True):
+                cid = get_correlation_id()
                 mlflow.log_params({
                     "age": profile.identity.age if hasattr(profile.identity, "age") else None,
                     "credit_score": profile.summary.credit_score,
@@ -173,7 +175,10 @@ def risk_engine_node(state: AgentState):
                     "ml_score": ml_score,
                     "risk_score": result_obj["risk_score"]
                 })
-                mlflow.set_tags({"decision": decision})
+                tags = {"decision": decision}
+                if cid:
+                    tags["correlation_id"] = cid
+                mlflow.set_tags(tags)
         except Exception as e:
             logger.error(f"MLflow inference logging failed: {e}")
         

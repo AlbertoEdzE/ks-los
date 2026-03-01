@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import os
 from src.shared.logging import setup_json_logging
+from src.shared.correlation import set_correlation_id
 
 from src.api.routers.scdg_router import router as scdg_router
 from src.api.routers.agent_router import router as agent_router
@@ -39,6 +40,12 @@ app.include_router(training_router)
 app.include_router(metrics_router)
 app.include_router(observability_router)
 
+@app.middleware("http")
+async def correlation_middleware(request: Request, call_next):
+    cid = request.headers.get("X-Correlation-ID")
+    set_correlation_id(cid)
+    response = await call_next(request)
+    return response
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}

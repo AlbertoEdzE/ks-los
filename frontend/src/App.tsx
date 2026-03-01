@@ -4,6 +4,7 @@ import { CreditProfileView } from './components/CreditProfileView';
 import { ChatInterface } from './components/ChatInterface';
 import './App.css';
 import { TrainingPanel } from './components/TrainingPanel';
+import { MonitoringPanel } from './components/MonitoringPanel';
 
 function App() {
   const [profile, setProfile] = useState<ApplicantCreditProfile | null>(null);
@@ -41,6 +42,9 @@ function App() {
       </div>
       <div style={{ maxWidth: '1400px', margin: '20px auto' }}>
         <TrainingPanel />
+      </div>
+      <div style={{ maxWidth: '1400px', margin: '20px auto' }}>
+        <MonitoringPanel />
       </div>
     </div>
   );

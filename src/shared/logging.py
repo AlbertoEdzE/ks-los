@@ -1,5 +1,6 @@
 import json
 import logging
+from src.shared.correlation import get_correlation_id
 
 class JSONFormatter(logging.Formatter):
     def format(self, record):
@@ -8,6 +9,9 @@ class JSONFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage()
         }
+        cid = get_correlation_id()
+        if cid:
+            payload["correlation_id"] = cid
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
         return json.dumps(payload)

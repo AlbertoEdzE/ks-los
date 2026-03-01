@@ -21,8 +21,11 @@ Introduce comprehensive observability across the system: structured logging, met
 2. Prometheus metrics exposure.
 3. Trace spans with model and decision metadata.
 4. Frontend panel to run training, drift and view summaries.
+5. Correlation IDs propagated across API requests, spans, and MLflow runs.
+6. Grafana provisioning with a basic dashboard and Prometheus config.
 
 ## 5. Success Criteria
 1. Metrics and traces available during normal operations.
 2. Drift report accessible via API and UI.
 3. Logs consistent and searchable; correlation of events across components.
+4. Grafana shows KS LOS dashboard with risk inference, latency, training, and drift metrics.

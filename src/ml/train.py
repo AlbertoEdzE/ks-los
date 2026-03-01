@@ -14,6 +14,7 @@ from src.ml.ml_config import (
     MLFLOW_TRACKING_URI, EXPERIMENT_NAME, 
     FEATURES, TARGET, REGISTERED_MODEL_NAME
 )
+from src.shared.correlation import get_correlation_id
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -89,6 +90,9 @@ def train_model(params: dict | None = None, n_samples: int = 2000):
     mlflow.set_experiment(EXPERIMENT_NAME)
     
     with mlflow.start_run():
+        cid = get_correlation_id()
+        if cid:
+            mlflow.set_tags({"correlation_id": cid})
         # 2. Data Generation
         df = generate_training_data(n_samples=n_samples)
         

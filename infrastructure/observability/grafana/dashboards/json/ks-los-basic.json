@@ -1,0 +1,50 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Risk Inference Total",
+      "targets": [
+        {
+          "expr": "risk_inference_total",
+          "legendFormat": "inferences"
+        }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Inference Latency (seconds)",
+      "targets": [
+        {
+          "expr": "rate(inference_latency_seconds_sum[5m]) / rate(inference_latency_seconds_count[5m])",
+          "legendFormat": "latency_avg"
+        }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Training Runs Total",
+      "targets": [
+        {
+          "expr": "training_runs_total",
+          "legendFormat": "training_runs"
+        }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Drift Runs Total",
+      "targets": [
+        {
+          "expr": "drift_runs_total",
+          "legendFormat": "drift_runs"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "title": "KS LOS Basic",
+  "version": 1
+}
