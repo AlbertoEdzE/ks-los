@@ -51,6 +51,12 @@ Correlation IDs:
 - Send `X-Correlation-ID` in requests to correlate logs, traces, and MLflow runs.
   Example: `curl -H "X-Correlation-ID: test-123" http://localhost:8000/health`
 
+### Docker Images
+GitHub Actions builds and publishes images:
+- API: `ghcr.io/<owner>/ks-los-api:latest`
+- Frontend: `ghcr.io/<owner>/ks-los-frontend:latest`
+Use these in production deployments behind TLS reverse proxy and with proper environment configs.
+
 ### Stop Dev Stack
 To stop API/frontend and observability stack:
 ```bash

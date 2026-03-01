@@ -1,0 +1,19 @@
+groups:
+  - name: ks-los-alerts
+    rules:
+      - alert: HighErrorRate
+        expr: (sum(rate(request_errors_total[5m])) / sum(rate(requests_total[5m]))) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API error rate"
+          description: "More than 5% errors over the last 10 minutes."
+      - alert: HighLatency
+        expr: (sum(rate(request_latency_seconds_sum[5m])) / sum(rate(request_latency_seconds_count[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency"
+          description: "Average latency exceeds 1s over the last 10 minutes."

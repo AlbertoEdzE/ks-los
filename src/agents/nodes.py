@@ -126,7 +126,7 @@ def risk_engine_node(state: AgentState):
     tracer = trace.get_tracer("risk_engine")
     start = time.monotonic()
     try:
-        with tracer.start_as_current_span("risk_inference"):
+        with tracer.start_as_current_span("risk_inference") as span:
             response = llm.invoke([
             SystemMessage(content=RISK_ENGINE_SYSTEM_PROMPT),
             HumanMessage(content=user_prompt)
@@ -143,6 +143,12 @@ def risk_engine_node(state: AgentState):
         # Ensemble Override Logic (Optional Rule Layer)
         decision = result.get("decision", "MANUAL_REVIEW")
         reasoning = result.get("reasoning", "Analysis failed.")
+        try:
+            span.set_attribute("risk.decision", decision)
+            span.set_attribute("risk.ml_prob_good", float(ml_prob))
+            span.set_attribute("risk.ml_score", float(ml_score))
+        except Exception:
+            pass
         
         # Safety Guardrail: If ML is extremely confident of default, force Manual Review even if Policy Passes
         if decision == "APPROVED" and ml_prob < 0.2:

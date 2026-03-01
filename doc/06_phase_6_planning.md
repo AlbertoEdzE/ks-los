@@ -19,6 +19,7 @@
 4. Documentation for deployment steps and environment variables.
 5. OTLP exporter initialization with local Jaeger via collector.
 6. Enhanced Grafana panels for endpoint error rates and request throughput.
+7. Security hygiene: secret scanning and dependency audits.
 
 ## Success Criteria
 1. Green CI for PRs and main merges.

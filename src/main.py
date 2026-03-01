@@ -64,14 +64,24 @@ async def correlation_middleware(request: Request, call_next):
     request_counter.labels(endpoint=endpoint).inc()
     import time
     start = time.monotonic()
+    tracer = trace.get_tracer("api")
     try:
-        response = await call_next(request)
+        with tracer.start_as_current_span(f"http_request:{endpoint}"):
+            response = await call_next(request)
     except Exception:
         request_errors_total.labels(endpoint=endpoint).inc()
         raise
-    finally:
-        duration = time.monotonic() - start
-        request_latency_seconds.labels(endpoint=endpoint).observe(duration)
+    duration = time.monotonic() - start
+    request_latency_seconds.labels(endpoint=endpoint).observe(duration)
+    # Inject traceparent header
+    span = trace.get_current_span()
+    ctx = span.get_span_context()
+    if ctx and ctx.trace_id and ctx.span_id:
+        version = "00"
+        trace_id = format(ctx.trace_id, "032x")
+        span_id = format(ctx.span_id, "016x")
+        flags = "01" if ctx.trace_flags & 0x01 else "00"
+        response.headers["traceparent"] = f"{version}-{trace_id}-{span_id}-{flags}"
     return response
 @app.get("/health")
 async def health_check():
