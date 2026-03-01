@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { getCorrelationId } from "../lib/correlation"
+import { getCorrelationId, getTraceparent, setTraceparentFromResponse } from "../lib/correlation"
 
 type Plan = {
   hyperparameters: Record<string, any>
@@ -21,11 +21,12 @@ export function TrainingPanel() {
     try {
       const res = await fetch("http://localhost:8000/training/plan", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Correlation-ID": getCorrelationId() },
+        headers: { "Content-Type": "application/json", "X-Correlation-ID": getCorrelationId(), "traceparent": getTraceparent() || "" },
         body: JSON.stringify({ rationale: "Operator requested refresh" })
       })
       if (!res.ok) throw new Error("Failed to generate plan")
       const data = await res.json()
+      setTraceparentFromResponse(res)
       setPlan(data.plan)
     } catch (e: any) {
       setError(e.message)
@@ -41,11 +42,12 @@ export function TrainingPanel() {
     try {
       const res = await fetch("http://localhost:8000/training/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Correlation-ID": getCorrelationId() },
+        headers: { "Content-Type": "application/json", "X-Correlation-ID": getCorrelationId(), "traceparent": getTraceparent() || "" },
         body: JSON.stringify(plan)
       })
       if (!res.ok) throw new Error("Failed to run training")
       const data = await res.json()
+      setTraceparentFromResponse(res)
       setResult(data.result)
     } catch (e: any) {
       setError(e.message)
@@ -56,9 +58,10 @@ export function TrainingPanel() {
   const runDrift = async () => {
     setError(null)
     try {
-      const res = await fetch("http://localhost:8000/training/drift", { method: "POST", headers: { "X-Correlation-ID": getCorrelationId() } })
+      const res = await fetch("http://localhost:8000/training/drift", { method: "POST", headers: { "X-Correlation-ID": getCorrelationId(), "traceparent": getTraceparent() || "" } })
       if (!res.ok) throw new Error("Failed to run drift")
       const data = await res.json()
+      setTraceparentFromResponse(res)
       setDriftUrl("http://localhost:8000" + data.report_endpoint)
     } catch (e: any) {
       setError(e.message)

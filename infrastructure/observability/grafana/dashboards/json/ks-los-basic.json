@@ -55,6 +55,16 @@
     },
     {
       "type": "graph",
+      "title": "API p99 Latency by Endpoint",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, endpoint) (rate(request_latency_seconds_bucket[5m])))",
+          "legendFormat": "{{endpoint}}"
+        }
+      ]
+    },
+    {
+      "type": "graph",
       "title": "Training Runs Total",
       "targets": [
         {
