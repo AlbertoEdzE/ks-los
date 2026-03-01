@@ -18,6 +18,9 @@ from src.ml.inference import CreditRiskModel
 import mlflow
 import os
 from src.ml.ml_config import MLFLOW_TRACKING_URI, EXPERIMENT_NAME
+import time
+from src.shared.metrics import risk_inference_total, inference_latency_seconds
+from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +122,11 @@ def risk_engine_node(state: AgentState):
     user_prompt += f"\nNote: Low scores (<50) indicate high risk of default based on historical data."
     
     # 4. LLM Evaluation
+    tracer = trace.get_tracer("risk_engine")
+    start = time.monotonic()
     try:
-        response = llm.invoke([
+        with tracer.start_as_current_span("risk_inference"):
+            response = llm.invoke([
             SystemMessage(content=RISK_ENGINE_SYSTEM_PROMPT),
             HumanMessage(content=user_prompt)
         ])
@@ -189,6 +195,9 @@ def risk_engine_node(state: AgentState):
         except Exception as e:
             logger.error(f"Local inference logging failed: {e}")
         
+        duration = time.monotonic() - start
+        risk_inference_total.inc()
+        inference_latency_seconds.observe(duration)
         return result_obj
         
     except Exception as e:

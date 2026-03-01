@@ -4,6 +4,7 @@ from typing import Dict, Any
 import logging
 from src.agents.training_agent import propose_training_plan, execute_training
 from src.ml.drift import run_drift_check
+from src.shared.metrics import request_counter, training_runs_total, drift_runs_total
 
 router = APIRouter(prefix="/training", tags=["training"])
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ class TrainingPlan(BaseModel):
 @router.post("/plan")
 def generate_plan(ctx: TrainingContext) -> Dict[str, Any]:
     try:
+        request_counter.labels(endpoint="/training/plan").inc()
         plan = propose_training_plan(context=ctx.model_dump())
         return {"plan": plan}
     except Exception as e:
@@ -28,6 +30,8 @@ def generate_plan(ctx: TrainingContext) -> Dict[str, Any]:
 @router.post("/execute")
 def run_training(plan: TrainingPlan) -> Dict[str, Any]:
     try:
+        request_counter.labels(endpoint="/training/execute").inc()
+        training_runs_total.inc()
         result = execute_training(plan.model_dump())
         return {"result": result}
     except Exception as e:
@@ -37,6 +41,8 @@ def run_training(plan: TrainingPlan) -> Dict[str, Any]:
 @router.post("/drift")
 def run_drift() -> Dict[str, Any]:
     try:
+        request_counter.labels(endpoint="/training/drift").inc()
+        drift_runs_total.inc()
         path = run_drift_check()
         return {"report_path": path, "report_endpoint": "/training/drift/report"}
     except Exception as e:
