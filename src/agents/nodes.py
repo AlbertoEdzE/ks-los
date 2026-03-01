@@ -14,6 +14,7 @@ from src.agents.prompts import (
 from src.agents.tools import GenerateProfileTool
 from src.shared.types import ApplicantCreditProfile
 from src.core.knowledge_base import KnowledgeBase
+from src.ml.inference import CreditRiskModel
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ tool_node = ToolNode(tools)
 
 # Lazy initialization of KB to avoid import-time DB connection issues
 kb = None
+ml_model = None
 
 def get_kb():
     global kb
@@ -35,6 +37,16 @@ def get_kb():
             logger.error(f"Failed to initialize KnowledgeBase: {e}")
             return None
     return kb
+
+def get_ml_model():
+    global ml_model
+    if ml_model is None:
+        try:
+            ml_model = CreditRiskModel()
+        except Exception as e:
+            logger.error(f"Failed to initialize ML Model: {e}")
+            return None
+    return ml_model
 
 def journey_coach_node(state: AgentState):
     """
@@ -51,18 +63,17 @@ def journey_coach_node(state: AgentState):
 
 def risk_engine_node(state: AgentState):
     """
-    Analyzes the credit profile using RAG-based policy lookup.
+    Analyzes the credit profile using RAG-based policy lookup AND XGBoost Predictive Model.
     """
     profile = state.get("credit_profile")
     if not profile:
         return {"risk_score": None}
     
-    # 1. Retrieve Policy Context
+    # 1. Retrieve Policy Context (RAG)
     kb_instance = get_kb()
     policy_context = ""
     if kb_instance:
         try:
-            # Query based on key profile attributes
             queries = [
                 f"Credit policy for {profile.identity.address.territory}",
                 f"Minimum credit score for {profile.summary.score_band}",
@@ -74,7 +85,6 @@ def risk_engine_node(state: AgentState):
             for q in queries:
                 docs.extend(kb_instance.query(q, k=2))
             
-            # Deduplicate and format
             seen_content = set()
             unique_docs = []
             for d in docs:
@@ -87,10 +97,25 @@ def risk_engine_node(state: AgentState):
             logger.error(f"RAG Retrieval failed: {e}")
             policy_context = "Policy retrieval unavailable. Use standard conservative fallback."
     
-    # 2. Construct Analysis Prompt
+    # 2. Get ML Prediction (XGBoost)
+    ml_instance = get_ml_model()
+    ml_score = 0.5
+    ml_prob = 0.5
+    if ml_instance:
+        ml_result = ml_instance.predict(profile)
+        ml_prob = ml_result["probability_good"]
+        ml_score = ml_result["score"] * 100 # Convert to 0-100 scale for consistency
+        logger.info(f"ML Model Prediction: Prob={ml_prob:.4f}, Score={ml_score:.2f}")
+
+    # 3. Construct Analysis Prompt (Ensemble Context)
+    # We inject the ML score into the prompt so the LLM can consider it
     user_prompt = build_risk_engine_user_prompt(policy_context, profile)
+    user_prompt += f"\n\n--- PREDICTIVE MODEL ---"
+    user_prompt += f"\nXGBoost Risk Score: {ml_score:.1f}/100"
+    user_prompt += f"\nProbability of Good Credit: {ml_prob:.2%}"
+    user_prompt += f"\nNote: Low scores (<50) indicate high risk of default based on historical data."
     
-    # 3. LLM Evaluation
+    # 4. LLM Evaluation
     try:
         response = llm.invoke([
             SystemMessage(content=RISK_ENGINE_SYSTEM_PROMPT),
@@ -98,7 +123,6 @@ def risk_engine_node(state: AgentState):
         ])
         
         content = response.content
-        # Basic JSON parsing cleanup
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0]
         elif "```" in content:
@@ -106,21 +130,28 @@ def risk_engine_node(state: AgentState):
             
         result = json.loads(content.strip())
         
+        # Ensemble Override Logic (Optional Rule Layer)
+        decision = result.get("decision", "MANUAL_REVIEW")
+        reasoning = result.get("reasoning", "Analysis failed.")
+        
+        # Safety Guardrail: If ML is extremely confident of default, force Manual Review even if Policy Passes
+        if decision == "APPROVED" and ml_prob < 0.2:
+            decision = "MANUAL_REVIEW"
+            reasoning += f" [SYSTEM OVERRIDE] Downgraded to Manual Review due to high ML predicted default risk ({ml_prob:.1%})."
+        
         return {
-            "risk_decision": result.get("decision", "MANUAL_REVIEW"),
-            "risk_score": float(result.get("risk_score", 0.0)),
-            "risk_reasoning": result.get("reasoning", "Analysis failed.")
+            "risk_decision": decision,
+            "risk_score": float(result.get("risk_score", ml_score)),
+            "risk_reasoning": reasoning
         }
         
     except Exception as e:
         logger.error(f"Risk Engine Analysis failed: {e}")
-        # Fallback to rule-based stub
-        base_score = profile.summary.credit_score
-        risk_score = max(0, min(100, (base_score - 300) / 5.5))
+        # Fallback
         return {
             "risk_decision": "MANUAL_REVIEW",
-            "risk_score": risk_score,
-            "risk_reasoning": "Automated analysis failed. Manual review required."
+            "risk_score": ml_score,
+            "risk_reasoning": f"Automated analysis failed. Fallback to ML Score: {ml_score:.1f}"
         }
 
 def advisory_node(state: AgentState):

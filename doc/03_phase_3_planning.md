@@ -1,5 +1,7 @@
 # Phase 3: Advanced Decisioning & Compliance
 
+## Status: Completed
+
 ## Overview
 Phase 3 focuses on enhancing the "Brain" of the system. While Phase 2 established the agentic workflow and data generation, Phase 3 implements the actual credit decisioning logic using a Retrieval-Augmented Generation (RAG) approach and ensures regulatory compliance through Metro 2 reporting.
 
@@ -37,14 +39,14 @@ Phase 3 focuses on enhancing the "Brain" of the system. While Phase 2 establishe
     -   **Trailer Segment**: Totals.
 
 ## Implementation Steps
-1.  **Dependencies**: Add `langchain-postgres` and `psycopg`.
-2.  **Metro 2**: Implement `src/core/metro2.py`.
-3.  **Knowledge Base**: Implement `src/core/knowledge_base.py`.
-4.  **Policy**: Create `doc/policies/credit_policy_v1.md`.
-5.  **Agent Update**: Modify `risk_engine_node` in `src/agents/nodes.py`.
-6.  **Testing**: Unit tests for Metro 2 compliance and RAG retrieval.
+1.  **Dependencies**: Add `langchain-postgres` and `psycopg`. (Done)
+2.  **Metro 2**: Implement `src/core/metro2.py`. (Done)
+3.  **Knowledge Base**: Implement `src/core/knowledge_base.py`. (Done)
+4.  **Policy**: Create `doc/policies/credit_policy_v1.md`. (Done)
+5.  **Agent Update**: Modify `risk_engine_node` in `src/agents/nodes.py`. (Done)
+6.  **Testing**: Unit tests for Metro 2 compliance and RAG retrieval. (Done)
 
 ## Validation Criteria
--   **Metro 2**: Output string must be exactly 426 characters (or multiple thereof for blocked records) and pass regex validation for numeric/alphanumeric fields.
--   **RAG**: Querying "minimum score" must retrieve the correct section from the policy document.
--   **Decision**: A "THIN_FILE_YOUNG" profile should trigger a specific policy rule (e.g., "Refer for manual review" or "Decline" depending on policy).
+-   **Metro 2**: Output string must be exactly 426 characters (or multiple thereof for blocked records) and pass regex validation for numeric/alphanumeric fields. (Validated)
+-   **RAG**: Querying "minimum score" must retrieve the correct section from the policy document. (Validated)
+-   **Decision**: A "THIN_FILE_YOUNG" profile should trigger a specific policy rule (e.g., "Refer for manual review" or "Decline" depending on policy). (Validated)

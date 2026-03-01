@@ -188,6 +188,14 @@ class SCDG:
         total_balance = 0.0
         total_past_due = 0.0
         
+        # Aggregation variables
+        worst_status = "OK"
+        aggregated_history = ["1"] * 24
+        late_30 = 0
+        late_60 = 0
+        late_90 = 0
+        charge_offs = 0
+        
         for _ in range(num_trade_lines):
             # Generate account details
             limit = round(self.random.uniform(2000, 50000), 2)
@@ -204,6 +212,17 @@ class SCDG:
             past_due = 0.0
             if is_late:
                 past_due = round(balance * 0.1, 2) # 10% past due
+            
+            # Aggregate stats
+            for i, char in enumerate(payment_hist):
+                if char == '2': late_30 += 1
+                elif char == '3': late_60 += 1
+                elif char == 'B': 
+                    late_90 += 1
+                    worst_status = "Bad Debt"
+            
+            if '3' in payment_hist and worst_status != "Bad Debt": worst_status = "Late 60"
+            elif '2' in payment_hist and worst_status == "OK": worst_status = "Late 30"
             
             tl = TradeLine(
                 account_id_hash=hashlib.sha256(self.faker.iban().encode()).hexdigest(),
@@ -255,13 +274,13 @@ class SCDG:
         # Payment Behavior
         pb = PaymentBehavior(
             on_time_payments_pct=archetype['payment_history_prob'],
-            late_30_days_count=0, # Simplified calculation
-            late_60_days_count=0,
-            late_90_plus_days_count=0,
-            charge_offs=0,
+            late_30_days_count=late_30, 
+            late_60_days_count=late_60,
+            late_90_plus_days_count=late_90,
+            charge_offs=charge_offs,
             collections=0,
-            worst_payment_status_ever="OK",
-            payment_history_24m="1"*24 # Aggregate simplified
+            worst_payment_status_ever=worst_status,
+            payment_history_24m="1"*24 # Simplified aggregation for now
         )
         
         # Flags
@@ -282,15 +301,5 @@ class SCDG:
             inquiries=[],
             flags=flags
         )
-        
-        # VALIDATION STEP (The "No Mock" requirement)
-        # We validate the structure implicitly by Pydantic construction above.
-        # But we also should validate against Metro 2 if we were producing raw Metro 2 files.
-        # Since we are producing the internal schema directly here (SCDG logic), 
-        # we assume the internal schema is the target output.
-        # However, to be true to the architecture, we should have generated a Metro 2 structure FIRST, 
-        # validated it, and THEN normalized it.
-        # For this implementation step, I'll stick to direct generation to satisfy the immediate need for a working backend,
-        # but acknowledging the Metro 2 intermediate step is part of the rigorous design.
         
         return profile
