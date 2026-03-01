@@ -1,0 +1,19 @@
+import axios from 'axios';
+import { ApplicantCreditProfile } from '../types';
+
+const API_URL = 'http://localhost:8000';
+
+export const generateProfile = async (
+  age: number,
+  territory: string,
+  scenario_type?: string,
+  seed?: string
+): Promise<ApplicantCreditProfile> => {
+  const response = await axios.post<ApplicantCreditProfile>(`${API_URL}/scdg/generate`, {
+    age,
+    territory,
+    scenario_type,
+    seed,
+  });
+  return response.data;
+};
