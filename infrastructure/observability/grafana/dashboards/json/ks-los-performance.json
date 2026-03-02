@@ -1,0 +1,78 @@
+{
+  "annotations": { "list": [] },
+  "title": "KS LOS API Performance",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Request Rate by Endpoint (req/s)",
+      "targets": [
+        { "expr": "sum by (endpoint) (rate(requests_total[5m]))", "legendFormat": "{{endpoint}}" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Error Rate by Endpoint (err/s)",
+      "targets": [
+        { "expr": "sum by (endpoint) (rate(request_errors_total[5m]))", "legendFormat": "{{endpoint}}" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Average Latency by Endpoint (s)",
+      "targets": [
+        { "expr": "sum by (endpoint) (rate(request_latency_seconds_sum[5m])) / sum by (endpoint) (rate(request_latency_seconds_count[5m]))", "legendFormat": "{{endpoint}}" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "p50 Latency by Endpoint (s)",
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le, endpoint) (rate(request_latency_seconds_bucket[5m])))", "legendFormat": "{{endpoint}}" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "p95 Latency by Endpoint (s)",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum by (le, endpoint) (rate(request_latency_seconds_bucket[5m])))", "legendFormat": "{{endpoint}}" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "p99 Latency by Endpoint (s)",
+      "targets": [
+        { "expr": "histogram_quantile(0.99, sum by (le, endpoint) (rate(request_latency_seconds_bucket[5m])))", "legendFormat": "{{endpoint}}" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Inference Latency (avg, s)",
+      "targets": [
+        { "expr": "rate(inference_latency_seconds_sum[5m]) / rate(inference_latency_seconds_count[5m])", "legendFormat": "inference_avg" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Risk Inferences Total",
+      "targets": [
+        { "expr": "risk_inference_total", "legendFormat": "risk_inferences" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Training Runs Total",
+      "targets": [
+        { "expr": "training_runs_total", "legendFormat": "training_runs" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Drift Runs Total",
+      "targets": [
+        { "expr": "drift_runs_total", "legendFormat": "drift_runs" }
+      ]
+    }
+  ]
+}
