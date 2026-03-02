@@ -56,9 +56,11 @@ test.describe('Chat Flow', () => {
     await expect(progressBar).toBeVisible({ timeout: 60000 });
     
     // Check for step labels (any of the steps) inside the progress bar
-    await expect(progressBar.getByText(/Checking Database|Assembling|Risk|Finalizing/)).toBeVisible();
+    await expect(progressBar.getByText('Intake')).toBeVisible();
     
-    // Wait for 100% completion
-    await expect(progressBar.getByText('100%')).toBeVisible({ timeout: 30000 });
+    // c. Wait for credit profile to appear (ChatInterface calls onProfileReceived)
+    // The profile appears when the progress bar is complete or near complete.
+    // We look for "Credit Summary" which is in CreditProfileView
+    await expect(page.getByText('Credit Summary')).toBeVisible({ timeout: 60000 });
   });
 });
