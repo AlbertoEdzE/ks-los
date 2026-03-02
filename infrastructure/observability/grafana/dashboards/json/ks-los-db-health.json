@@ -1,0 +1,37 @@
+{
+  "annotations": { "list": [] },
+  "title": "KS LOS DB Health",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Cache Hit Ratio",
+      "targets": [
+        { "expr": "sum(rate(pg_stat_database_blks_hit[5m])) / (sum(rate(pg_stat_database_blks_hit[5m])) + sum(rate(pg_stat_database_blks_read[5m])))", "legendFormat": "cache_hit_ratio" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Transactions (commit/rollback)",
+      "targets": [
+        { "expr": "sum(rate(pg_stat_database_xact_commit[5m]))", "legendFormat": "commit" },
+        { "expr": "sum(rate(pg_stat_database_xact_rollback[5m]))", "legendFormat": "rollback" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Tuples Fetched",
+      "targets": [
+        { "expr": "sum(rate(pg_stat_database_tup_fetched[5m]))", "legendFormat": "tup_fetched" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Deadlocks",
+      "targets": [
+        { "expr": "sum(rate(pg_stat_database_deadlocks[5m]))", "legendFormat": "deadlocks" }
+      ]
+    }
+  ]
+}

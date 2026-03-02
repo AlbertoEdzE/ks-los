@@ -100,6 +100,16 @@ services:
       - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards
       - ./observability/grafana/dashboards/json:/etc/grafana/provisioning/dashboards/json
 
+  postgres_exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: ks_los_postgres_exporter
+    ports:
+      - "9187:9187"
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-ks_los}:${POSTGRES_PASSWORD:-secure_password}@ks_los_postgres:5432/${POSTGRES_DB:-ks_los_db}?sslmode=disable"
+    depends_on:
+      - postgres
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: ks_los_otel_collector

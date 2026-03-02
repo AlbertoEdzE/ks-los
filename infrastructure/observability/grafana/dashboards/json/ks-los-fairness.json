@@ -1,0 +1,29 @@
+{
+  "annotations": { "list": [] },
+  "title": "KS LOS Fairness (Territory)",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Approvals by Territory",
+      "targets": [
+        { "expr": "sum by (territory) (approvals_total)", "legendFormat": "{{territory}}" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Declines by Territory",
+      "targets": [
+        { "expr": "sum by (territory) (declines_total)", "legendFormat": "{{territory}}" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Approval Rate by Territory",
+      "targets": [
+        { "expr": "sum by (territory) (approvals_total) / (sum by (territory) (approvals_total) + sum by (territory) (declines_total))", "legendFormat": "{{territory}}" }
+      ]
+    }
+  ]
+}

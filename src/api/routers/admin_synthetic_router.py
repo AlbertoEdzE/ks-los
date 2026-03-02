@@ -9,6 +9,7 @@ from src.agents.data_synthesizer.scdg import SCDG
 from src.ml.inference import CreditRiskModel
 from src.shared.types import ApplicantCreditProfile
 from src.shared.audit import log_audit
+from src.shared.metrics import approvals_total, declines_total, risk_inference_total, inference_latency_seconds
 
 router = APIRouter(prefix="/admin/synthetic", tags=["admin_synthetic"])
 
@@ -24,7 +25,15 @@ _dataset: List[Dict[str, Any]] = []
 
 def _decide(profile: ApplicantCreditProfile) -> Dict[str, Any]:
     model = CreditRiskModel()
+    import time as _t
+    _start = _t.time()
     pred = model.predict(profile)
+    duration = _t.time() - _start
+    try:
+        risk_inference_total.inc()
+        inference_latency_seconds.observe(duration)
+    except Exception:
+        pass
     prob = pred["probability_good"]
     decision = "APPROVED" if prob >= 0.6 else "DECLINED"
     reasoning = f"Threshold decision based on probability_good={prob:.3f} (>=0.6 => APPROVED)"
@@ -49,6 +58,14 @@ def _decide(profile: ApplicantCreditProfile) -> Dict[str, Any]:
             status = "ON_TIME"
             events.append({"type": "SCHEDULED_PAYMENT", "due_date": due_date, "amount_xcd": monthly, "status": status})
             repayments.append({"date": due_date, "amount_xcd": monthly, "status": status})
+    try:
+        territory = profile.metadata.territory or "UNKNOWN"
+        if decision == "APPROVED":
+            approvals_total.labels(territory=territory).inc()
+        else:
+            declines_total.labels(territory=territory).inc()
+    except Exception:
+        pass
     return {"application": app, "events": events, "repayments": repayments, "reasoning": reasoning}
 
 def _run_generation(count: int, territory: str, archetype: Optional[str], seed: Optional[str]):
