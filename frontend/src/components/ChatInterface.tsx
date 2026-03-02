@@ -8,6 +8,11 @@ interface Props {
 }
 
 export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
+  const [name, setName] = useState('');
+  const [surname, setSurname] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [progress, setProgress] = useState(0);
+  const [currentStep, setCurrentStep] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'assistant', content: 'Hello! I am your Journey Coach. I can help you generate a credit profile and assess loan eligibility. What is your age and territory?' }
   ]);
@@ -20,9 +25,56 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
   };
 
   useEffect(scrollToBottom, [messages]);
+  useEffect(() => {
+    const prefix = (name + ' ' + surname).trim();
+    if (!prefix) {
+      setSuggestions([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(async () => {
+      try {
+        const r = await fetch(`http://localhost:8000/chat/suggestions?prefix=${encodeURIComponent(prefix)}&limit=8`, { signal: controller.signal });
+        if (r.ok) {
+          const data = await r.json();
+          setSuggestions(data.items || []);
+        }
+      } catch {}
+    }, 200);
+    return () => {
+      controller.abort();
+      clearTimeout(timeout);
+    };
+  }, [name, surname]);
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
+    const fullName = `${name} ${surname}`.trim();
+    if (!fullName) {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Please provide your name and surname before chatting.' }]);
+      return;
+    }
+    try {
+      const r = await fetch('http://localhost:8000/chat/identity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, surname })
+      });
+      if (r.ok) {
+        const data = await r.json();
+        const es = new EventSource(`http://localhost:8000/chat/progress/stream?full_name=${encodeURIComponent(data.full_name)}`);
+        es.onmessage = (ev) => {
+          try {
+            const payload = JSON.parse(ev.data);
+            setProgress(payload.progress || 0);
+            setCurrentStep(payload.step || '');
+          } catch {}
+        };
+        es.onerror = () => {
+          es.close();
+        };
+      }
+    } catch {}
 
     const userMsg: ChatMessage = { role: 'user', content: input };
     setMessages(prev => [...prev, userMsg]);
@@ -66,6 +118,32 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
       borderRadius: '8px',
       backgroundColor: '#fff'
     }}>
+      <div style={{ padding: '12px', borderBottom: '1px solid #eee', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <div>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666' }}>Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+        </div>
+        <div>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666' }}>Surname</label>
+          <input value={surname} onChange={(e) => setSurname(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+        </div>
+        {suggestions.length > 0 && (
+          <div style={{ gridColumn: '1 / span 2', marginTop: '8px' }}>
+            <div style={{ fontSize: '12px', color: '#666', marginBottom: '6px' }}>Suggestions</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+              {suggestions.map((s) => (
+                <button key={s} onClick={() => {
+                  const parts = s.split(' ');
+                  setName(parts[0] || '');
+                  setSurname(parts.slice(1).join(' ') || '');
+                }} style={{ padding: '6px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f8f8f8' }}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
       <div className="messages" style={{ 
         flex: 1, 
         overflowY: 'auto', 
@@ -74,6 +152,14 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
         flexDirection: 'column',
         gap: '10px'
       }}>
+        <div style={{ marginBottom: '10px' }}>
+          <div style={{ height: '12px', backgroundColor: '#eee', borderRadius: '6px', overflow: 'hidden' }}>
+            <div style={{ width: `${progress}%`, backgroundColor: '#0056b3', height: '100%' }} />
+          </div>
+          <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
+            {currentStep ? `Step: ${currentStep} (${progress}%)` : 'No progress yet'}
+          </div>
+        </div>
         {messages.map((msg, idx) => (
           <div key={idx} style={{ 
             alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
