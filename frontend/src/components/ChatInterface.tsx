@@ -38,7 +38,7 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
     })();
   }, []);
   useEffect(() => {
-    const prefix = (name + ' ' + surname).trim();
+    const prefix = (surname.trim().length > 0 ? (name + ' ' + surname) : name).trim();
     if (!prefix) {
       setSuggestions([]);
       return;
@@ -132,12 +132,12 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
     }}>
       <div style={{ padding: '12px', borderBottom: '1px solid #eee', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
         <div>
-          <label style={{ display: 'block', fontSize: '12px', color: '#666' }}>Name</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+          <label htmlFor="chat-name" style={{ display: 'block', fontSize: '12px', color: '#666' }}>Name</label>
+          <input id="chat-name" value={name} onChange={(e) => setName(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
         </div>
         <div>
-          <label style={{ display: 'block', fontSize: '12px', color: '#666' }}>Surname</label>
-          <input value={surname} onChange={(e) => setSurname(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+          <label htmlFor="chat-surname" style={{ display: 'block', fontSize: '12px', color: '#666' }}>Surname</label>
+          <input id="chat-surname" value={surname} onChange={(e) => setSurname(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
         </div>
         {suggestionsEnabled && suggestions.length > 0 && (
           <div style={{ gridColumn: '1 / span 2', marginTop: '8px' }}>

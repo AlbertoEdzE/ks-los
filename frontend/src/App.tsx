@@ -75,9 +75,10 @@ function App() {
                 </label>
               </div>
             </div>
-            <div>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#666' }}>Username</label>
-              <input
+             <div>
+               <label htmlFor="login-username" style={{ display: 'block', marginBottom: '8px', color: '#666' }}>Username</label>
+               <input
+                 id="login-username"
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -86,8 +87,9 @@ function App() {
               />
             </div>
             <div>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#666' }}>Password</label>
-              <input
+               <label htmlFor="login-password" style={{ display: 'block', marginBottom: '8px', color: '#666' }}>Password</label>
+               <input
+                 id="login-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
