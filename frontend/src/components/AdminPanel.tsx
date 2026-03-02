@@ -31,26 +31,23 @@ export const AdminPanel: React.FC = () => {
       setMessage(msg);
       return;
     }
-    const poll = async () => {
+    const es = new EventSource('http://localhost:8000/admin/synthetic/stream');
+    es.onmessage = (ev) => {
       try {
-        const r = await fetch('http://localhost:8000/admin/synthetic/status');
-        if (r.ok) {
-          const data = await r.json();
-          setProgress(data.progress || 0);
-          setStatus(data.status || 'running');
-          setMessage(data.message || '');
-          if (data.status === 'completed' || data.status === 'idle' || data.status === 'error') {
-            return;
-          }
-          setTimeout(poll, 1000);
-        } else {
-          setTimeout(poll, 1500);
+        const payload = JSON.parse(ev.data.replace(/'/g, '"'));
+        setProgress(payload.progress || 0);
+        setStatus(payload.status || 'running');
+        setMessage(payload.message || '');
+        if (payload.status === 'completed' || payload.status === 'error' || payload.status === 'idle') {
+          es.close();
         }
       } catch {
-        setTimeout(poll, 1500);
+        // ignore parse errors
       }
     };
-    poll();
+    es.onerror = () => {
+      es.close();
+    };
   };
   const validateOutput = async () => {
     try {
