@@ -11,13 +11,59 @@ interface ProgressState {
 }
 
 const PROCESS_STEPS = [
-  { id: 'intake', label: 'Intake' },
-  { id: 'database_lookup', label: 'Lookup' },
-  { id: 'feature_assembly', label: 'Assembly' },
-  { id: 'classification', label: 'Classify' },
-  { id: 'model_inference', label: 'Inference' },
-  { id: 'aggregation', label: 'Decision' }
+  { id: 'intake', label: 'Intake', description: 'Gathering initial applicant information and consent.' },
+  { id: 'database_lookup', label: 'Lookup', description: 'Querying external databases (e.g., CreditInfo, CCBL) for credit records.' },
+  { id: 'feature_assembly', label: 'Assembly', description: 'Aggregating and normalizing data into a unified feature set.' },
+  { id: 'classification', label: 'Classify', description: 'Analyzing patterns and segmenting the applicant profile.' },
+  { id: 'model_inference', label: 'Inference', description: 'Running AI models to calculate credit scores and risk probabilities.' },
+  { id: 'aggregation', label: 'Decision', description: 'Synthesizing all insights into a final credit decision recommendation.' }
 ];
+
+const Tooltip = ({ text }: { text: string }) => {
+  const [show, setShow] = useState(false);
+  return (
+    <div 
+      style={{ position: 'relative', display: 'inline-block', marginLeft: '4px', cursor: 'help' }}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+      onClick={(e) => { e.stopPropagation(); setShow(!show); }}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+      </svg>
+      {show && (
+        <div style={{
+          position: 'absolute',
+          bottom: '100%',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: '#1f2937',
+          color: 'white',
+          padding: '6px 10px',
+          borderRadius: '6px',
+          fontSize: '0.7rem',
+          whiteSpace: 'nowrap',
+          zIndex: 50,
+          marginBottom: '6px',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+        }}>
+          {text}
+          <div style={{
+            position: 'absolute',
+            top: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            borderWidth: '4px',
+            borderStyle: 'solid',
+            borderColor: '#1f2937 transparent transparent transparent'
+          }}></div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const GlobalProgressBar: React.FC<Props> = ({ fullName, onComplete }) => {
   const [currentStepId, setCurrentStepId] = useState<string>('intake');
@@ -135,9 +181,12 @@ export const GlobalProgressBar: React.FC<Props> = ({ fullName, onComplete }) => 
                 fontSize: '0.75rem',
                 fontWeight: 500,
                 color: isActive || isCompleted ? '#4338ca' : '#6b7280',
-                transition: 'color 0.3s ease'
+                transition: 'color 0.3s ease',
+                display: 'flex',
+                alignItems: 'center'
               }}>
                 {step.label}
+                <Tooltip text={step.description} />
               </div>
             </div>
           );

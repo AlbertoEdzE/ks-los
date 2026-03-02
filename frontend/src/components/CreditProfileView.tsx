@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { ApplicantCreditProfile } from '../types';
+import { Metro2Analysis } from './Metro2Analysis';
 
 interface Props {
   profile: ApplicantCreditProfile;
@@ -81,6 +82,8 @@ export const CreditProfileView: React.FC<Props> = ({ profile }) => {
           <div style={{ gridColumn: '1 / -1' }}><strong style={{ color: '#4b5563' }}>Address:</strong> <span style={{ color: '#111827' }}>{profile.identity.address.line1}, {profile.identity.address.city}, {profile.identity.address.territory}</span></div>
         </div>
       </div>
+
+      <Metro2Analysis profile={profile} />
 
       {/* Summary */}
       <div className="section" style={{ marginBottom: '24px', backgroundColor: '#f9fafb', padding: '20px', borderRadius: '8px', border: '1px solid #f3f4f6' }}>

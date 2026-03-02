@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { sendMessage } from '../api/agent';
 import type { ChatMessage } from '../api/agent';
 import type { ApplicantCreditProfile } from '../types';
@@ -157,6 +159,7 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
           }}>
             <div 
               data-testid={`chat-message-${msg.role}`}
+              className="chat-message-content"
               style={{
               maxWidth: '80%',
               padding: '12px 16px',
@@ -168,10 +171,11 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
               boxShadow: msg.role === 'user' ? '0 1px 2px rgba(79, 70, 229, 0.2)' : '0 1px 2px rgba(0, 0, 0, 0.05)',
               border: msg.role === 'user' ? 'none' : '1px solid #e5e7eb',
               fontSize: '14px',
-              lineHeight: '1.5',
-              whiteSpace: 'pre-wrap'
+              lineHeight: '1.6',
             }}>
-              {msg.content}
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {msg.content}
+              </ReactMarkdown>
             </div>
           </div>
         ))}
