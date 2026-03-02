@@ -113,7 +113,10 @@ export const AdminPanel: React.FC = () => {
       {activeTab === 'configuration' && (
         <div style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '16px' }}>
           <h2>Configuration</h2>
-          <div>Toggle demo suggestions and related flags will be added here.</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <label>Suggestions Enabled</label>
+            <SuggestionsToggle />
+          </div>
         </div>
       )}
       {activeTab === 'model' && (
@@ -131,3 +134,32 @@ export const AdminPanel: React.FC = () => {
     </div>
   );
 }
+
+const SuggestionsToggle: React.FC = () => {
+  const [enabled, setEnabled] = React.useState(true);
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('http://localhost:8000/admin/config/suggestions_enabled');
+        if (r.ok) {
+          const data = await r.json();
+          setEnabled(!!data.value);
+        }
+      } catch {}
+    })();
+  }, []);
+  const toggle = async () => {
+    try {
+      const r = await fetch(`http://localhost:8000/admin/config/suggestions_enabled?value=${(!enabled).toString()}`, { method: 'POST' });
+      if (r.ok) {
+        const data = await r.json();
+        setEnabled(!!data.value);
+      }
+    } catch {}
+  };
+  return (
+    <button onClick={toggle} style={{ padding: '8px 12px', borderRadius: '4px', border: '1px solid #ccc' }}>
+      {enabled ? 'Disable' : 'Enable'}
+    </button>
+  );
+};

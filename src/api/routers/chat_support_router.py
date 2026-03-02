@@ -9,6 +9,7 @@ import redis
 from src.agents.data_synthesizer.scdg import SCDG
 from src.core.knowledge_base import KnowledgeBase
 from src.ml.inference import CreditRiskModel
+from src.api.routers.admin_config_router import _get_flag
 
 router = APIRouter(prefix="/chat", tags=["chat_support"])
 
@@ -27,6 +28,8 @@ def _seed_names_if_needed():
 
 @router.get("/suggestions")
 async def suggestions(prefix: str = "", limit: int = 10):
+    if not _get_flag():
+        return {"items": []}
     _seed_names_if_needed()
     all_names = r.lrange(DEMO_NAMES_KEY, 0, -1)
     prefix_lower = prefix.strip().lower()

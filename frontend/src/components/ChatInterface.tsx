@@ -25,6 +25,18 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
   };
 
   useEffect(scrollToBottom, [messages]);
+  const [suggestionsEnabled, setSuggestionsEnabled] = useState(true);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('http://localhost:8000/admin/config/suggestions_enabled');
+        if (r.ok) {
+          const data = await r.json();
+          setSuggestionsEnabled(!!data.value);
+        }
+      } catch {}
+    })();
+  }, []);
   useEffect(() => {
     const prefix = (name + ' ' + surname).trim();
     if (!prefix) {
@@ -127,7 +139,7 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
           <label style={{ display: 'block', fontSize: '12px', color: '#666' }}>Surname</label>
           <input value={surname} onChange={(e) => setSurname(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
         </div>
-        {suggestions.length > 0 && (
+        {suggestionsEnabled && suggestions.length > 0 && (
           <div style={{ gridColumn: '1 / span 2', marginTop: '8px' }}>
             <div style={{ fontSize: '12px', color: '#666', marginBottom: '6px' }}>Suggestions</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
