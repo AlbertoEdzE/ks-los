@@ -1,8 +1,5 @@
 import React, { useState } from 'react';
-interface Props {
-  apiKey: string;
-}
-export const AdminPanel: React.FC<Props> = ({ apiKey }) => {
+export const AdminPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'configuration' | 'synthetic' | 'model' | 'metrics'>('synthetic');
   const [count, setCount] = useState(100);
   const [territory, setTerritory] = useState('ECCU');
@@ -20,7 +17,6 @@ export const AdminPanel: React.FC<Props> = ({ apiKey }) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': apiKey || ''
         },
         body: JSON.stringify({ count, territory, archetype, seed })
       });
@@ -37,9 +33,7 @@ export const AdminPanel: React.FC<Props> = ({ apiKey }) => {
     }
     const poll = async () => {
       try {
-        const r = await fetch('http://localhost:8000/admin/synthetic/status', {
-          headers: { 'X-API-Key': apiKey || '' }
-        });
+        const r = await fetch('http://localhost:8000/admin/synthetic/status');
         if (r.ok) {
           const data = await r.json();
           setProgress(data.progress || 0);
@@ -63,8 +57,7 @@ export const AdminPanel: React.FC<Props> = ({ apiKey }) => {
       const res = await fetch('http://localhost:8000/admin/synthetic/validate', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey || ''
+          'Content-Type': 'application/json'
         }
       });
       const data = await res.json();

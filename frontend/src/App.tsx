@@ -10,7 +10,6 @@ import { AdminPanel } from './components/AdminPanel';
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [role, setRole] = useState<'user' | 'admin'>('user');
-  const [apiKey, setApiKey] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -19,11 +18,11 @@ function App() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (role === 'admin') {
-      if (username === 'admin' && password === 'admin123' && apiKey.trim().length > 0) {
+      if (username === 'admin' && password === 'admin123') {
         setIsLoggedIn(true);
         setLoginError('');
       } else {
-        setLoginError('Invalid admin credentials or missing API key');
+        setLoginError('Invalid admin credentials');
       }
     } else {
       if (username === 'demo' && password === 'demo123') {
@@ -96,21 +95,7 @@ function App() {
                 placeholder="Enter password"
               />
             </div>
-            {role === 'admin' && (
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', color: '#666' }}>API Key</label>
-                <input
-                  type="text"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }}
-                  placeholder="Enter admin API key"
-                />
-                <div style={{ fontSize: '12px', color: '#999', marginTop: '6px' }}>
-                  This is used for admin operations.
-                </div>
-              </div>
-            )}
+            
             {loginError && <div style={{ color: 'red', fontSize: '14px' }}>{loginError}</div>}
             <button 
               type="submit"
@@ -128,7 +113,7 @@ function App() {
               Login
             </button>
             <div style={{ textAlign: 'center', fontSize: '12px', color: '#999', marginTop: '10px' }}>
-              User: demo / demo123. Admin: admin / admin123 + API key.
+              User: demo / demo123. Admin: admin / admin123.
             </div>
           </form>
         </div>
@@ -141,7 +126,7 @@ function App() {
       <h1 style={{ textAlign: 'center', marginBottom: '30px' }}>KS LOS - Agentic Journey Coach</h1>
       
       {role === 'admin' ? (
-        <AdminPanel apiKey={apiKey} />
+        <AdminPanel />
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', maxWidth: '1400px', margin: '0 auto' }}>
