@@ -3,9 +3,9 @@ import type { ApplicantCreditProfile } from './types';
 import { CreditProfileView } from './components/CreditProfileView';
 import { ChatInterface } from './components/ChatInterface';
 import './App.css';
-import { TrainingPanel } from './components/TrainingPanel';
 import { MonitoringPanel } from './components/MonitoringPanel';
 import { AdminPanel } from './components/AdminPanel';
+import { GlobalProgressBar } from './components/GlobalProgressBar';
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -131,14 +131,15 @@ function App() {
         <AdminPanel />
       ) : (
         <>
+          <div style={{ maxWidth: '1400px', margin: '0 auto 20px auto' }}>
+             {profile && <GlobalProgressBar fullName={profile.identity.full_name} />}
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', maxWidth: '1400px', margin: '0 auto' }}>
             <div>
-              <h2>Chat with Journey Coach</h2>
               <ChatInterface onProfileReceived={setProfile} />
             </div>
             
             <div>
-              <h2>Credit Profile</h2>
               {profile ? (
                 <CreditProfileView profile={profile} />
               ) : (
@@ -157,9 +158,6 @@ function App() {
                 </div>
               )}
             </div>
-          </div>
-          <div style={{ maxWidth: '1400px', margin: '20px auto' }}>
-            <TrainingPanel />
           </div>
           <div style={{ maxWidth: '1400px', margin: '20px auto' }}>
             <MonitoringPanel />

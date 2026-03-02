@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import process from 'node:process';
 
 export default defineConfig({
   testDir: './tests',
@@ -12,7 +13,7 @@ export default defineConfig({
   ],
   timeout: 120 * 1000,
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: process.env.BASE_URL || 'http://localhost:5173',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },

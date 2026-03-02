@@ -51,7 +51,11 @@ if [ -f "$FRONT_DIR/package.json" ]; then
     
     echo "[KS LOS] Starting frontend dev server..."
     # Force port 5173 to be sure
-    nohup npm run dev -- --port 5173 > "$ROOT_DIR/frontend.log" 2>&1 &
+    # If 5173 is taken, Vite will try 5174, but we want to fail or kill to ensure consistency if needed
+    # Actually, let's kill anything on 5173 first to be aggressive
+    lsof -ti:5173 | xargs kill -9 2>/dev/null || true
+    
+    nohup npm run dev -- --port 5173 --strictPort > "$ROOT_DIR/frontend.log" 2>&1 &
     echo $! > "$ROOT_DIR/.pid_frontend"
   )
 

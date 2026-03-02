@@ -2,22 +2,21 @@ import React, { useState, useRef, useEffect } from 'react';
 import { sendMessage } from '../api/agent';
 import type { ChatMessage } from '../api/agent';
 import type { ApplicantCreditProfile } from '../types';
+import { SuggestionStrip } from './SuggestionStrip';
+import type { Suggestion } from './SuggestionStrip';
 
 interface Props {
   onProfileReceived: (profile: ApplicantCreditProfile) => void;
 }
 
 export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
-  const [name, setName] = useState('');
-  const [surname, setSurname] = useState('');
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [progress, setProgress] = useState(0);
-  const [currentStep, setCurrentStep] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'assistant', content: 'Hello! I am your Journey Coach. I can help you generate a credit profile and assess loan eligibility. What is your age and territory?' }
+    { role: 'assistant', content: 'Hello! I am your Journey Coach. I can help you generate a credit profile and assess loan eligibility. To get started, please tell me your full name, age, and territory.' }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [seedSuggestions, setSeedSuggestions] = useState<Suggestion[]>([]);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -25,205 +24,264 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
   };
 
   useEffect(scrollToBottom, [messages]);
-  const [suggestionsEnabled, setSuggestionsEnabled] = useState(true);
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch('http://localhost:8000/admin/config/suggestions_enabled');
-        if (r.ok) {
-          const data = await r.json();
-          setSuggestionsEnabled(!!data.value);
-        }
-      } catch {}
-    })();
-  }, []);
-  useEffect(() => {
-    const prefix = (surname.trim().length > 0 ? (name + ' ' + surname) : name).trim();
-    if (!prefix) {
-      setSuggestions([]);
-      return;
-    }
-    const controller = new AbortController();
-    const timeout = setTimeout(async () => {
-      try {
-        const r = await fetch(`http://localhost:8000/chat/suggestions?prefix=${encodeURIComponent(prefix)}&limit=8`, { signal: controller.signal });
-        if (r.ok) {
-          const data = await r.json();
-          setSuggestions(data.items || []);
-        }
-      } catch {}
-    }, 200);
-    return () => {
-      controller.abort();
-      clearTimeout(timeout);
-    };
-  }, [name, surname]);
 
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
-    const fullName = `${name} ${surname}`.trim();
-    if (!fullName) {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Please provide your name and surname before chatting.' }]);
-      return;
-    }
-    try {
-      const r = await fetch('http://localhost:8000/chat/identity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, surname })
-      });
-      if (r.ok) {
-        const data = await r.json();
-        const es = new EventSource(`http://localhost:8000/chat/progress/stream?full_name=${encodeURIComponent(data.full_name)}`);
-        es.onmessage = (ev) => {
-          try {
-            const payload = JSON.parse(ev.data);
-            setProgress(payload.progress || 0);
-            setCurrentStep(payload.step || '');
-          } catch {}
-        };
-        es.onerror = () => {
-          es.close();
-        };
+  // Fetch seed suggestions on mount
+  useEffect(() => {
+    const fetchSuggestions = async () => {
+      try {
+        const res = await fetch('http://localhost:8000/chat/suggestions');
+        if (res.ok) {
+          const data = await res.json();
+          const items = data.items.map((item: any) => 
+            typeof item === 'string' 
+              ? { label: item, text: item } 
+              : item
+          );
+          setSeedSuggestions(items);
+        }
+      } catch (e) {
+        console.error("Failed to fetch suggestions", e);
       }
-    } catch {}
+    };
+    fetchSuggestions();
+  }, []);
 
-    const userMsg: ChatMessage = { role: 'user', content: input };
+  const handleSend = async (text: string = input) => {
+    if (!text.trim() || loading) return;
+
+    const userMsg: ChatMessage = { role: 'user', content: text };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
 
     try {
-      const response = await sendMessage(input, messages);
+      const response = await sendMessage(text, messages);
       
       const assistantMsg: ChatMessage = { 
         role: 'assistant', 
         content: response.response 
       };
-      
       setMessages(prev => [...prev, assistantMsg]);
 
       if (response.credit_profile) {
         onProfileReceived(response.credit_profile);
       }
     } catch (error) {
-      console.error('Chat error:', error);
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error. Please ensure the backend is running.' }]);
+      console.error('Error sending message:', error);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' }]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+  // Determine current suggestions
+  const getCurrentSuggestions = (): { label: string, items: Suggestion[] } => {
+    const lastMsg = messages[messages.length - 1];
+    
+    if (!lastMsg) return { label: '', items: [] };
+
+    const content = lastMsg.content.toLowerCase();
+
+    // Initial State or User just spoke (and waiting for reply - though loading covers this)
+    if (messages.length === 1 || content.includes('full name') || content.includes('territory')) {
+      return { 
+        label: 'Quick Start (Click to Auto-fill)', 
+        items: seedSuggestions.length > 0 ? seedSuggestions : [
+           { label: 'Start as Katie (Antigua)', text: 'Katie Brady, Antigua and Barbuda, 34 years old' },
+           { label: 'Start as John (Grenada)', text: 'John Doe, Grenada, 28 years old' }
+        ]
+      };
     }
+
+    // Document Phase
+    if (content.includes('bank statement') || content.includes('id') || content.includes('document')) {
+      return {
+        label: 'Use Sample Data (Since no file upload)',
+        items: [
+          { label: '📄 Paste Sample Bank Statement', text: 'Here is my bank statement summary:\nAccount: 123456789\nBalance: $15,000\nMonthly Deposits: $4,500\nNo missed payments.' },
+          { label: '🆔 Paste Sample ID Info', text: 'Here are my ID details:\nName: Katie Brady\nID Number: AB123456\nNationality: Antigua and Barbuda\nDOB: 1990-05-15' }
+        ]
+      };
+    }
+
+    return { label: '', items: [] };
   };
 
+  const { label: suggestionLabel, items: currentSuggestions } = getCurrentSuggestions();
+
   return (
-    <div className="chat-container" style={{ 
-      display: 'flex', 
-      flexDirection: 'column', 
-      height: '500px', 
-      border: '1px solid #ccc', 
+    <div style={{
+      height: '650px',
+      backgroundColor: 'white',
       borderRadius: '8px',
-      backgroundColor: '#fff'
+      boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+      border: '1px solid #e5e7eb'
     }}>
-      <div style={{ padding: '12px', borderBottom: '1px solid #eee', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+      <div style={{
+        padding: '16px 20px',
+        borderBottom: '1px solid #e5e7eb',
+        backgroundColor: 'white',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between'
+      }}>
         <div>
-          <label htmlFor="chat-name" style={{ display: 'block', fontSize: '12px', color: '#666' }}>Name</label>
-          <input id="chat-name" value={name} onChange={(e) => setName(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+          <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#111827', margin: 0 }}>
+            Chat with Journey Coach
+          </h2>
+          <p style={{ fontSize: '13px', color: '#6b7280', margin: '4px 0 0 0' }}>AI-powered loan prequalification</p>
         </div>
-        <div>
-          <label htmlFor="chat-surname" style={{ display: 'block', fontSize: '12px', color: '#666' }}>Surname</label>
-          <input id="chat-surname" value={surname} onChange={(e) => setSurname(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+        <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4b5563" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+           </svg>
         </div>
-        {suggestionsEnabled && suggestions.length > 0 && (
-          <div style={{ gridColumn: '1 / span 2', marginTop: '8px' }}>
-            <div style={{ fontSize: '12px', color: '#666', marginBottom: '6px' }}>Suggestions</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-              {suggestions.map((s) => (
-                <button key={s} onClick={() => {
-                  const parts = s.split(' ');
-                  setName(parts[0] || '');
-                  setSurname(parts.slice(1).join(' ') || '');
-                }} style={{ padding: '6px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f8f8f8' }}>
-                  {s}
-                </button>
-              ))}
+      </div>
+
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: '20px',
+        backgroundColor: '#f9fafb',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '16px'
+      }}>
+        {messages.map((msg, index) => (
+          <div key={index} style={{
+            display: 'flex',
+            justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start'
+          }}>
+            <div 
+              data-testid={`chat-message-${msg.role}`}
+              style={{
+              maxWidth: '80%',
+              padding: '12px 16px',
+              borderRadius: '16px',
+              borderBottomRightRadius: msg.role === 'user' ? '4px' : '16px',
+              borderBottomLeftRadius: msg.role === 'user' ? '16px' : '4px',
+              backgroundColor: msg.role === 'user' ? '#4f46e5' : 'white',
+              color: msg.role === 'user' ? 'white' : '#1f2937',
+              boxShadow: msg.role === 'user' ? '0 1px 2px rgba(79, 70, 229, 0.2)' : '0 1px 2px rgba(0, 0, 0, 0.05)',
+              border: msg.role === 'user' ? 'none' : '1px solid #e5e7eb',
+              fontSize: '14px',
+              lineHeight: '1.5',
+              whiteSpace: 'pre-wrap'
+            }}>
+              {msg.content}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <div style={{
+              backgroundColor: 'white',
+              border: '1px solid #e5e7eb',
+              borderRadius: '16px',
+              borderBottomLeftRadius: '4px',
+              padding: '12px 16px',
+              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+              display: 'flex',
+              gap: '4px',
+              alignItems: 'center'
+            }}>
+              <div className="typing-dot" style={{ width: '6px', height: '6px', backgroundColor: '#9ca3af', borderRadius: '50%', animation: 'bounce 1.4s infinite ease-in-out both', animationDelay: '0s' }}></div>
+              <div className="typing-dot" style={{ width: '6px', height: '6px', backgroundColor: '#9ca3af', borderRadius: '50%', animation: 'bounce 1.4s infinite ease-in-out both', animationDelay: '0.16s' }}></div>
+              <div className="typing-dot" style={{ width: '6px', height: '6px', backgroundColor: '#9ca3af', borderRadius: '50%', animation: 'bounce 1.4s infinite ease-in-out both', animationDelay: '0.32s' }}></div>
             </div>
           </div>
         )}
-      </div>
-      <div className="messages" style={{ 
-        flex: 1, 
-        overflowY: 'auto', 
-        padding: '20px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px'
-      }}>
-        <div style={{ marginBottom: '10px' }}>
-          <div style={{ height: '12px', backgroundColor: '#eee', borderRadius: '6px', overflow: 'hidden' }}>
-            <div style={{ width: `${progress}%`, backgroundColor: '#0056b3', height: '100%' }} />
-          </div>
-          <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
-            {currentStep ? `Step: ${currentStep} (${progress}%)` : 'No progress yet'}
-          </div>
-        </div>
-        {messages.map((msg, idx) => (
-          <div key={idx} style={{ 
-            alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-            maxWidth: '80%',
-            backgroundColor: msg.role === 'user' ? '#0056b3' : '#f0f0f0',
-            color: msg.role === 'user' ? '#fff' : '#333',
-            padding: '10px 15px',
-            borderRadius: '12px',
-            whiteSpace: 'pre-wrap'
-          }}>
-            {msg.content}
-          </div>
-        ))}
-        {loading && <div style={{ alignSelf: 'flex-start', color: '#999', fontStyle: 'italic' }}>Thinking...</div>}
         <div ref={messagesEndRef} />
       </div>
-      
-      <div className="input-area" style={{ 
-        padding: '15px', 
-        borderTop: '1px solid #eee',
-        display: 'flex',
-        gap: '10px'
+
+      <div style={{
+        padding: '16px 20px',
+        backgroundColor: 'white',
+        borderTop: '1px solid #e5e7eb'
       }}>
-        <input 
-          type="text" 
-          value={input} 
-          onChange={(e) => setInput(e.target.value)} 
-          onKeyDown={handleKeyDown}
-          placeholder="Type your message..."
-          disabled={loading}
-          style={{ 
-            flex: 1, 
-            padding: '10px', 
-            borderRadius: '4px', 
-            border: '1px solid #ccc' 
-          }}
-        />
-        <button 
-          onClick={handleSend} 
-          disabled={loading || !input.trim()}
-          style={{ 
-            padding: '10px 20px', 
-            backgroundColor: '#0056b3', 
-            color: 'white', 
-            border: 'none', 
-            borderRadius: '4px',
-            cursor: loading ? 'not-allowed' : 'pointer'
-          }}
-        >
-          Send
-        </button>
+        {!loading && currentSuggestions.length > 0 && (
+           <SuggestionStrip 
+             suggestions={currentSuggestions} 
+             onSelect={handleSend} 
+             label={suggestionLabel}
+           />
+        )}
+        
+        <div style={{ display: 'flex', gap: '10px', marginTop: currentSuggestions.length > 0 ? '12px' : '0' }}>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+            placeholder="Type your message..."
+            style={{
+              flex: 1,
+              padding: '12px 16px',
+              borderRadius: '24px',
+              border: '1px solid #d1d5db',
+              outline: 'none',
+              fontSize: '14px',
+              backgroundColor: '#f9fafb',
+              transition: 'border-color 0.2s, box-shadow 0.2s'
+            }}
+            onFocus={(e) => {
+              e.target.style.borderColor = '#4f46e5';
+              e.target.style.boxShadow = '0 0 0 2px rgba(79, 70, 229, 0.1)';
+              e.target.style.backgroundColor = 'white';
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = '#d1d5db';
+              e.target.style.boxShadow = 'none';
+              e.target.style.backgroundColor = '#f9fafb';
+            }}
+          />
+          <button 
+            onClick={() => handleSend()}
+            disabled={loading || !input.trim()}
+            aria-label="Send"
+            style={{
+              width: '46px',
+              height: '46px',
+              borderRadius: '50%',
+              backgroundColor: loading || !input.trim() ? '#e5e7eb' : '#4f46e5',
+              color: 'white',
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+              transition: 'background-color 0.2s, transform 0.1s',
+              boxShadow: loading || !input.trim() ? 'none' : '0 2px 4px rgba(79, 70, 229, 0.3)'
+            }}
+            onMouseEnter={(e) => {
+              if (!loading && input.trim()) {
+                e.currentTarget.style.backgroundColor = '#4338ca';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!loading && input.trim()) {
+                e.currentTarget.style.backgroundColor = '#4f46e5';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
       </div>
+      <style>{`
+        @keyframes bounce {
+          0%, 80%, 100% { transform: scale(0); }
+          40% { transform: scale(1); }
+        }
+      `}</style>
     </div>
   );
 };
