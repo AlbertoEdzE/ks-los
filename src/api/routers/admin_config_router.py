@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from typing import Dict
 import redis
+from src.shared.audit import log_audit
 
 router = APIRouter(prefix="/admin/config", tags=["admin_config"])
 
@@ -21,4 +22,8 @@ async def get_suggestions_enabled() -> Dict[str, bool]:
 @router.post("/suggestions_enabled")
 async def set_suggestions_enabled(value: bool) -> Dict[str, bool]:
     r.set(SUGGESTIONS_KEY, "1" if value else "0")
+    try:
+        log_audit(event="toggle_suggestions", endpoint="/admin/config/suggestions_enabled", status="success", meta={"value": value})
+    except Exception:
+        pass
     return {"value": _get_flag()}

@@ -20,6 +20,7 @@ from src.api.routers.explain_router import router as explain_router
 from src.api.routers.admin_synthetic_router import router as admin_synthetic_router
 from src.api.routers.chat_support_router import router as chat_support_router
 from src.api.routers.admin_config_router import router as admin_config_router
+from src.api.routers.admin_seed_router import router as admin_seed_router
 
 # Configure logging
 if os.getenv("LOG_JSON", "1") == "1":
@@ -63,6 +64,7 @@ app.include_router(explain_router)
 app.include_router(admin_synthetic_router)
 app.include_router(chat_support_router)
 app.include_router(admin_config_router)
+app.include_router(admin_seed_router)
 
 @app.middleware("http")
 async def correlation_middleware(request: Request, call_next):

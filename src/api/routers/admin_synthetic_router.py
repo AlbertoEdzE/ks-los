@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from src.agents.data_synthesizer.scdg import SCDG
 from src.ml.inference import CreditRiskModel
 from src.shared.types import ApplicantCreditProfile
+from src.shared.audit import log_audit
 
 router = APIRouter(prefix="/admin/synthetic", tags=["admin_synthetic"])
 
@@ -80,12 +81,21 @@ async def start_generation(req: GenerateRequest, tasks: BackgroundTasks):
     tasks.add_task(_run_generation, req.count, req.territory, req.archetype, req.seed)
     with _lock:
         st = dict(_status)
+    try:
+        log_audit(event="synthetic_generate", endpoint="/admin/synthetic/generate", status="accepted", meta={"count": req.count, "territory": req.territory, "archetype": req.archetype})
+    except Exception:
+        pass
     return {"accepted": True, "status": st}
 
 @router.get("/status")
 async def status():
     with _lock:
-        return dict(_status)
+        st = dict(_status)
+    try:
+        log_audit(event="synthetic_status", endpoint="/admin/synthetic/status", status=st.get("status", "unknown"), meta={"progress": st.get("progress", 0)})
+    except Exception:
+        pass
+    return st
 
 def _sse_events():
     last = -1
@@ -113,10 +123,15 @@ async def validate():
     approved = sum(1 for r in ds if r.get("application", {}).get("decision") == "APPROVED")
     declined = total - approved
     avg_prob = sum(r.get("application", {}).get("probability_good", 0.0) for r in ds) / total if total else 0.0
-    return {
+    result = {
         "total": total,
         "approved": approved,
         "declined": declined,
         "approval_rate": (approved / total) if total else 0.0,
         "avg_probability_good": avg_prob
     }
+    try:
+        log_audit(event="synthetic_validate", endpoint="/admin/synthetic/validate", status="success", meta=result)
+    except Exception:
+        pass
+    return result
