@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import type { ApplicantCreditProfile } from './types';
 import { CreditProfileView } from './components/CreditProfileView';
 import { ChatInterface } from './components/ChatInterface';
@@ -7,7 +7,85 @@ import { TrainingPanel } from './components/TrainingPanel';
 import { MonitoringPanel } from './components/MonitoringPanel';
 
 function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
   const [profile, setProfile] = useState<ApplicantCreditProfile | null>(null);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (username === 'demo' && password === 'demo123') {
+      setIsLoggedIn(true);
+      setLoginError('');
+    } else {
+      setLoginError('Invalid credentials. Try demo/demo123');
+    }
+  };
+
+  if (!isLoggedIn) {
+    return (
+      <div className="app-container" style={{ 
+        height: '100vh', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        backgroundColor: '#f5f5f5'
+      }}>
+        <div style={{
+          padding: '40px',
+          backgroundColor: 'white',
+          borderRadius: '8px',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+          width: '100%',
+          maxWidth: '400px'
+        }}>
+          <h1 style={{ textAlign: 'center', marginBottom: '30px', color: '#333' }}>KS LOS Demo</h1>
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#666' }}>Username</label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }}
+                placeholder="Enter username"
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#666' }}>Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }}
+                placeholder="Enter password"
+              />
+            </div>
+            {loginError && <div style={{ color: 'red', fontSize: '14px' }}>{loginError}</div>}
+            <button 
+              type="submit"
+              style={{
+                padding: '12px',
+                backgroundColor: '#0056b3',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: 'bold'
+              }}
+            >
+              Login
+            </button>
+            <div style={{ textAlign: 'center', fontSize: '12px', color: '#999', marginTop: '10px' }}>
+              Default: demo / demo123
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-container" style={{ padding: '20px' }}>
