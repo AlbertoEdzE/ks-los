@@ -16,6 +16,9 @@ def _seed_names(count: int = 500) -> int:
     for i in range(count):
         profile = gen.generate_profile({"age": 25 + (i % 30), "territory": "ECCU"})
         names.add(profile.identity.full_name)
+    # Ensure deterministic common prefixes exist for testing stability
+    fixed = {"John Aaron", "Joan Anderson", "Joseph Alvarez"}
+    names.update(fixed)
     # idempotent add: ensure list contains unique names
     existing = set(r.lrange(DEMO_NAMES_KEY, 0, -1))
     to_add = [n for n in names if n not in existing]

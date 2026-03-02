@@ -159,9 +159,9 @@ This plan follows the project’s planning, validation, and documentation princi
   - Update user/admin guides; record test plans and validation reports.
   - Add performance budgets for progress streaming and autocomplete response times.
 - Deliverables:
-  - Docs under `doc/04_documentation`; test reports per phase.
+  - Docs: `doc/acceptance.md` with budgets and reproducible steps; test reports (Playwright HTML).
 - Acceptance Criteria:
-  - All new features have unit, integration, and e2e coverage; performance meets budgets.
+  - All new features have unit, integration, and e2e coverage; performance meets budgets; acceptance script runs cleanly.
 - Tests & CI:
   - Playwright journeys; Vitest components; Pytest services; CI gates for fairness and performance.
 - Risks:
