@@ -12,7 +12,7 @@ class GenerateProfileInput(BaseModel):
 
 class GenerateProfileTool(BaseTool):
     name: str = "generate_credit_profile"
-    description: str = "Generates a synthetic credit profile for a given applicant based on age and territory."
+    description: str = "The 'Organizer' tool. Parses provided document text (Bank Statements/IDs) to extract and generate a structured credit profile."
     args_schema: Type[BaseModel] = GenerateProfileInput
 
     def _run(self, age: int, territory: str, scenario_type: Optional[str] = None) -> str:

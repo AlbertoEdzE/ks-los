@@ -27,8 +27,22 @@ class CreditRiskModel:
         """
         try:
             mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-            # Load latest version
-            model_uri = f"models:/{REGISTERED_MODEL_NAME}/1" # Hardcoded v1 for now, ideally 'Production' alias
+            
+            # Get latest version dynamically
+            from mlflow.tracking import MlflowClient
+            client = MlflowClient()
+            # Get all versions and pick the last one (highest version number)
+            # In a real prod env, we would filter by stage="Production"
+            versions = client.get_latest_versions(REGISTERED_MODEL_NAME, stages=["None", "Production", "Staging"])
+            if not versions:
+                logger.warning(f"No registered models found for {REGISTERED_MODEL_NAME}")
+                self._model = None
+                return
+
+            # Sort by version number just in case
+            latest_version = sorted(versions, key=lambda x: int(x.version))[-1].version
+            
+            model_uri = f"models:/{REGISTERED_MODEL_NAME}/{latest_version}"
             logger.info(f"Loading model from {model_uri}...")
             self._model = mlflow.xgboost.load_model(model_uri)
             logger.info("Model loaded successfully.")
