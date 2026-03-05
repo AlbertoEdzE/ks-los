@@ -67,8 +67,8 @@ test.describe('ML Training Workflow', () => {
 
     // Step 2: Execution
     await expect(page.getByText('Review & Execute')).toBeVisible();
-    // Use regex to be more flexible
-    await expect(page.locator('pre')).toContainText('hyperparameters'); 
+    // Use filter to be more specific and avoid strict mode violations
+    await expect(page.locator('pre').filter({ hasText: 'hyperparameters' })).toBeVisible(); 
     await page.getByRole('button', { name: 'Execute Training' }).click();
     
     // Wait for completion
