@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 class CreditRiskModel:
     _instance = None
     _model = None
+    _current_version = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -21,48 +22,85 @@ class CreditRiskModel:
             cls._instance._load_model()
         return cls._instance
 
-    def _load_model(self):
+    def _load_model(self, version: Optional[str] = None):
         """
-        Loads the latest production model from MLflow.
+        Loads the latest production model from MLflow, or a specific version.
         """
         try:
             mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-            
-            # Get latest version dynamically
             from mlflow.tracking import MlflowClient
             client = MlflowClient()
-            # Get all versions and pick the last one (highest version number)
-            # In a real prod env, we would filter by stage="Production"
-            versions = client.get_latest_versions(REGISTERED_MODEL_NAME, stages=["None", "Production", "Staging"])
-            if not versions:
-                logger.warning(f"No registered models found for {REGISTERED_MODEL_NAME}")
-                self._model = None
-                return False
-
-            # Sort by version number just in case
-            latest_version = sorted(versions, key=lambda x: int(x.version))[-1].version
             
-            model_uri = f"models:/{REGISTERED_MODEL_NAME}/{latest_version}"
+            if version:
+                target_version = version
+            else:
+                # Get latest version dynamically
+                versions = client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")
+                if not versions:
+                    logger.warning(f"No registered models found for {REGISTERED_MODEL_NAME}")
+                    self._model = None
+                    return False
+                # Sort by version number
+                target_version = sorted(versions, key=lambda x: int(x.version))[-1].version
+            
+            model_uri = f"models:/{REGISTERED_MODEL_NAME}/{target_version}"
             logger.info(f"Loading model from {model_uri}...")
             self._model = mlflow.xgboost.load_model(model_uri)
-            logger.info("Model loaded successfully.")
+            self._current_version = target_version
+            logger.info(f"Model version {target_version} loaded successfully.")
             return True
         except Exception as e:
-            logger.error(f"Failed to load MLflow model: {e}")
-            self._model = None
+            logger.error(f"Failed to load model: {e}")
             return False
 
-    def reload_model(self) -> bool:
-        """
-        Force reloads the model from MLflow.
-        Returns True if successful, False otherwise.
-        """
+    def reload_model(self):
+        """Reloads the latest model."""
         return self._load_model()
 
+    def get_version(self):
+        return self._current_version
 
-    def predict(self, profile: ApplicantCreditProfile) -> Dict[str, float]:
+    def list_versions(self):
+        try:
+            from mlflow.tracking import MlflowClient
+            client = MlflowClient()
+            versions = client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")
+            return sorted([
+                {"version": v.version, "stage": v.current_stage, "run_id": v.run_id, "timestamp": v.creation_timestamp}
+                for v in versions
+            ], key=lambda x: int(x["version"]), reverse=True)
+        except Exception:
+            return []
+
+    def rollback(self):
+        """Rolls back to the previous version relative to the current one."""
+        if not self._current_version:
+            return False, "No model currently loaded"
+        
+        versions = self.list_versions()
+        if not versions:
+            return False, "No versions found"
+            
+        # Find index of current version
+        try:
+            current_idx = next(i for i, v in enumerate(versions) if v["version"] == self._current_version)
+            if current_idx + 1 < len(versions):
+                prev_version = versions[current_idx + 1]["version"]
+                success = self._load_model(version=prev_version)
+                return success, f"Rolled back to version {prev_version}" if success else "Failed to load previous version"
+            else:
+                return False, "No previous version available"
+        except StopIteration:
+            # Current version not in list (maybe deleted?), try loading latest-1
+            if len(versions) > 1:
+                 prev_version = versions[1]["version"]
+                 success = self._load_model(version=prev_version)
+                 return success, f"Current version unknown, loaded second latest {prev_version}"
+            return False, "Cannot determine rollback target"
+
+    def predict(self, profile: ApplicantCreditProfile | Dict[str, Any]) -> Dict[str, float]:
         """
-        Predicts credit risk for a profile.
+        Predicts credit risk for a profile or a feature dictionary.
         Returns: {"probability_good": float, "score": float}
         """
         if not self._model:
@@ -70,20 +108,30 @@ class CreditRiskModel:
             return {"probability_good": 0.5, "score": 0.5}
 
         try:
-            # Flatten profile to match training features
-            features = {
-                "age": 2024 - profile.identity.date_of_birth.year, # Approx
-                "credit_score": profile.summary.credit_score,
-                "utilization_ratio": profile.summary.utilization_ratio,
-                "total_debt": profile.summary.total_current_balance_xcd,
-                "history_length_months": profile.summary.months_oldest_account,
-                "derogatory_marks": profile.summary.derogatory_marks,
-                "thin_file_flag": 1 if profile.summary.thin_file else 0
-            }
+            if isinstance(profile, dict):
+                # Assume profile is a dict of features
+                features = profile
+                # If features are missing, fill with defaults or fail?
+                # Let's assume frontend sends complete feature set or partial.
+            else:
+                # Flatten profile to match training features
+                features = {
+                    "age": 2024 - profile.identity.date_of_birth.year, # Approx
+                    "credit_score": profile.summary.credit_score,
+                    "utilization_ratio": profile.summary.utilization_ratio,
+                    "total_debt": profile.summary.total_current_balance_xcd,
+                    "history_length_months": profile.summary.months_oldest_account,
+                    "derogatory_marks": profile.summary.derogatory_marks,
+                    "thin_file_flag": 1 if profile.summary.thin_file else 0
+                }
             
             df = pd.DataFrame([features])
             
-            # Ensure column order matches training
+            # Ensure column order matches training, if columns are missing, add them as 0
+            for col in FEATURES:
+                if col not in df.columns:
+                    df[col] = 0
+            
             df = df[FEATURES]
             
             prob = self._model.predict_proba(df)[0][1] # Probability of Class 1 (Good)

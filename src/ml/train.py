@@ -5,8 +5,9 @@ import mlflow
 import mlflow.xgboost
 import logging
 import os
+import time
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score, confusion_matrix
 from datetime import date
 
 from src.agents.data_synthesizer.scdg import SCDG
@@ -15,16 +16,20 @@ from src.ml.ml_config import (
     FEATURES, TARGET, REGISTERED_MODEL_NAME
 )
 from src.shared.correlation import get_correlation_id
+from src.ml.training_manager import training_manager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def generate_training_data(n_samples: int = 1000) -> pd.DataFrame:
+def generate_training_data(n_samples: int = 1000, progress_callback=None) -> pd.DataFrame:
     """
     Generates synthetic training data using SCDG.
     """
     logger.info(f"Generating {n_samples} synthetic profiles...")
+    if progress_callback:
+        progress_callback(10, "generating_data", f"Starting generation of {n_samples} samples...")
+
     scdg = SCDG(seed="training_seed_v1")
     
     data = []
@@ -42,7 +47,9 @@ def generate_training_data(n_samples: int = 1000) -> pd.DataFrame:
     total_weight = sum(w for _, _, w in archetypes)
     probs = [w/total_weight for _, _, w in archetypes]
     
-    for _ in range(n_samples):
+    batch_size = max(1, n_samples // 10) # Update progress every 10%
+
+    for i in range(n_samples):
         # Pick random archetype based on weights
         idx = np.random.choice(len(archetypes), p=probs)
         arch_name, age, _ = archetypes[idx]
@@ -79,73 +86,105 @@ def generate_training_data(n_samples: int = 1000) -> pd.DataFrame:
         }
         data.append(row)
         
+        if progress_callback and (i + 1) % batch_size == 0:
+            pct = 10 + int((i + 1) / n_samples * 40) # 10% to 50%
+            progress_callback(pct, "generating_data", f"Generated {i + 1}/{n_samples} samples")
+        
     return pd.DataFrame(data)
 
-def train_model(params: dict | None = None, n_samples: int = 2000):
+def train_model(params: dict | None = None, n_samples: int = 2000) -> dict:
     """
     Main training pipeline.
     """
-    # 1. Setup MLflow
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    mlflow.set_experiment(EXPERIMENT_NAME)
-    
-    with mlflow.start_run():
-        cid = get_correlation_id()
-        if cid:
-            mlflow.set_tags({"correlation_id": cid})
-        # 2. Data Generation
-        df = generate_training_data(n_samples=n_samples)
+    training_manager.start_training()
+    try:
+        # 1. Setup MLflow
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(EXPERIMENT_NAME)
         
-        X = df[FEATURES]
-        y = df[TARGET]
-        
-        # 3. Split
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        
-        # 4. Train XGBoost
-        logger.info("Training XGBoost model...")
-        default_params = {
-            "objective": "binary:logistic",
-            "eval_metric": "logloss",
-            "max_depth": 4,
-            "learning_rate": 0.1,
-            "n_estimators": 100
-        }
-        if params:
-            default_params.update(params)
-        
-        model = xgb.XGBClassifier(**default_params)
-        model.fit(X_train, y_train)
-        
-        # 5. Evaluate
-        preds = model.predict(X_test)
-        probs = model.predict_proba(X_test)[:, 1]
-        
-        acc = accuracy_score(y_test, preds)
-        auc = roc_auc_score(y_test, probs)
-        prec = precision_score(y_test, preds)
-        rec = recall_score(y_test, preds)
-        
-        logger.info(f"Metrics: Accuracy={acc:.4f}, AUC={auc:.4f}")
-        
-        # 6. Log to MLflow
-        mlflow.log_params(default_params)
-        mlflow.log_metrics({
-            "accuracy": acc,
-            "auc": auc,
-            "precision": prec,
-            "recall": rec
-        })
-        
-        # Log Model
-        mlflow.xgboost.log_model(
-            model, 
-            "model", 
-            registered_model_name=REGISTERED_MODEL_NAME
-        )
-        
-        logger.info("Training complete. Model logged to MLflow.")
-        return {"accuracy": acc, "auc": auc, "precision": prec, "recall": rec}
+        with mlflow.start_run() as run:
+            cid = get_correlation_id()
+            if cid:
+                mlflow.set_tags({"correlation_id": cid})
+            
+            # 2. Data Generation
+            df = generate_training_data(n_samples=n_samples, progress_callback=training_manager.update_progress)
+            
+            training_manager.update_progress(50, "preprocessing", "Splitting dataset...")
+            
+            X = df[FEATURES]
+            y = df[TARGET]
+            
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            
+            training_manager.update_progress(60, "training", f"Training XGBoost on {len(X_train)} samples...")
+
+            # 3. Train
+            if params is None:
+                params = {
+                    "objective": "binary:logistic",
+                    "eval_metric": "logloss",
+                    "learning_rate": 0.1,
+                    "max_depth": 5,
+                    "n_estimators": 100
+                }
+            
+            # Use callback for training progress
+            class ProgressCallback(xgb.callback.TrainingCallback):
+                def after_iteration(self, model, epoch, evals_log):
+                    pct = 60 + int((epoch + 1) / params.get("n_estimators", 100) * 30) # 60% to 90%
+                    training_manager.update_progress(pct, "training", f"Epoch {epoch+1}/{params.get('n_estimators', 100)}")
+                    return False
+
+            clf = xgb.XGBClassifier(**params, callbacks=[ProgressCallback()])
+            clf.fit(X_train, y_train)
+            
+            training_manager.update_progress(90, "evaluating", "Evaluating model...")
+
+            # 4. Evaluate
+            y_pred = clf.predict(X_test)
+            y_prob = clf.predict_proba(X_test)[:, 1]
+            
+            acc = accuracy_score(y_test, y_pred)
+            auc = roc_auc_score(y_test, y_prob)
+            prec = precision_score(y_test, y_pred, zero_division=0)
+            rec = recall_score(y_test, y_pred, zero_division=0)
+            f1 = f1_score(y_test, y_pred, zero_division=0)
+            cm = confusion_matrix(y_test, y_pred).tolist()
+
+            # Log metrics
+            mlflow.log_metrics({
+                "accuracy": acc, 
+                "auc": auc,
+                "precision": prec,
+                "recall": rec,
+                "f1": f1
+            })
+            
+            # Log model
+            mlflow.xgboost.log_model(clf, "model", registered_model_name=REGISTERED_MODEL_NAME)
+            
+            result = {
+                "accuracy": float(acc),
+                "auc": float(auc),
+                "precision": float(prec),
+                "recall": float(rec),
+                "f1": float(f1),
+                "confusion_matrix": cm,
+                "model_uri": f"runs:/{run.info.run_id}/model",
+                "run_id": run.info.run_id,
+                "dataset_size": n_samples,
+                "train_size": len(X_train),
+                "test_size": len(X_test)
+            }
+            
+            training_manager.complete_training(result)
+            return result
+            
+    except Exception as e:
+        logger.error(f"Training failed: {e}")
+        training_manager.fail_training(str(e))
+        raise e
 
 if __name__ == "__main__":
     train_model()
