@@ -16,20 +16,37 @@ SYSTEM_PROMPT = (
 )
 
 def propose_training_plan(context: Dict[str, Any]) -> Dict[str, Any]:
-    llm = get_llm()
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=f"Context: {context}. Propose plan.")
-    ]
-    response = llm.invoke(messages)
-    content = response.content
-    if "```json" in content:
-        content = content.split("```json")[1].split("```")[0]
-    elif "```" in content:
-        content = content.split("```")[1].split("```")[0]
-    import json
-    plan = json.loads(content)
-    return plan
+    """
+    Generates a training plan using LLM if available, otherwise falls back to defaults.
+    """
+    try:
+        llm = get_llm()
+        messages = [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=f"Context: {context}. Propose plan.")
+        ]
+        response = llm.invoke(messages)
+        content = response.content
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0]
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0]
+        import json
+        plan = json.loads(content)
+        return plan
+    except Exception as e:
+        logger.warning(f"LLM generation failed ({e}). Falling back to default plan.")
+        # Fallback Plan
+        return {
+            "hyperparameters": {
+                "learning_rate": 0.1,
+                "max_depth": 5,
+                "n_estimators": 100,
+                "objective": "binary:logistic"
+            },
+            "n_samples": context.get("n_samples", 2000),
+            "notes": "Generated via fallback logic (LLM unavailable). Standard XGBoost configuration."
+        }
 
 def execute_training(plan: Dict[str, Any]) -> Dict[str, Any]:
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)

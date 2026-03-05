@@ -117,10 +117,13 @@ export const TrainingPanel: React.FC = () => {
       if (res.ok) {
         const data = await res.json();
         setPlan(data.plan);
+      } else {
+        const err = await res.json();
+        alert(`Failed to generate plan: ${err.detail || 'Unknown error'}`);
       }
     } catch (e) {
       console.error(e);
-      alert('Failed to generate plan');
+      alert('Failed to generate plan: Network or Server Error');
     } finally {
       setIsGeneratingPlan(false);
     }
