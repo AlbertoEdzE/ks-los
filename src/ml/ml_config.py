@@ -3,7 +3,7 @@ import os
 # MLOps Configuration
 # Local SQLite backend for simplicity and portability (Scientific Rigor: Reproducibility)
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
-EXPERIMENT_NAME = "credit_risk_model_v1"
+EXPERIMENT_NAME = "credit_risk_model_v2"
 
 # Model Parameters
 MODEL_ARTIFACT_PATH = "xgboost_model"

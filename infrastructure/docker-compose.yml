@@ -72,7 +72,7 @@ services:
       MLFLOW_DEFAULT_ARTIFACT_ROOT: /mlflow/artifacts
     volumes:
       - mlflow_data:/mlflow
-    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow/mlflow.db --default-artifact-root /mlflow/artifacts
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow/mlflow.db --default-artifact-root mlflow-artifacts:/ --artifacts-destination /mlflow/artifacts --serve-artifacts
 
   prometheus:
     image: prom/prometheus:latest
