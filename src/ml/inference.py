@@ -2,7 +2,7 @@ import mlflow
 import pandas as pd
 import logging
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 
 from src.shared.types import ApplicantCreditProfile
 from src.ml.ml_config import (
