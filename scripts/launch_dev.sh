@@ -84,6 +84,7 @@ fi
 export LOG_JSON=1
 export OTLP_URL="http://localhost:4317"
 export ENFORCE_RBAC=0
+export MLFLOW_TRACKING_URI="http://localhost:5000"
 
 # Start Backend with nohup
 (
