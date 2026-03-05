@@ -66,6 +66,22 @@ export const TrainingPanel: React.FC = () => {
     }
   };
 
+  const deployModel = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/model/reload', {
+        method: 'POST'
+      });
+      if (res.ok) {
+        alert('Model reloaded successfully');
+      } else {
+        alert('Failed to reload model');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Error reloading model');
+    }
+  };
+
   return (
     <div style={{ padding: '24px', maxWidth: '800px' }}>
       <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '24px', color: '#1a202c' }}>ML Model Training Pipeline</h2>
@@ -142,7 +158,13 @@ export const TrainingPanel: React.FC = () => {
             <pre style={{ margin: 0, overflowX: 'auto', fontSize: '0.9rem' }}>{JSON.stringify(trainingResult, null, 2)}</pre>
           </div>
           <div style={{ display: 'flex', gap: '16px' }}>
-             <button 
+            <button 
+              onClick={deployModel}
+              style={{ padding: '10px 20px', backgroundColor: '#e53e3e', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '500', cursor: 'pointer' }}
+            >
+              Deploy Model
+            </button>
+            <button 
               onClick={runDrift}
               style={{ padding: '10px 20px', backgroundColor: '#805ad5', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '500', cursor: 'pointer' }}
             >

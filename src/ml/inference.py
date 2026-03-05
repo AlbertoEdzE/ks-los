@@ -37,7 +37,7 @@ class CreditRiskModel:
             if not versions:
                 logger.warning(f"No registered models found for {REGISTERED_MODEL_NAME}")
                 self._model = None
-                return
+                return False
 
             # Sort by version number just in case
             latest_version = sorted(versions, key=lambda x: int(x.version))[-1].version
@@ -46,9 +46,19 @@ class CreditRiskModel:
             logger.info(f"Loading model from {model_uri}...")
             self._model = mlflow.xgboost.load_model(model_uri)
             logger.info("Model loaded successfully.")
+            return True
         except Exception as e:
             logger.error(f"Failed to load MLflow model: {e}")
             self._model = None
+            return False
+
+    def reload_model(self) -> bool:
+        """
+        Force reloads the model from MLflow.
+        Returns True if successful, False otherwise.
+        """
+        return self._load_model()
+
 
     def predict(self, profile: ApplicantCreditProfile) -> Dict[str, float]:
         """
