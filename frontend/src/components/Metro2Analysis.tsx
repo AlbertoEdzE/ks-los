@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { ApplicantCreditProfile, TradeLine } from '../types';
+import type { ApplicantCreditProfile } from '../types';
 
 interface Props {
   profile: ApplicantCreditProfile;

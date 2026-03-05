@@ -4,10 +4,38 @@ export const AdminPanel: React.FC = () => {
   const [count, setCount] = useState(100);
   const [territory, setTerritory] = useState('ECCU');
   const [archetype, setArchetype] = useState('standard');
-  const [seed, setSeed] = useState('');
+  const [seed, setSeed] = useState('0');
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
+
+  const TERRITORIES = [
+    { code: 'AG', name: 'Antigua and Barbuda' },
+    { code: 'GD', name: 'Grenada' },
+    { code: 'LC', name: 'Saint Lucia' },
+    { code: 'VC', name: 'Saint Vincent and the Grenadines' },
+    { code: 'DM', name: 'Dominica' },
+    { code: 'KN', name: 'Saint Kitts and Nevis' },
+    { code: 'MS', name: 'Montserrat' },
+    { code: 'AI', name: 'Anguilla' },
+    { code: 'ECCU', name: 'ECCU (Generic)' },
+    { code: 'US', name: 'United States' },
+    { code: 'EU', name: 'European Union' },
+    { code: 'APAC', name: 'Asia Pacific' },
+  ];
+
+  const ARCHETYPES = [
+    'standard',
+    'THIN_FILE_YOUNG',
+    'THIN_FILE_IMMIGRANT',
+    'PRIME_ESTABLISHED',
+    'NEAR_PRIME',
+    'RECOVERING',
+    'STRESSED',
+    'HIGH_UTILIZATION',
+    'DEFAULTED'
+  ];
+
   const startGeneration = async () => {
     setStatus('running');
     setProgress(0);
@@ -76,20 +104,40 @@ export const AdminPanel: React.FC = () => {
           <h2 style={{ marginBottom: '12px' }}>Synthetic Data Control</h2>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label>Count</label>
-              <input type="number" value={count} onChange={(e) => setCount(parseInt(e.target.value || '0', 10))} style={{ width: '100%', padding: '8px' }} />
+              <label htmlFor="count-input">Count</label>
+              <input id="count-input" type="number" value={count} onChange={(e) => setCount(parseInt(e.target.value || '0', 10))} style={{ width: '100%', padding: '8px' }} />
             </div>
             <div>
-              <label>Territory</label>
-              <input type="text" value={territory} onChange={(e) => setTerritory(e.target.value)} style={{ width: '100%', padding: '8px' }} />
+              <label htmlFor="territory-select">Territory</label>
+              <select id="territory-select" value={territory} onChange={(e) => setTerritory(e.target.value)} style={{ width: '100%', padding: '8px' }}>
+                {TERRITORIES.map((t) => (
+                  <option key={t.code} value={t.code}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
-              <label>Archetype</label>
-              <input type="text" value={archetype} onChange={(e) => setArchetype(e.target.value)} style={{ width: '100%', padding: '8px' }} />
+              <label htmlFor="archetype-select">Archetype</label>
+              <select id="archetype-select" value={archetype} onChange={(e) => setArchetype(e.target.value)} style={{ width: '100%', padding: '8px' }}>
+                {ARCHETYPES.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
-              <label>Seed</label>
-              <input type="text" value={seed} onChange={(e) => setSeed(e.target.value)} style={{ width: '100%', padding: '8px' }} />
+              <label htmlFor="seed-input" title="Use a seed for reproducible data generation (optional)">Seed (optional) ℹ️</label>
+              <input
+                id="seed-input"
+                type="number"
+                value={seed}
+                onChange={(e) => setSeed(e.target.value)}
+                placeholder="0"
+                title="Enter a numeric seed for reproducibility"
+                style={{ width: '100%', padding: '8px' }}
+              />
             </div>
           </div>
           <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>

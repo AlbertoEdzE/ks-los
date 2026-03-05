@@ -17,20 +17,16 @@ function App() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (role === 'admin') {
-      if (username === 'admin' && password === 'admin123') {
-        setIsLoggedIn(true);
-        setLoginError('');
-      } else {
-        setLoginError('Invalid admin credentials');
-      }
+    if (username === 'admin' && password === 'admin123') {
+      setRole('admin');
+      setIsLoggedIn(true);
+      setLoginError('');
+    } else if (username === 'demo' && password === 'demo123') {
+      setRole('user');
+      setIsLoggedIn(true);
+      setLoginError('');
     } else {
-      if (username === 'demo' && password === 'demo123') {
-        setIsLoggedIn(true);
-        setLoginError('');
-      } else {
-        setLoginError('Invalid credentials. Try demo/demo123');
-      }
+      setLoginError('Invalid credentials. Try demo/demo123 or admin/admin123');
     }
   };
 
@@ -52,29 +48,6 @@ function App() {
           maxWidth: '400px'
         }}>
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <div>
-              <label style={{ display: 'block', marginBottom: '8px', color: '#666' }}>Role</label>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <label>
-                  <input
-                    type="radio"
-                    name="role"
-                    value="user"
-                    checked={role === 'user'}
-                    onChange={() => setRole('user')}
-                  /> User
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="role"
-                    value="admin"
-                    checked={role === 'admin'}
-                    onChange={() => setRole('admin')}
-                  /> Admin
-                </label>
-              </div>
-            </div>
              <div>
                <label htmlFor="login-username" style={{ display: 'block', marginBottom: '8px', color: '#666' }}>Username</label>
                <input

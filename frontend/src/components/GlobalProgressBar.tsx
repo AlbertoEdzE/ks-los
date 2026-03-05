@@ -5,11 +5,6 @@ interface Props {
   onComplete?: () => void;
 }
 
-interface ProgressState {
-  step: string;
-  progress: number;
-}
-
 const PROCESS_STEPS = [
   { id: 'intake', label: 'Intake', description: 'Gathering initial applicant information and consent.' },
   { id: 'database_lookup', label: 'Lookup', description: 'Querying external databases (e.g., CreditInfo, CCBL) for credit records.' },
@@ -68,7 +63,6 @@ const Tooltip = ({ text }: { text: string }) => {
 export const GlobalProgressBar: React.FC<Props> = ({ fullName, onComplete }) => {
   const [currentStepId, setCurrentStepId] = useState<string>('intake');
   const [completedSteps, setCompletedSteps] = useState<Set<string>>(new Set(['intake']));
-  const [error, setError] = useState(false);
 
   useEffect(() => {
     if (!fullName) return;
@@ -107,7 +101,7 @@ export const GlobalProgressBar: React.FC<Props> = ({ fullName, onComplete }) => 
     };
 
     es.onerror = () => {
-      setError(true);
+      console.error("EventSource failed");
       es.close();
     };
 

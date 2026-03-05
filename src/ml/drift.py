@@ -1,10 +1,19 @@
 import pandas as pd
-from evidently import Report
-from evidently.presets import DataDriftPreset
 import os
 from src.ml.train import generate_training_data
 
+try:
+    from evidently import Report
+    from evidently.presets import DataDriftPreset
+    EVIDENTLY_AVAILABLE = True
+except ImportError:
+    EVIDENTLY_AVAILABLE = False
+    print("Warning: 'evidently' not installed. Drift checks disabled.")
+
 def run_drift_check(output_path: str = "doc/04_documentation/phase_4/drift_report.html"):
+    if not EVIDENTLY_AVAILABLE:
+        return "Drift check skipped (evidently not installed)"
+        
     ref = generate_training_data(n_samples=1000)
     # Ensure inference log exists
     if not os.path.exists("data/inference_log.csv"):

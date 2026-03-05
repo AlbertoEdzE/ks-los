@@ -4,6 +4,73 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/infrastructure/docker-compose.yml"
 
+# Function to check and free a port
+check_and_free_port() {
+    local port=$1
+    local service_name=$2
+    
+    if lsof -i :$port >/dev/null 2>&1; then
+        echo "[KS LOS] Port $port ($service_name) is in use. Attempting to free..."
+        local pids=$(lsof -ti :$port || true)
+        if [ -n "$pids" ]; then
+            echo "$pids" | xargs kill -9 2>/dev/null || true
+            echo "[KS LOS] Freed port $port."
+        fi
+    fi
+}
+
+# Function to ensure Docker is running
+ensure_docker_running() {
+    if ! docker info > /dev/null 2>&1; then
+        echo "[KS LOS] Docker is not running."
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo "[KS LOS] Attempting to start Docker Desktop..."
+            open -a Docker
+            echo "[KS LOS] Waiting for Docker to start (this may take a minute)..."
+            local retries=0
+            while ! docker info > /dev/null 2>&1; do
+                sleep 2
+                printf "."
+                retries=$((retries+1))
+                if [ $retries -gt 60 ]; then
+                    echo ""
+                    echo "[KS LOS] Error: Timed out waiting for Docker to start."
+                    exit 1
+                fi
+            done
+            echo ""
+            echo "[KS LOS] Docker started successfully."
+        else
+            echo "[KS LOS] Error: Docker is not running. Please start it manually."
+            exit 1
+        fi
+    fi
+}
+
+ensure_docker_running
+
+echo "[KS LOS] Cleaning up previous session..."
+
+# 1. Stop Docker services
+if [ -f "$COMPOSE_FILE" ]; then
+    echo "[KS LOS] Stopping Docker containers..."
+    docker compose -f "$COMPOSE_FILE" down --remove-orphans || true
+fi
+
+# 2. Kill local processes on critical ports
+# Docker services ports (in case local services are running or docker failed to clean up)
+check_and_free_port 6379 "Redis"
+check_and_free_port 5432 "Postgres"
+check_and_free_port 5000 "MLflow"
+check_and_free_port 9090 "Prometheus"
+check_and_free_port 3000 "Grafana"
+check_and_free_port 4317 "Otel Collector"
+check_and_free_port 16686 "Jaeger"
+
+# App ports
+check_and_free_port 8000 "Backend API"
+check_and_free_port 5173 "Frontend"
+
 echo "[KS LOS] Bootstrapping observability stack (Prometheus, Grafana, MLflow)..."
 docker compose -f "$COMPOSE_FILE" up -d postgres redis mlflow prometheus grafana otel-collector jaeger
 
@@ -50,10 +117,6 @@ if [ -f "$FRONT_DIR/package.json" ]; then
     fi
     
     echo "[KS LOS] Starting frontend dev server..."
-    # Force port 5173 to be sure
-    # If 5173 is taken, Vite will try 5174, but we want to fail or kill to ensure consistency if needed
-    # Actually, let's kill anything on 5173 first to be aggressive
-    lsof -ti:5173 | xargs kill -9 2>/dev/null || true
     
     nohup npm run dev -- --port 5173 --strictPort > "$ROOT_DIR/frontend.log" 2>&1 &
     echo $! > "$ROOT_DIR/.pid_frontend"
