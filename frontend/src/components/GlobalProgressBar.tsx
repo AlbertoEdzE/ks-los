@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 
 interface Props {
-  fullName: string;
+  fullName?: string;
   onComplete?: () => void;
+  isActive?: boolean;
 }
 
 const PROCESS_STEPS = [
@@ -60,14 +61,14 @@ const Tooltip = ({ text }: { text: string }) => {
   );
 };
 
-export const GlobalProgressBar: React.FC<Props> = ({ fullName, onComplete }) => {
+export const GlobalProgressBar: React.FC<Props> = ({ fullName, onComplete, isActive = true }) => {
   const [currentStepId, setCurrentStepId] = useState<string>('intake');
   const [completedSteps, setCompletedSteps] = useState<Set<string>>(new Set(['intake']));
 
   useEffect(() => {
-    if (!fullName) return;
+    if (!fullName || !isActive) return;
 
-    // Reset state on new name
+    // Reset state on new name/activation
     setCurrentStepId('intake');
     setCompletedSteps(new Set(['intake']));
     
@@ -97,21 +98,21 @@ export const GlobalProgressBar: React.FC<Props> = ({ fullName, onComplete }) => 
         }
       } catch (e) {
         console.error("Error parsing progress event", e);
+        es.close();
       }
     };
 
-    es.onerror = () => {
-      console.error("EventSource failed");
-      es.close();
+    es.onerror = (e) => {
+        console.error("EventSource failed", e);
+        es.close();
     };
 
     return () => {
-      es.close();
+        es.close();
     };
-  }, [fullName, onComplete]);
+  }, [fullName, isActive, onComplete]);
 
-  if (!fullName) return null;
-
+  // If no name is provided, we just show the empty state
   return (
     <div 
       style={{

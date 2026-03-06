@@ -78,7 +78,7 @@ echo "[KS LOS] Starting FastAPI (backend) on :8000..."
 # Install backend dependencies
 if [ -f "$ROOT_DIR/requirements.txt" ]; then
     echo "[KS LOS] Installing backend dependencies..."
-    pip install -r "$ROOT_DIR/requirements.txt" >/dev/null 2>&1 || echo "Warning: pip install failed, continuing..."
+    pip install -r "$ROOT_DIR/requirements.txt" || echo "Warning: pip install failed, continuing..."
 fi
 
 export LOG_JSON=1

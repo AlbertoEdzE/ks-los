@@ -2,12 +2,12 @@ import React, { useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { SyntheticDataControl } from './SyntheticDataControl';
 import { ConfigurationPanel } from './ConfigurationPanel';
-import { ModelPanel } from './ModelPanel';
+import { SimulatorPanel } from './SimulatorPanel';
 import { MetricsPanel } from './MetricsPanel';
 import { TrainingPanel } from './TrainingPanel';
 
 export const AdminPanel: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'configuration' | 'synthetic' | 'model' | 'metrics' | 'training'>('synthetic');
+  const [activeTab, setActiveTab] = useState<'configuration' | 'synthetic' | 'simulator' | 'metrics' | 'training'>('synthetic');
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#ffffff' }}>
@@ -19,8 +19,8 @@ export const AdminPanel: React.FC = () => {
         <div style={{ display: activeTab === 'configuration' ? 'block' : 'none' }}>
           <ConfigurationPanel />
         </div>
-        <div style={{ display: activeTab === 'model' ? 'block' : 'none' }}>
-          <ModelPanel />
+        <div style={{ display: activeTab === 'simulator' ? 'block' : 'none' }}>
+          <SimulatorPanel />
         </div>
         <div style={{ display: activeTab === 'metrics' ? 'block' : 'none' }}>
           <MetricsPanel />

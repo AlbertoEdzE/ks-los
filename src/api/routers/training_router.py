@@ -98,6 +98,49 @@ def run_drift(_: bool = Depends(require_role("operator"))) -> Dict[str, Any]:
         drift_runs_total.inc()
         path = run_drift_check()
         log_audit("drift_run", "/training/drift", "success")
+        return {"message": "Drift check completed", "report_path": path}
+    except Exception as e:
+        logger.error(f"Drift check failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/metrics")
+def get_current_model_metrics(_: bool = Depends(require_role("viewer"))) -> Dict[str, Any]:
+    """
+    Returns metrics for the currently loaded model.
+    Since we don't store live metrics in memory persistently across restarts (unless using a DB),
+    we can return the metadata of the currently loaded model version.
+    """
+    try:
+        model = CreditRiskModel()
+        version = model.get_version()
+        if not version:
+            return {"status": "no_model_loaded"}
+            
+        # Retrieve run info for this version to get metrics logged during training
+        import mlflow
+        from src.ml.ml_config import MLFLOW_TRACKING_URI, REGISTERED_MODEL_NAME
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        client = mlflow.tracking.MlflowClient()
+        
+        versions = client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")
+        target = next((v for v in versions if v.version == version), None)
+        
+        if not target:
+             return {"status": "version_not_found", "version": version}
+
+        run = client.get_run(target.run_id)
+        metrics = run.data.metrics
+        
+        return {
+            "version": version,
+            "stage": target.current_stage,
+            "run_id": target.run_id,
+            "creation_timestamp": target.creation_timestamp,
+            "metrics": metrics
+        }
+    except Exception as e:
+        logger.error(f"Failed to get model metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
         return {"report_path": path, "report_endpoint": "/training/drift/report"}
     except Exception as e:
         logger.error(f"Failed to run drift: {e}")

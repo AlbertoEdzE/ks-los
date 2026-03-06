@@ -3,7 +3,6 @@ import type { ApplicantCreditProfile } from './types';
 import { CreditProfileView } from './components/CreditProfileView';
 import { ChatInterface } from './components/ChatInterface';
 import './App.css';
-import { MonitoringPanel } from './components/MonitoringPanel';
 import { AdminPanel } from './components/AdminPanel';
 import { GlobalProgressBar } from './components/GlobalProgressBar';
 
@@ -14,6 +13,8 @@ function App() {
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [profile, setProfile] = useState<ApplicantCreditProfile | null>(null);
+  const [candidateName, setCandidateName] = useState<string>('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,11 +106,21 @@ function App() {
       ) : (
         <>
           <div style={{ maxWidth: '1400px', margin: '0 auto 20px auto' }}>
-             {profile && <GlobalProgressBar fullName={profile.identity.full_name} />}
+            <GlobalProgressBar 
+                fullName={profile?.identity.full_name || candidateName || "Applicant"} 
+                isActive={isAnalyzing}
+            />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', maxWidth: '1400px', margin: '0 auto' }}>
             <div>
-              <ChatInterface onProfileReceived={setProfile} />
+              <ChatInterface 
+                onProfileReceived={(p) => {
+                    setProfile(p);
+                    setIsAnalyzing(false);
+                }}
+                onNameDetected={setCandidateName}
+                onAnalysisStart={() => setIsAnalyzing(true)}
+              />
             </div>
             
             <div>
@@ -131,9 +142,6 @@ function App() {
                 </div>
               )}
             </div>
-          </div>
-          <div style={{ maxWidth: '1400px', margin: '20px auto' }}>
-            <MonitoringPanel />
           </div>
         </>
       )}

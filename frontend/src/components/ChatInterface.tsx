@@ -9,9 +9,11 @@ import type { Suggestion } from './SuggestionStrip';
 
 interface Props {
   onProfileReceived: (profile: ApplicantCreditProfile) => void;
+  onNameDetected?: (name: string) => void;
+  onAnalysisStart?: () => void;
 }
 
-export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
+export const ChatInterface: React.FC<Props> = ({ onProfileReceived, onNameDetected, onAnalysisStart }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'assistant', content: 'Hello! I am your Journey Coach. I can help you generate a credit profile and assess loan eligibility. To get started, please tell me your full name, age, and territory.' }
   ]);
@@ -50,6 +52,18 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived }) => {
 
   const handleSend = async (text: string = input) => {
     if (!text.trim() || loading) return;
+
+    // Detect Name (Simple heuristic)
+    const nameMatch = text.match(/(?:my name is|i am) ([a-z ]+?)(?:,|$|\.|and)/i);
+    if (nameMatch && onNameDetected) {
+        onNameDetected(nameMatch[1].trim());
+    }
+
+    // Detect Analysis Intent (Bank statement provided)
+    const analysisKeywords = ['bank statement', 'account', 'transaction', 'csv', 'json', 'data', 'details', 'history'];
+    if (analysisKeywords.some(keyword => text.toLowerCase().includes(keyword)) && onAnalysisStart) {
+        onAnalysisStart();
+    }
 
     const userMsg: ChatMessage = { role: 'user', content: text };
     setMessages(prev => [...prev, userMsg]);

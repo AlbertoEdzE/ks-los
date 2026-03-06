@@ -31,6 +31,21 @@ interface TrainingStatus {
   duration: number;
 }
 
+interface CurrentModelMetrics {
+  version: string;
+  stage: string;
+  run_id: string;
+  creation_timestamp: number;
+  metrics: {
+    accuracy: number;
+    auc: number;
+    precision: number;
+    recall: number;
+    f1: number;
+    [key: string]: number;
+  };
+}
+
 // --- Components ---
 
 const ProgressBar: React.FC<{ progress: number; status: string }> = ({ progress, status }) => (
@@ -77,7 +92,9 @@ const ConfusionMatrix: React.FC<{ matrix: number[][] }> = ({ matrix }) => {
 };
 
 export const TrainingPanel: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'current' | 'train'>('current');
   const [activeStep, setActiveStep] = useState(1);
+  const [currentMetrics, setCurrentMetrics] = useState<CurrentModelMetrics | null>(null);
   
   // Step 1: Configuration
   const [rationale, setRationale] = useState('Periodic refresh to improve AUC and stability');
@@ -105,6 +122,28 @@ export const TrainingPanel: React.FC = () => {
       if (pollInterval.current) clearInterval(pollInterval.current);
     };
   }, []);
+
+  // Fetch current metrics on mount
+  useEffect(() => {
+    fetchCurrentMetrics();
+  }, []);
+
+  const fetchCurrentMetrics = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/training/metrics');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status && data.status !== 'success' && !data.metrics) {
+           // Handle no model loaded case gracefully
+           setCurrentMetrics(null);
+        } else {
+           setCurrentMetrics(data);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch metrics", e);
+    }
+  };
 
   const generatePlan = async () => {
     setIsGeneratingPlan(true);
@@ -163,6 +202,7 @@ export const TrainingPanel: React.FC = () => {
             if (pollInterval.current) clearInterval(pollInterval.current);
             if (data.status === 'completed') {
                // Auto advance to Analysis after short delay? No, let user click.
+               // Also refresh current metrics if deployed? No, deployment is manual step 5.
             }
           }
         }
@@ -196,6 +236,7 @@ export const TrainingPanel: React.FC = () => {
       if (res.ok) {
         setDeployStatus('deployed');
         alert('Model successfully deployed to production!');
+        fetchCurrentMetrics(); // Refresh metrics tab
       } else {
         setDeployStatus('failed');
       }
@@ -215,6 +256,7 @@ export const TrainingPanel: React.FC = () => {
       if (res.ok) {
         setRollbackStatus('rolled_back');
         setRollbackMessage(data.message);
+        fetchCurrentMetrics(); // Refresh metrics tab
       } else {
         setRollbackStatus('failed');
         setRollbackMessage(data.detail || 'Failed to rollback');
@@ -226,6 +268,58 @@ export const TrainingPanel: React.FC = () => {
   };
 
   // --- Render Steps ---
+
+  const renderCurrentMetrics = () => {
+    if (!currentMetrics) {
+        return (
+            <div style={{ textAlign: 'center', padding: '48px', color: '#718096' }}>
+                <div style={{ fontSize: '1.2rem', marginBottom: '16px' }}>No Active Model Found</div>
+                <p>Train a new model to see metrics here.</p>
+                <button 
+                    onClick={() => setActiveTab('train')}
+                    style={{ marginTop: '24px', padding: '10px 24px', backgroundColor: '#3182ce', color: 'white', borderRadius: '6px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                    Start Training
+                </button>
+            </div>
+        );
+    }
+
+    const m = currentMetrics.metrics;
+    return (
+        <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#2d3748' }}>Active Model Performance</h3>
+                <div style={{ fontSize: '0.875rem', color: '#718096' }}>
+                    Version: <span style={{ fontWeight: 'bold', color: '#2d3748' }}>{currentMetrics.version}</span> | 
+                    Run ID: <span style={{ fontFamily: 'monospace' }}>{currentMetrics.run_id.substring(0, 8)}...</span>
+                </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '32px' }}>
+                <MetricsCard label="Accuracy" value={m.accuracy ? (m.accuracy * 100).toFixed(2) + '%' : '-'} color="#38a169" />
+                <MetricsCard label="AUC" value={m.auc ? m.auc.toFixed(4) : '-'} color="#3182ce" />
+                <MetricsCard label="Precision" value={m.precision ? m.precision.toFixed(4) : '-'} />
+                <MetricsCard label="Recall" value={m.recall ? m.recall.toFixed(4) : '-'} />
+                <MetricsCard label="F1 Score" value={m.f1 ? m.f1.toFixed(4) : '-'} />
+            </div>
+
+            <div style={{ padding: '24px', backgroundColor: '#ebf8ff', borderRadius: '8px', border: '1px solid #bee3f8' }}>
+                <h4 style={{ fontWeight: '600', color: '#2c5282', marginBottom: '8px' }}>Model Status: Active</h4>
+                <p style={{ color: '#4a5568', fontSize: '0.9rem' }}>
+                    This model is currently serving all inference requests. 
+                    If performance is degrading, consider retraining.
+                </p>
+                <button 
+                    onClick={() => setActiveTab('train')}
+                    style={{ marginTop: '16px', padding: '10px 20px', backgroundColor: '#3182ce', color: 'white', borderRadius: '6px', border: 'none', cursor: 'pointer' }}
+                >
+                    Train New Version
+                </button>
+            </div>
+        </div>
+    );
+  };
 
   const renderStep1 = () => (
     <div>
@@ -500,41 +594,83 @@ export const TrainingPanel: React.FC = () => {
         <p style={{ color: '#718096' }}>End-to-end workflow for training, evaluating, and deploying the Credit Risk Model.</p>
       </header>
 
-      {/* Progress Stepper */}
-      <div style={{ display: 'flex', marginBottom: '40px', borderBottom: '1px solid #e2e8f0', paddingBottom: '20px' }}>
-        {['Configuration', 'Execution', 'Analysis', 'Testing', 'Deployment'].map((label, idx) => {
-          const stepNum = idx + 1;
-          const isActive = activeStep === stepNum;
-          const isCompleted = activeStep > stepNum;
-          return (
-            <div 
-              key={label} 
-              onClick={() => stepNum < activeStep && setActiveStep(stepNum)}
-              style={{ 
-                display: 'flex', alignItems: 'center', marginRight: '40px', cursor: stepNum < activeStep ? 'pointer' : 'default',
-                opacity: activeStep < stepNum ? 0.5 : 1
-              }}
-            >
-              <div style={{ 
-                width: '32px', height: '32px', borderRadius: '50%', 
-                backgroundColor: isActive || isCompleted ? '#3182ce' : '#cbd5e0', 
-                color: 'white', fontWeight: 'bold',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '12px'
-              }}>
-                {isCompleted ? '✓' : stepNum}
-              </div>
-              <span style={{ fontWeight: isActive ? '700' : '500', color: isActive ? '#2d3748' : '#718096' }}>{label}</span>
-            </div>
-          );
-        })}
+      {/* Tab Navigation */}
+      <div style={{ display: 'flex', borderBottom: '2px solid #e2e8f0', marginBottom: '32px' }}>
+         <button
+            onClick={() => setActiveTab('current')}
+            style={{
+                padding: '12px 24px',
+                border: 'none',
+                backgroundColor: 'transparent',
+                borderBottom: activeTab === 'current' ? '3px solid #3182ce' : '3px solid transparent',
+                color: activeTab === 'current' ? '#3182ce' : '#718096',
+                fontWeight: 'bold',
+                fontSize: '1rem',
+                cursor: 'pointer',
+                marginBottom: '-2px'
+            }}
+         >
+            Current Model Metrics
+         </button>
+         <button
+            onClick={() => setActiveTab('train')}
+            style={{
+                padding: '12px 24px',
+                border: 'none',
+                backgroundColor: 'transparent',
+                borderBottom: activeTab === 'train' ? '3px solid #3182ce' : '3px solid transparent',
+                color: activeTab === 'train' ? '#3182ce' : '#718096',
+                fontWeight: 'bold',
+                fontSize: '1rem',
+                cursor: 'pointer',
+                marginBottom: '-2px'
+            }}
+         >
+            Training Workflow
+         </button>
       </div>
 
       <div style={{ backgroundColor: 'white', padding: '32px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
-        {activeStep === 1 && renderStep1()}
-        {activeStep === 2 && renderStep2()}
-        {activeStep === 3 && renderStep3()}
-        {activeStep === 4 && renderStep4()}
-        {activeStep === 5 && renderStep5()}
+        {activeTab === 'current' && renderCurrentMetrics()}
+        
+        {activeTab === 'train' && (
+            <>
+                {/* Progress Stepper */}
+                <div style={{ display: 'flex', marginBottom: '40px', borderBottom: '1px solid #e2e8f0', paddingBottom: '20px' }}>
+                    {['Configuration', 'Execution', 'Analysis', 'Testing', 'Deployment'].map((label, idx) => {
+                    const stepNum = idx + 1;
+                    const isActive = activeStep === stepNum;
+                    const isCompleted = activeStep > stepNum;
+                    return (
+                        <div 
+                        key={label} 
+                        onClick={() => stepNum < activeStep && setActiveStep(stepNum)}
+                        style={{ 
+                            display: 'flex', alignItems: 'center', marginRight: '40px', cursor: stepNum < activeStep ? 'pointer' : 'default',
+                            opacity: activeStep < stepNum ? 0.5 : 1
+                        }}
+                        >
+                        <div style={{ 
+                            width: '32px', height: '32px', borderRadius: '50%', 
+                            backgroundColor: isActive || isCompleted ? '#3182ce' : '#cbd5e0', 
+                            color: 'white', fontWeight: 'bold',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '12px'
+                        }}>
+                            {isCompleted ? '✓' : stepNum}
+                        </div>
+                        <span style={{ fontWeight: isActive ? '700' : '500', color: isActive ? '#2d3748' : '#718096' }}>{label}</span>
+                        </div>
+                    );
+                    })}
+                </div>
+
+                {activeStep === 1 && renderStep1()}
+                {activeStep === 2 && renderStep2()}
+                {activeStep === 3 && renderStep3()}
+                {activeStep === 4 && renderStep4()}
+                {activeStep === 5 && renderStep5()}
+            </>
+        )}
       </div>
     </div>
   );

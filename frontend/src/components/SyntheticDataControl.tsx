@@ -1,5 +1,34 @@
 import React, { useState } from 'react';
 
+const ProgressBar: React.FC<{ progress: number; status: string }> = ({ progress, status }) => (
+  <div style={{ width: '100%', marginTop: '24px' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+      <span style={{ fontWeight: '500', color: '#4a5568', fontSize: '0.875rem' }}>{status}</span>
+      <span style={{ fontWeight: '600', color: '#3182ce', fontSize: '0.875rem' }}>{progress}%</span>
+    </div>
+    <div style={{ width: '100%', height: '10px', backgroundColor: '#edf2f7', borderRadius: '5px', overflow: 'hidden' }}>
+      <div style={{ 
+        width: `${progress}%`, 
+        height: '100%', 
+        backgroundColor: '#3182ce', 
+        transition: 'width 0.3s ease' 
+      }} />
+    </div>
+  </div>
+);
+
+const InputGroup: React.FC<{ label: string; children: React.ReactNode; info?: string }> = ({ label, children, info }) => (
+  <div style={{ marginBottom: '16px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px' }}>
+      <label style={{ fontSize: '0.875rem', fontWeight: '500', color: '#4a5568' }}>{label}</label>
+      {info && (
+        <span title={info} style={{ marginLeft: '6px', cursor: 'help', fontSize: '0.8rem', color: '#a0aec0' }}>ℹ️</span>
+      )}
+    </div>
+    {children}
+  </div>
+);
+
 export const SyntheticDataControl: React.FC = () => {
   const [count, setCount] = useState(100);
   const [territory, setTerritory] = useState('ECCU');
@@ -93,63 +122,113 @@ export const SyntheticDataControl: React.FC = () => {
     }
   };
 
+  const inputStyle = {
+    width: '100%',
+    padding: '10px 12px',
+    borderRadius: '6px',
+    border: '1px solid #e2e8f0',
+    fontSize: '0.95rem',
+    color: '#2d3748',
+    outline: 'none',
+    transition: 'border-color 0.2s',
+    backgroundColor: '#fff'
+  };
+
   return (
-    <div style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '16px' }}>
-      <h2 style={{ marginBottom: '12px' }}>Synthetic Data Control</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-        <div>
-          <label htmlFor="count-input">Count</label>
-          <input id="count-input" type="number" value={count} onChange={(e) => setCount(parseInt(e.target.value || '0', 10))} style={{ width: '100%', padding: '8px' }} />
-        </div>
-        <div>
-          <label htmlFor="territory-select">Territory</label>
-          <select id="territory-select" value={territory} onChange={(e) => setTerritory(e.target.value)} style={{ width: '100%', padding: '8px' }}>
+    <div style={{ padding: '24px', backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+      <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1a202c', marginBottom: '24px' }}>Synthetic Data Generator</h2>
+      
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+        <InputGroup label="Count">
+          <input 
+            type="number" 
+            value={count} 
+            onChange={(e) => setCount(parseInt(e.target.value || '0', 10))} 
+            style={inputStyle} 
+          />
+        </InputGroup>
+        
+        <InputGroup label="Territory">
+          <select 
+            value={territory} 
+            onChange={(e) => setTerritory(e.target.value)} 
+            style={inputStyle}
+          >
             {TERRITORIES.map((t) => (
               <option key={t.code} value={t.code}>
                 {t.name}
               </option>
             ))}
           </select>
-        </div>
-        <div>
-          <label htmlFor="archetype-select">Archetype</label>
-          <select id="archetype-select" value={archetype} onChange={(e) => setArchetype(e.target.value)} style={{ width: '100%', padding: '8px' }}>
+        </InputGroup>
+        
+        <InputGroup label="Archetype">
+          <select 
+            value={archetype} 
+            onChange={(e) => setArchetype(e.target.value)} 
+            style={inputStyle}
+          >
             {ARCHETYPES.map((a) => (
               <option key={a} value={a}>
                 {a}
               </option>
             ))}
           </select>
-        </div>
-        <div>
-          <label htmlFor="seed-input" title="Use a seed for reproducible data generation (optional)">Seed (optional) ℹ️</label>
+        </InputGroup>
+        
+        <InputGroup label="Seed (Optional)" info="Use a numeric seed for reproducible data generation">
           <input
-            id="seed-input"
             type="number"
             value={seed}
             onChange={(e) => setSeed(e.target.value)}
             placeholder="0"
-            title="Enter a numeric seed for reproducibility"
-            style={{ width: '100%', padding: '8px' }}
+            style={inputStyle}
           />
-        </div>
+        </InputGroup>
       </div>
-      <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
-        <button onClick={startGeneration} style={{ padding: '10px 14px', backgroundColor: '#0056b3', color: '#fff', border: 'none', borderRadius: '4px' }}>
+
+      <div style={{ display: 'flex', gap: '16px', marginTop: '24px' }}>
+        <button 
+          onClick={startGeneration} 
+          style={{ 
+            padding: '10px 24px', 
+            backgroundColor: '#3182ce', 
+            color: '#fff', 
+            border: 'none', 
+            borderRadius: '6px', 
+            fontWeight: '600',
+            cursor: 'pointer',
+            transition: 'background-color 0.2s',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#2b6cb0'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#3182ce'}
+        >
           Start Generation
         </button>
-        <button onClick={validateOutput} style={{ padding: '10px 14px', backgroundColor: '#444', color: '#fff', border: 'none', borderRadius: '4px' }}>
+        
+        <button 
+          onClick={validateOutput} 
+          style={{ 
+            padding: '10px 24px', 
+            backgroundColor: '#edf2f7', 
+            color: '#4a5568', 
+            border: '1px solid #e2e8f0', 
+            borderRadius: '6px', 
+            fontWeight: '600',
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#e2e8f0'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#edf2f7'}
+        >
           Validate Output
         </button>
       </div>
-      <div style={{ marginTop: '16px' }}>
-        <div style={{ height: '18px', backgroundColor: '#eee', borderRadius: '9px', overflow: 'hidden' }}>
-          <div style={{ width: `${progress}%`, backgroundColor: '#28a745', height: '100%' }} />
-        </div>
-        <div style={{ marginTop: '8px', color: '#666' }}>
-          Status: {status} {message && `– ${message}`}
-        </div>
-      </div>
+
+      {(status !== 'idle' || progress > 0) && (
+        <ProgressBar progress={progress} status={`${status === 'running' ? 'Generating...' : status} ${message ? `— ${message}` : ''}`} />
+      )}
     </div>
   );
 };

@@ -2,14 +2,14 @@ import React from 'react';
 
 interface SidebarProps {
   activeTab: string;
-  onTabChange: (tab: 'configuration' | 'synthetic' | 'model' | 'metrics' | 'training') => void;
+  onTabChange: (tab: 'configuration' | 'synthetic' | 'simulator' | 'metrics' | 'training') => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
   const tabs = [
     { id: 'synthetic', label: 'Synthetic Data' },
     { id: 'configuration', label: 'Configuration' },
-    { id: 'model', label: 'Model' },
+    { id: 'simulator', label: 'Simulator' },
     { id: 'metrics', label: 'Metrics' },
     { id: 'training', label: 'ML Training' },
   ];
