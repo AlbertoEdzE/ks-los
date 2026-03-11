@@ -1,9 +1,14 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from typing import Dict, Any
+import uuid
 import redis
 from datetime import datetime
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
 from src.agents.data_synthesizer.scdg import SCDG
+from src.api.routers.v2_auth import require_officer_role
 from src.shared.audit import log_audit
+from src.shared.db import LoanPhase, LoanProductCatalog, get_db
 
 router = APIRouter(prefix="/admin/seed", tags=["admin_seed"])
 
@@ -38,4 +43,55 @@ async def seed_demo_names(reset: bool = Query(False), count: int = Query(500)) -
         return {"total": total, "reset": reset}
     except Exception as e:
         log_audit(event="seed_demo_names", endpoint="/admin/seed/demo-names", status="error", meta={"error": str(e)})
+        return {"error": str(e)}
+
+
+@router.post("/v2-baseline")
+async def seed_v2_baseline(
+    reset: bool = Query(False),
+    _: bool = Depends(require_officer_role),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    try:
+        from src.api.routers.v2_phases_router import DEFAULT_PHASES
+        from src.api.routers.v2_catalog_products_router import DEFAULT_PRODUCTS
+
+        if reset:
+            db.execute(delete(LoanProductCatalog))
+            db.execute(delete(LoanPhase))
+            db.commit()
+
+        existing_phase_names = set(db.execute(select(LoanPhase.name)).scalars().all())
+        phases_added = 0
+        for phase in DEFAULT_PHASES:
+            if phase["name"] in existing_phase_names:
+                continue
+            db.add(LoanPhase(**phase))
+            phases_added += 1
+        db.commit()
+
+        existing_product_codes = set(db.execute(select(LoanProductCatalog.code)).scalars().all())
+        products_added = 0
+        for prod in DEFAULT_PRODUCTS:
+            if prod["code"] in existing_product_codes:
+                continue
+            db.add(LoanProductCatalog(id=str(uuid.uuid4()), **prod))
+            products_added += 1
+        db.commit()
+
+        phases_total = db.execute(select(LoanPhase.id)).scalars().all()
+        products_total = db.execute(select(LoanProductCatalog.id)).scalars().all()
+
+        meta = {
+            "reset": reset,
+            "phases_added": phases_added,
+            "products_added": products_added,
+            "phases_total": len(phases_total),
+            "products_total": len(products_total),
+        }
+        log_audit(event="seed_v2_baseline", endpoint="/admin/seed/v2-baseline", status="success", meta=meta)
+        return meta
+    except Exception as e:
+        db.rollback()
+        log_audit(event="seed_v2_baseline", endpoint="/admin/seed/v2-baseline", status="error", meta={"error": str(e)})
         return {"error": str(e)}

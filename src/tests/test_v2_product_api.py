@@ -173,3 +173,29 @@ def test_v2_catalog_products_list_create_patch_requires_officer():
     patched_product = patched.json()
     assert patched_product["status"] == "active"
     assert patched_product["minCreditScore"] == 720
+
+
+def test_v2_seeding_is_idempotent_for_phases_and_products():
+    phases1 = client.get("/api/phases").json()
+    phases2 = client.get("/api/phases").json()
+    assert len(phases1) == len(phases2)
+    assert {p["id"] for p in phases1} == {p["id"] for p in phases2}
+
+    products1 = client.get("/api/catalog-products", headers=OFFICER_HEADERS).json()
+    products2 = client.get("/api/catalog-products", headers=OFFICER_HEADERS).json()
+    assert len(products1) == len(products2)
+    assert {p["id"] for p in products1} == {p["id"] for p in products2}
+
+
+def test_wp_v2_007_admin_seed_v2_baseline_idempotent_and_reset():
+    reset = client.post("/admin/seed/v2-baseline?reset=true", headers=OFFICER_HEADERS)
+    assert reset.status_code == 200
+    baseline = reset.json()
+    assert baseline["phases_total"] >= 1
+    assert baseline["products_total"] >= 1
+
+    again = client.post("/admin/seed/v2-baseline", headers=OFFICER_HEADERS)
+    assert again.status_code == 200
+    payload2 = again.json()
+    assert payload2["phases_total"] == baseline["phases_total"]
+    assert payload2["products_total"] == baseline["products_total"]
