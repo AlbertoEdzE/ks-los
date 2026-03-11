@@ -93,6 +93,39 @@ class Loan(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class LoanProductCatalog(Base):
+    __tablename__ = "loan_product_catalog"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    code: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    min_amount: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    max_amount: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    min_tenure_months: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    max_tenure_months: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    base_interest_rate: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    max_interest_rate: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processing_fee_percent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    prepayment_penalty: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    min_credit_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    max_ltv: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    min_income: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    collateral_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    required_documents: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    eligibility_criteria: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    features: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    target_segment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    risk_grade: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    insurance_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
+    icon: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="banknote")
+    color: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="#0d9488")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 _engine = None
 _SessionLocal: Optional[sessionmaker[Session]] = None
 _initialized = False

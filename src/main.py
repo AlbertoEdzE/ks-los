@@ -25,6 +25,7 @@ from src.api.routers.model_manage_router import router as model_manage_router
 from src.api.routers.v2_conversations_router import router as v2_conversations_router
 from src.api.routers.v2_phases_router import router as v2_phases_router
 from src.api.routers.v2_loans_router import router as v2_loans_router
+from src.api.routers.v2_catalog_products_router import router as v2_catalog_products_router
 
 # Configure logging
 if os.getenv("LOG_JSON", "1") == "1":
@@ -82,6 +83,7 @@ app.include_router(model_manage_router)
 app.include_router(v2_conversations_router)
 app.include_router(v2_phases_router)
 app.include_router(v2_loans_router)
+app.include_router(v2_catalog_products_router)
 
 @app.middleware("http")
 async def correlation_middleware(request: Request, call_next):

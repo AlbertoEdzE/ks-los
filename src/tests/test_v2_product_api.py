@@ -124,3 +124,52 @@ def test_v2_loans_list_and_patch_requires_officer():
     assert updated["id"] == loan_id
     assert updated["status"] == "submitted"
     assert updated["notes"] == "Docs pending"
+
+
+def test_v2_catalog_products_list_create_patch_requires_officer():
+    list_no_officer = client.get("/api/catalog-products")
+    assert list_no_officer.status_code == 403
+
+    seeded = client.get("/api/catalog-products", headers=OFFICER_HEADERS)
+    assert seeded.status_code == 200
+    products = seeded.json()
+    assert isinstance(products, list)
+    assert len(products) >= 1
+
+    create_no_officer = client.post(
+        "/api/catalog-products",
+        json={"name": "Test Product", "code": "TEST-001", "category": "test"},
+    )
+    assert create_no_officer.status_code == 403
+
+    created = client.post(
+        "/api/catalog-products",
+        json={
+            "name": "Test Product",
+            "code": "TEST-001",
+            "category": "test",
+            "status": "draft",
+            "requiredDocuments": ["Doc A"],
+        },
+        headers=OFFICER_HEADERS,
+    )
+    assert created.status_code == 200
+    created_product = created.json()
+    assert created_product["code"] == "TEST-001"
+    assert created_product["requiredDocuments"] == ["Doc A"]
+
+    patch_no_officer = client.patch(
+        f"/api/catalog-products/{created_product['id']}",
+        json={"status": "active"},
+    )
+    assert patch_no_officer.status_code == 403
+
+    patched = client.patch(
+        f"/api/catalog-products/{created_product['id']}",
+        json={"status": "active", "minCreditScore": 720},
+        headers=OFFICER_HEADERS,
+    )
+    assert patched.status_code == 200
+    patched_product = patched.json()
+    assert patched_product["status"] == "active"
+    assert patched_product["minCreditScore"] == 720
