@@ -63,6 +63,36 @@ class LoanPhase(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class Loan(Base):
+    __tablename__ = "loans"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    borrower_name: Mapped[str] = mapped_column(Text, nullable=False)
+    borrower_email: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    borrower_phone: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    loan_type: Mapped[str] = mapped_column(Text, nullable=False)
+    loan_amount: Mapped[str] = mapped_column(Text, nullable=False)
+    interest_rate: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tenure: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    monthly_emi: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    purpose: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    employment_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    monthly_income: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    existing_debts: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    credit_score: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    collateral: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    down_payment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    property_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ltv: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    current_phase_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    conversation_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 _engine = None
 _SessionLocal: Optional[sessionmaker[Session]] = None
 _initialized = False
