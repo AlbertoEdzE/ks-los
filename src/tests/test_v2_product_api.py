@@ -87,12 +87,24 @@ def test_v2_conversation_patch_and_messages_flow():
     assert send.status_code == 200
     send_payload = send.json()
     assert send_payload["message"]["role"] == "assistant"
+    assert send_payload["intentAnalysis"]["intentSummary"]["purpose"] == "home"
+    assert isinstance(send_payload["intentAnalysis"]["seriousnessScore"], int)
+    assert isinstance(send_payload["intentAnalysis"]["fitScore"], int)
+    assert isinstance(send_payload["intentAnalysis"]["nextConversationAngle"], str)
 
     msgs1 = client.get(f"/api/conversations/{conv_id}/messages")
     assert msgs1.status_code == 200
     msgs = msgs1.json()
     assert any(m["role"] == "user" for m in msgs)
     assert any(m["role"] == "assistant" for m in msgs)
+
+    conv = client.get(f"/api/conversations/{conv_id}")
+    assert conv.status_code == 200
+    conv_payload = conv.json()
+    assert conv_payload["intentSummary"] is not None
+    assert conv_payload["seriousnessScore"] is not None
+    assert conv_payload["fitScore"] is not None
+    assert conv_payload["nextConversationAngle"] is not None
 
 
 def test_v2_loans_list_and_patch_requires_officer():
@@ -199,3 +211,16 @@ def test_wp_v2_007_admin_seed_v2_baseline_idempotent_and_reset():
     payload2 = again.json()
     assert payload2["phases_total"] == baseline["phases_total"]
     assert payload2["products_total"] == baseline["products_total"]
+
+
+def test_wp_v2_008_intent_summary_schema_rejects_unknown_fields():
+    from pydantic import ValidationError
+    from src.api.routers.v2_conversations_router import IntentSummary
+
+    IntentSummary.model_validate({"purpose": "home"})
+
+    try:
+        IntentSummary.model_validate({"purpose": "home", "unknownKey": "x"})
+        assert False, "Expected ValidationError"
+    except ValidationError:
+        assert True

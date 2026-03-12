@@ -1,8 +1,9 @@
 import uuid
+import re
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,21 @@ class UpdateConversationRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str
+
+
+class IntentSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    purpose: Optional[str] = None
+    urgency: Optional[str] = None
+    affordability: Optional[str] = None
+    monthlyIncome: Optional[str] = None
+    existingDebts: Optional[str] = None
+    loanAmount: Optional[str] = None
+    preferredTenure: Optional[str] = None
+    collateralAvailable: Optional[str] = None
+    employmentType: Optional[str] = None
+    creditHistory: Optional[str] = None
 
 
 def _serialize_conversation(c: Conversation) -> dict[str, Any]:
@@ -65,6 +81,139 @@ def _ensure_phases_seeded(db: Session):
     for p in DEFAULT_PHASES:
         db.add(LoanPhase(**p))
     db.commit()
+
+
+def _merge_intent(prev: Optional[dict], new: IntentSummary) -> dict:
+    base: dict = dict(prev or {})
+    for k, v in new.model_dump(exclude_none=True).items():
+        if base.get(k) in (None, "", []):
+            base[k] = v
+    return base
+
+
+def _extract_amount(text: str) -> Optional[str]:
+    t = text.lower()
+    m = re.search(r"(\$|usd\s*)?\s*(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\s*(k|m|million|thousand)?", t)
+    if not m:
+        return None
+    raw = m.group(2).replace(",", "").replace(" ", "")
+    unit = (m.group(3) or "").strip()
+    if unit in {"k", "thousand"}:
+        return f"{raw}k"
+    if unit in {"m", "million"}:
+        return f"{raw}m"
+    return raw
+
+
+def _extract_credit_score(text: str) -> Optional[str]:
+    m = re.search(r"\b(3\d{2}|4\d{2}|5\d{2}|6\d{2}|7\d{2}|8[0-4]\d|850)\b", text)
+    if not m:
+        return None
+    return m.group(1)
+
+
+def _infer_urgency(text: str) -> Optional[str]:
+    t = text.lower()
+    if any(k in t for k in ["today", "asap", "urgent", "immediately", "this week", "deadline"]):
+        return "high"
+    if any(k in t for k in ["soon", "next week", "this month"]):
+        return "medium"
+    return None
+
+
+def _infer_purpose(text: str) -> Optional[str]:
+    t = text.lower()
+    mapping = {
+        "home": ["home", "mortgage", "house", "property"],
+        "car": ["car", "vehicle", "auto"],
+        "business": ["business", "working capital", "inventory", "startup"],
+        "personal": ["personal", "medical", "education", "wedding", "travel"],
+        "debt_consolidation": ["debt", "consolidat", "refinanc"],
+    }
+    for purpose, keys in mapping.items():
+        if any(k in t for k in keys):
+            return purpose
+    return None
+
+
+def _infer_employment(text: str) -> Optional[str]:
+    t = text.lower()
+    if any(k in t for k in ["salaried", "employed", "full-time", "full time", "paycheck"]):
+        return "salaried"
+    if any(k in t for k in ["self-employed", "self employed", "freelance", "contractor", "business owner"]):
+        return "self-employed"
+    return None
+
+
+def _compute_scores(intent: dict) -> tuple[int, int]:
+    completeness_fields = [
+        "purpose",
+        "loanAmount",
+        "monthlyIncome",
+        "creditHistory",
+        "employmentType",
+        "preferredTenure",
+        "existingDebts",
+        "collateralAvailable",
+        "urgency",
+    ]
+    present = sum(1 for f in completeness_fields if intent.get(f))
+    seriousness = min(100, 10 + present * 10)
+
+    credit = intent.get("creditHistory")
+    credit_score = None
+    if isinstance(credit, str):
+        try:
+            credit_score = int(credit)
+        except ValueError:
+            credit_score = None
+    if credit_score is None:
+        fit = 55
+    elif credit_score >= 760:
+        fit = 85
+    elif credit_score >= 720:
+        fit = 75
+    elif credit_score >= 680:
+        fit = 65
+    elif credit_score >= 620:
+        fit = 50
+    else:
+        fit = 35
+    return seriousness, fit
+
+
+def _next_angle(intent: dict) -> str:
+    if not intent.get("loanAmount"):
+        return "Confirm desired loan amount and timeline."
+    if not intent.get("purpose"):
+        return "Clarify the loan purpose and preferred product type."
+    if not intent.get("monthlyIncome"):
+        return "Ask about monthly income and existing obligations."
+    if not intent.get("creditHistory"):
+        return "Ask for credit score range and any recent delinquencies."
+    if not intent.get("preferredTenure"):
+        return "Confirm preferred tenure and repayment comfort level."
+    return "Validate documents, collateral, and eligibility constraints."
+
+
+def analyze_intent_message(content: str, previous_intent: Optional[dict]) -> dict[str, Any]:
+    amount = _extract_amount(content)
+    credit = _extract_credit_score(content)
+    intent = IntentSummary(
+        purpose=_infer_purpose(content),
+        urgency=_infer_urgency(content),
+        loanAmount=amount,
+        employmentType=_infer_employment(content),
+        creditHistory=credit,
+    )
+    merged = _merge_intent(previous_intent, intent)
+    seriousness, fit = _compute_scores(merged)
+    return {
+        "intentSummary": merged,
+        "seriousnessScore": seriousness,
+        "fitScore": fit,
+        "nextConversationAngle": _next_angle(merged),
+    }
 
 
 @router.post("")
@@ -182,9 +331,26 @@ def send_message(conversation_id: str, req: SendMessageRequest, db: Session = De
     db.add(user_msg)
     db.commit()
 
+    if conv.chat_role == "borrower":
+        analysis = analyze_intent_message(req.content, conv.intent_summary)
+        conv.intent_summary = analysis["intentSummary"]
+        conv.seriousness_score = analysis["seriousnessScore"]
+        conv.fit_score = analysis["fitScore"]
+        conv.next_conversation_angle = analysis["nextConversationAngle"]
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+    else:
+        analysis = {
+            "intentSummary": conv.intent_summary,
+            "seriousnessScore": conv.seriousness_score,
+            "fitScore": conv.fit_score,
+            "nextConversationAngle": conv.next_conversation_angle,
+        }
+
     assistant_text = "Got it. I’ll ask a few quick questions to narrow down the best option for you."
     assistant_metadata = {
-        "intentAnalysis": None,
+        "intentAnalysis": analysis,
         "loanRecommendations": None,
         "phaseAction": None,
         "loanAction": None,
@@ -202,7 +368,7 @@ def send_message(conversation_id: str, req: SendMessageRequest, db: Session = De
 
     return {
         "message": _serialize_message(assistant_msg),
-        "intentAnalysis": None,
+        "intentAnalysis": analysis,
         "loanRecommendations": None,
         "phaseAction": None,
         "loanAction": None,
