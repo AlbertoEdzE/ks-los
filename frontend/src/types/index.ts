@@ -86,3 +86,89 @@ export interface ApplicantCreditProfile {
   inquiries: Inquiry[];
   flags: Flags;
 }
+
+export interface V2RecommendedProduct {
+  name: string;
+  type: string;
+  estimatedRate: string;
+  estimatedEmi: string;
+  tenure: string;
+  totalInterest: string;
+  approvalSpeed: string;
+  pros: string[];
+  cons: string[];
+  recommendation: string;
+}
+
+export interface V2ApprovalProbabilityItem {
+  title: string;
+  detail: string;
+  severity?: 'low' | 'medium' | 'high';
+  impact?: 'low' | 'medium' | 'high';
+}
+
+export interface V2ApprovalProbability {
+  probability: number;
+  band: 'low' | 'medium' | 'high';
+  topBlockers: V2ApprovalProbabilityItem[];
+  topActions: V2ApprovalProbabilityItem[];
+  inputsUsed: Record<string, unknown>;
+  method: string;
+  asOf: string;
+}
+
+export interface V2Conversation {
+  id: string;
+  borrowerName: string | null;
+  status: string;
+  chatRole: string;
+  currentPhaseId: string | null;
+  seriousnessScore: number | null;
+  fitScore: number | null;
+  intentSummary: Record<string, unknown> | null;
+  approvalProbability: V2ApprovalProbability | null;
+  recommendedProducts: V2RecommendedProduct[] | null;
+  nextConversationAngle: string | null;
+  assignedOfficer: string | null;
+  createdAt: string | null;
+}
+
+export interface V2Phase {
+  id: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  color: string | null;
+  icon: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface V2Loan {
+  id: string;
+  borrowerName: string | null;
+  borrowerEmail: string | null;
+  borrowerPhone: string | null;
+  loanType: string | null;
+  loanAmount: string | null;
+  interestRate: string | null;
+  tenure: string | null;
+  monthlyEmi: string | null;
+  purpose: string | null;
+  employmentType: string | null;
+  monthlyIncome: string | null;
+  existingDebts: string | null;
+  creditScore: string | null;
+  collateral: string | null;
+  downPayment: string | null;
+  propertyValue: string | null;
+  ltv: string | null;
+  currentPhaseId: string | null;
+  status: string | null;
+  notes: string | null;
+  conversationId: string | null;
+  createdBy: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}

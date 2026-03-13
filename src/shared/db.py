@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Iterator, Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, Text, String, JSON, create_engine, func
+from sqlalchemy import Boolean, DateTime, Integer, Text, String, JSON, create_engine, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ class Conversation(Base):
     seriousness_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     fit_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     intent_summary: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    approval_probability: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     recommended_products: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     next_conversation_angle: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     assigned_officer: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -148,6 +149,8 @@ def get_engine():
         _engine = engine
         return _engine
     except Exception as e:
+        if os.getenv("DISABLE_SQLITE_FALLBACK", "0") == "1":
+            raise
         logger.warning(f"Database connection failed; using SQLite fallback. Error: {e}")
         _engine = _create_sqlite_fallback_engine()
         return _engine
@@ -159,6 +162,7 @@ def init_db():
         return
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
+    _ensure_conversation_schema(engine)
     _SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     _initialized = True
 
@@ -178,3 +182,38 @@ def reset_db_for_tests():
     _engine = None
     _SessionLocal = None
     _initialized = False
+
+
+def _ensure_conversation_schema(engine) -> None:
+    missing_columns: list[tuple[str, str]] = []
+    try:
+        with engine.connect() as conn:
+            dialect = engine.dialect.name
+            if dialect == "postgresql":
+                rows = conn.execute(
+                    text(
+                        """
+                        select column_name
+                        from information_schema.columns
+                        where table_schema = 'public'
+                          and table_name = :table_name
+                        """
+                    ),
+                    {"table_name": "conversations"},
+                ).fetchall()
+                existing = {r[0] for r in rows}
+            elif dialect == "sqlite":
+                rows = conn.execute(text("pragma table_info(conversations)")).fetchall()
+                existing = {r[1] for r in rows}
+            else:
+                return
+
+            if "approval_probability" not in existing:
+                missing_columns.append(("approval_probability", "JSON"))
+
+            for col, col_type in missing_columns:
+                conn.execute(text(f"alter table conversations add column {col} {col_type}"))
+            if missing_columns:
+                conn.commit()
+    except Exception as e:
+        logger.warning(f"Schema ensure failed for conversations: {e}")

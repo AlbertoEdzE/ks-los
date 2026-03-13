@@ -1,6 +1,7 @@
 import uuid
 import re
 from typing import Any, Optional
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, ConfigDict
@@ -8,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.api.routers.v2_auth import OFFICER_HEADER, OFFICER_TOKEN, require_officer_role
-from src.shared.db import Conversation, LoanPhase, Message, get_db
+from src.shared.db import Conversation, LoanPhase, Message, LoanProductCatalog, get_db
 
 
 router = APIRouter(prefix="/api/conversations", tags=["v2_conversations"])
@@ -54,6 +55,7 @@ def _serialize_conversation(c: Conversation) -> dict[str, Any]:
         "seriousnessScore": c.seriousness_score,
         "fitScore": c.fit_score,
         "intentSummary": c.intent_summary,
+        "approvalProbability": c.approval_probability,
         "recommendedProducts": c.recommended_products,
         "nextConversationAngle": c.next_conversation_angle,
         "assignedOfficer": c.assigned_officer,
@@ -73,22 +75,82 @@ def _serialize_message(m: Message) -> dict[str, Any]:
 
 
 def _ensure_phases_seeded(db: Session):
-    exists = db.execute(select(LoanPhase.id).limit(1)).first()
-    if exists is not None:
-        return
     from src.api.routers.v2_phases_router import DEFAULT_PHASES
 
+    existing_names = set(db.execute(select(LoanPhase.name)).scalars().all())
+    phases_added = 0
     for p in DEFAULT_PHASES:
-        db.add(LoanPhase(**p))
-    db.commit()
+        if p["name"] in existing_names:
+            continue
+        phase_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"ks-los:v2:phase:{p['name']}"))
+        db.add(LoanPhase(id=phase_id, **p))
+        phases_added += 1
+    if phases_added:
+        db.commit()
 
 
 def _merge_intent(prev: Optional[dict], new: IntentSummary) -> dict:
-    base: dict = dict(prev or {})
+    allowed = set(IntentSummary.model_fields.keys())
+    base: dict = {k: v for k, v in (prev or {}).items() if k in allowed}
     for k, v in new.model_dump(exclude_none=True).items():
         if base.get(k) in (None, "", []):
             base[k] = v
     return base
+
+
+def _recommend_products(db: Session, intent: dict) -> list[dict[str, Any]]:
+    from src.api.routers.v2_catalog_products_router import _ensure_seeded as _ensure_products_seeded
+
+    _ensure_products_seeded(db)
+    purpose = (intent.get("purpose") or "").lower()
+    category = None
+    if purpose in {"home", "mortgage", "property"}:
+        category = "home_loan"
+    elif purpose in {"car", "auto", "vehicle"}:
+        category = "auto_loan"
+    elif purpose in {"personal", "education", "business"}:
+        category = "personal_loan"
+
+    stmt = select(LoanProductCatalog).where(LoanProductCatalog.status == "active")
+    if category is not None:
+        stmt = stmt.where(LoanProductCatalog.category == category)
+
+    rows = db.execute(stmt.order_by(LoanProductCatalog.created_at.asc())).scalars().all()
+    items: list[dict[str, Any]] = []
+    for p in rows[:2]:
+        tenure = None
+        if p.min_tenure_months is not None and p.max_tenure_months is not None:
+            tenure = f"{p.min_tenure_months}-{p.max_tenure_months} months"
+        elif p.max_tenure_months is not None:
+            tenure = f"Up to {p.max_tenure_months} months"
+        elif p.min_tenure_months is not None:
+            tenure = f"From {p.min_tenure_months} months"
+        else:
+            tenure = "Flexible"
+
+        features = list(p.features or [])
+        eligibility = list(p.eligibility_criteria or [])
+        approval_speed = "Standard"
+        if p.category == "personal_loan":
+            approval_speed = "Fast"
+        if p.category == "auto_loan":
+            approval_speed = "Quick"
+
+        items.append(
+            {
+                "name": p.name,
+                "type": p.category,
+                "estimatedRate": p.base_interest_rate or "Varies",
+                "estimatedEmi": "TBD",
+                "tenure": tenure,
+                "totalInterest": "TBD",
+                "approvalSpeed": approval_speed,
+                "pros": features[:3],
+                "cons": eligibility[:3],
+                "recommendation": p.description or "Recommended based on your stated intent.",
+            }
+        )
+    return items
 
 
 def _extract_amount(text: str) -> Optional[str]:
@@ -103,6 +165,14 @@ def _extract_amount(text: str) -> Optional[str]:
     if unit in {"m", "million"}:
         return f"{raw}m"
     return raw
+
+
+def _extract_income(text: str) -> Optional[str]:
+    t = text.lower()
+    m = re.search(r"\b(income|salary)\b\s*(is|=|:)?\s*(\$|₹|usd\s*)?\s*([\d,]+)", t)
+    if not m:
+        return None
+    return m.group(4).replace(",", "")
 
 
 def _extract_credit_score(text: str) -> Optional[str]:
@@ -198,11 +268,13 @@ def _next_angle(intent: dict) -> str:
 
 def analyze_intent_message(content: str, previous_intent: Optional[dict]) -> dict[str, Any]:
     amount = _extract_amount(content)
+    income = _extract_income(content)
     credit = _extract_credit_score(content)
     intent = IntentSummary(
         purpose=_infer_purpose(content),
         urgency=_infer_urgency(content),
         loanAmount=amount,
+        monthlyIncome=income,
         employmentType=_infer_employment(content),
         creditHistory=credit,
     )
@@ -213,6 +285,160 @@ def analyze_intent_message(content: str, previous_intent: Optional[dict]) -> dic
         "seriousnessScore": seriousness,
         "fitScore": fit,
         "nextConversationAngle": _next_angle(merged),
+    }
+
+
+def _parse_amount_to_number(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if not isinstance(v, str):
+        return None
+    s = v.strip().lower().replace(",", "").replace(" ", "")
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)(k|m)?", s)
+    if not m:
+        return None
+    base = float(m.group(1))
+    unit = m.group(2)
+    if unit == "k":
+        return base * 1_000.0
+    if unit == "m":
+        return base * 1_000_000.0
+    return base
+
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
+def _compute_approval_probability(intent: dict) -> dict[str, Any]:
+    credit_score = _parse_amount_to_number(intent.get("creditHistory"))
+    income = _parse_amount_to_number(intent.get("monthlyIncome"))
+    debts = _parse_amount_to_number(intent.get("existingDebts"))
+    loan_amount = _parse_amount_to_number(intent.get("loanAmount"))
+
+    prob = 0.55
+    blockers: list[dict[str, Any]] = []
+    actions: list[dict[str, Any]] = []
+
+    if credit_score is None:
+        blockers.append({"title": "Missing credit score", "severity": "high", "detail": "Credit score not provided yet."})
+        actions.append({"title": "Share credit score range", "impact": "high", "detail": "Provide an estimated credit score or bureau range."})
+    else:
+        if credit_score >= 760:
+            prob += 0.25
+        elif credit_score >= 720:
+            prob += 0.18
+        elif credit_score >= 680:
+            prob += 0.10
+        elif credit_score >= 620:
+            prob -= 0.05
+        else:
+            prob -= 0.20
+            blockers.append({"title": "Low credit score", "severity": "high", "detail": f"Credit score appears low ({int(credit_score)})."})
+            actions.append({"title": "Improve credit hygiene", "impact": "high", "detail": "Pay on time, reduce utilization, and resolve delinquencies."})
+
+    dti = None
+    if income is None:
+        blockers.append({"title": "Missing income", "severity": "medium", "detail": "Monthly income not provided yet."})
+        actions.append({"title": "Provide income proof", "impact": "high", "detail": "Share pay slips or bank statements to validate affordability."})
+    else:
+        if debts is not None and income > 0:
+            dti = debts / income
+            if dti > 0.6:
+                prob -= 0.15
+                blockers.append({"title": "High debt burden", "severity": "high", "detail": f"Debt-to-income is high ({dti:.0%})."})
+                actions.append({"title": "Reduce outstanding debts", "impact": "high", "detail": "Pay down revolving balances or consolidate to reduce obligations."})
+            elif dti > 0.4:
+                prob -= 0.08
+                blockers.append({"title": "Elevated obligations", "severity": "medium", "detail": f"Debt-to-income is moderate ({dti:.0%})."})
+                actions.append({"title": "Lower monthly obligations", "impact": "medium", "detail": "Reduce monthly payments to improve affordability."})
+            elif dti < 0.2:
+                prob += 0.05
+
+    loan_to_income = None
+    if loan_amount is not None and income is not None and income > 0:
+        loan_to_income = loan_amount / (income * 12.0)
+        if loan_to_income > 10:
+            prob -= 0.12
+            blockers.append(
+                {"title": "Requested amount high vs income", "severity": "medium", "detail": "Requested loan size may be aggressive relative to income."}
+            )
+            actions.append({"title": "Consider smaller amount or longer tenure", "impact": "medium", "detail": "Adjust request to fit affordability constraints."})
+        elif loan_to_income > 7:
+            prob -= 0.06
+
+    prob = _clamp(prob, 0.05, 0.95)
+    if prob >= 0.70:
+        band = "high"
+    elif prob >= 0.45:
+        band = "medium"
+    else:
+        band = "low"
+
+    return {
+        "probability": round(prob, 4),
+        "band": band,
+        "topBlockers": blockers[:3],
+        "topActions": actions[:3],
+        "inputsUsed": {
+            "creditScore": int(credit_score) if isinstance(credit_score, (int, float)) else None,
+            "monthlyIncome": income,
+            "existingDebts": debts,
+            "loanAmount": loan_amount,
+            "dti": round(dti, 4) if isinstance(dti, (int, float)) else None,
+            "loanToIncome": round(loan_to_income, 4) if isinstance(loan_to_income, (int, float)) else None,
+        },
+        "method": "heuristic_v1",
+        "asOf": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _desired_phase_index(intent: dict) -> int:
+    if intent.get("purpose") and intent.get("loanAmount"):
+        if intent.get("employmentType") and intent.get("monthlyIncome"):
+            if intent.get("creditHistory"):
+                return 3
+            return 2
+        return 1
+    return 0
+
+
+def apply_phase_guardrails(db: Session, conversation: Conversation) -> dict[str, Any] | None:
+    phases = (
+        db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc()))
+        .scalars()
+        .all()
+    )
+    if not phases:
+        return None
+
+    phase_ids = [p.id for p in phases]
+    if conversation.current_phase_id not in phase_ids:
+        conversation.current_phase_id = phases[0].id
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+        return None
+
+    current_index = phase_ids.index(conversation.current_phase_id)
+    desired_index = min(len(phases) - 1, _desired_phase_index(conversation.intent_summary or {}))
+    if desired_index <= current_index:
+        return None
+
+    next_index = min(current_index + 1, desired_index)
+    from_phase = phases[current_index]
+    to_phase = phases[next_index]
+    conversation.current_phase_id = to_phase.id
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+
+    return {
+        "fromPhaseId": from_phase.id,
+        "toPhaseId": to_phase.id,
+        "reason": "sequential_guardrail",
     }
 
 
@@ -337,9 +563,13 @@ def send_message(conversation_id: str, req: SendMessageRequest, db: Session = De
         conv.seriousness_score = analysis["seriousnessScore"]
         conv.fit_score = analysis["fitScore"]
         conv.next_conversation_angle = analysis["nextConversationAngle"]
+        approval_probability = _compute_approval_probability(analysis["intentSummary"])
+        conv.approval_probability = approval_probability
+        conv.recommended_products = _recommend_products(db, analysis["intentSummary"])
         db.add(conv)
         db.commit()
         db.refresh(conv)
+        phase_action = apply_phase_guardrails(db, conv)
     else:
         analysis = {
             "intentSummary": conv.intent_summary,
@@ -347,12 +577,15 @@ def send_message(conversation_id: str, req: SendMessageRequest, db: Session = De
             "fitScore": conv.fit_score,
             "nextConversationAngle": conv.next_conversation_angle,
         }
+        approval_probability = conv.approval_probability
+        phase_action = None
 
     assistant_text = "Got it. I’ll ask a few quick questions to narrow down the best option for you."
     assistant_metadata = {
         "intentAnalysis": analysis,
-        "loanRecommendations": None,
-        "phaseAction": None,
+        "loanRecommendations": conv.recommended_products if conv.chat_role == "borrower" else None,
+        "approvalProbability": approval_probability,
+        "phaseAction": phase_action,
         "loanAction": None,
     }
     assistant_msg = Message(
@@ -369,7 +602,8 @@ def send_message(conversation_id: str, req: SendMessageRequest, db: Session = De
     return {
         "message": _serialize_message(assistant_msg),
         "intentAnalysis": analysis,
-        "loanRecommendations": None,
-        "phaseAction": None,
+        "loanRecommendations": conv.recommended_products if conv.chat_role == "borrower" else None,
+        "approvalProbability": approval_probability,
+        "phaseAction": phase_action,
         "loanAction": None,
     }
