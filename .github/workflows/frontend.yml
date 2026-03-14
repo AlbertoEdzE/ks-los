@@ -1,9 +1,9 @@
 name: Frontend CI
 on:
   push:
-    branches: [ "poc", "main" ]
+    branches: [ "poc", "poc1", "main" ]
   pull_request:
-    branches: [ "poc", "main" ]
+    branches: [ "poc", "poc1", "main" ]
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,6 +17,7 @@ jobs:
         run: |
           if [ -f package.json ]; then
             npm ci
+            npm audit --audit-level=high
             npm run lint
             npm run test -- --run
             npm run build
