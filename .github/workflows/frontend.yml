@@ -23,3 +23,52 @@ jobs:
           else
             echo "No frontend package.json; skipping"
           fi
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install Playwright
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps
+      - name: Start backend
+        run: |
+          python -m uvicorn src.main:app --host 127.0.0.1 --port 8000 &
+      - name: Start frontend
+        working-directory: frontend
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 5174 &
+      - name: Wait for services
+        run: |
+          for i in {1..60}; do
+            if curl -sf http://127.0.0.1:8000/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          for i in {1..60}; do
+            if curl -sf http://127.0.0.1:5174 >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+      - name: Run Playwright smoke tests
+        working-directory: e2e
+        env:
+          BASE_URL: http://127.0.0.1:5174
+        run: npx playwright test admin_navigation.spec.ts --project=chromium

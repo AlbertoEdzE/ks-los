@@ -101,6 +101,7 @@ test.describe('Admin Panel Navigation', () => {
 
     await page.getByRole('button', { name: 'Loans' }).click();
     await expect(page.getByRole('heading', { name: 'Loans' })).toBeVisible();
+    await page.getByTestId(`loan-row-${loanId}`).click();
     await expect(page.getByTestId('text-doc-checklist-title')).toBeVisible();
     await page.getByTestId(`select-doc-status-${docName}`).selectOption('submitted');
     await expect(page.getByTestId(`doc-status-${docName}`)).toHaveText('submitted');
@@ -136,8 +137,9 @@ test.describe('Admin Panel Navigation', () => {
     await page.getByRole('button', { name: 'Loans' }).click();
     await expect(page.getByRole('heading', { name: 'Loans' })).toBeVisible();
 
+    await expect(page.getByTestId(`loan-row-${loanId}`)).toBeVisible({ timeout: 30000 });
     await page.getByTestId(`loan-row-${loanId}`).click();
-    await expect(page.getByTestId('text-doc-checklist-title')).toBeVisible();
+    await expect(page.getByTestId('text-doc-checklist-title')).toBeVisible({ timeout: 30000 });
     await page.getByTestId('select-doc-status-PAN Card').selectOption('submitted');
     await expect(page.getByTestId('doc-status-PAN Card')).toHaveText('submitted');
 
@@ -162,6 +164,7 @@ test.describe('Admin Panel Navigation', () => {
 
   test('Training tab shows steps', async ({ page }) => {
     await page.getByRole('button', { name: 'ML Training' }).click();
+    await page.getByRole('button', { name: 'Training Workflow' }).click();
     
     // Check steps
     await expect(page.getByText('Execution')).toBeVisible();

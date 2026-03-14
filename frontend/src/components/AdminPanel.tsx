@@ -661,27 +661,13 @@ export const AdminPanel: React.FC = () => {
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
       <div style={{ marginLeft: '250px', padding: '32px', width: 'calc(100% - 250px)' }}>
-        <div style={{ display: activeTab === 'leads' ? 'block' : 'none' }}>
-          <LeadsPanel />
-        </div>
-        <div style={{ display: activeTab === 'loans' ? 'block' : 'none' }}>
-          <LoansPanel />
-        </div>
-        <div style={{ display: activeTab === 'synthetic' ? 'block' : 'none' }}>
-          <SyntheticDataControl />
-        </div>
-        <div style={{ display: activeTab === 'configuration' ? 'block' : 'none' }}>
-          <ConfigurationPanel />
-        </div>
-        <div style={{ display: activeTab === 'simulator' ? 'block' : 'none' }}>
-          <SimulatorPanel />
-        </div>
-        <div style={{ display: activeTab === 'metrics' ? 'block' : 'none' }}>
-          <MetricsPanel />
-        </div>
-        <div style={{ display: activeTab === 'training' ? 'block' : 'none' }}>
-          <TrainingPanel />
-        </div>
+        {activeTab === 'leads' ? <LeadsPanel /> : null}
+        {activeTab === 'loans' ? <LoansPanel /> : null}
+        {activeTab === 'synthetic' ? <SyntheticDataControl /> : null}
+        {activeTab === 'configuration' ? <ConfigurationPanel /> : null}
+        {activeTab === 'simulator' ? <SimulatorPanel /> : null}
+        {activeTab === 'metrics' ? <MetricsPanel /> : null}
+        {activeTab === 'training' ? <TrainingPanel /> : null}
       </div>
     </div>
   );
