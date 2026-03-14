@@ -9,7 +9,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.api.routers.v2_auth import OFFICER_HEADER, OFFICER_TOKEN, require_officer_role
+from src.shared.audit import log_audit
 from src.shared.db import Conversation, LoanPhase, Message, LoanProductCatalog, get_db
+from src.shared.metrics import request_counter, request_errors_total
 
 
 router = APIRouter(prefix="/api/conversations", tags=["v2_conversations"])
@@ -448,8 +450,16 @@ def create_conversation(
     db: Session = Depends(get_db),
     x_officer_role: str | None = Header(default=None, alias=OFFICER_HEADER),
 ):
+    request_counter.labels(endpoint="/api/conversations").inc()
     wants_officer = (req.chatRole or "").lower() == "officer"
     if wants_officer and x_officer_role != OFFICER_TOKEN:
+        request_errors_total.labels(endpoint="/api/conversations").inc()
+        log_audit(
+            event="v2_conversation_create",
+            endpoint="/api/conversations",
+            status="forbidden",
+            meta={"chatRole": req.chatRole},
+        )
         raise HTTPException(status_code=403, detail="Officer access required")
     chat_role = "officer" if wants_officer else "borrower"
 
@@ -485,6 +495,12 @@ def create_conversation(
     db.add(assistant_msg)
     db.commit()
 
+    log_audit(
+        event="v2_conversation_create",
+        endpoint="/api/conversations",
+        status="success",
+        meta={"conversationId": conversation.id, "chatRole": chat_role},
+    )
     return {"conversation": _serialize_conversation(conversation), "greeting": greeting}
 
 
@@ -493,11 +509,17 @@ def list_conversations(_: bool = Depends(require_officer_role), db: Session = De
     rows = db.execute(select(Conversation).order_by(Conversation.created_at.desc())).scalars().all()
     return [_serialize_conversation(c) for c in rows]
 
+    request_counter.labels(endpoint="/api/conversations").inc()
+
+@router.get("/{conversation_id}")
+
 
 @router.get("/{conversation_id}")
 def get_conversation(conversation_id: str, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/conversations/{conversation_id}").inc()
     conv = db.get(Conversation, conversation_id)
     if not conv:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}").inc()
         raise HTTPException(status_code=404, detail="Conversation not found")
     return _serialize_conversation(conv)
 
@@ -509,8 +531,16 @@ def patch_conversation(
     _: bool = Depends(require_officer_role),
     db: Session = Depends(get_db),
 ):
+    request_counter.labels(endpoint="/api/conversations/{conversation_id}").inc()
     conv = db.get(Conversation, conversation_id)
     if not conv:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}").inc()
+        log_audit(
+            event="v2_conversation_patch",
+            endpoint="/api/conversations/{conversation_id}",
+            status="not_found",
+            meta={"conversationId": conversation_id},
+        )
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     if req.status is not None:
@@ -525,11 +555,18 @@ def patch_conversation(
     db.add(conv)
     db.commit()
     db.refresh(conv)
+    log_audit(
+        event="v2_conversation_patch",
+        endpoint="/api/conversations/{conversation_id}",
+        status="success",
+        meta={"conversationId": conversation_id},
+    )
     return _serialize_conversation(conv)
 
 
 @router.get("/{conversation_id}/messages")
 def list_messages(conversation_id: str, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
     rows = (
         db.execute(select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc()))
         .scalars()
@@ -540,8 +577,16 @@ def list_messages(conversation_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{conversation_id}/messages")
 def send_message(conversation_id: str, req: SendMessageRequest, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
     conv = db.get(Conversation, conversation_id)
     if not conv:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
+        log_audit(
+            event="v2_message_send",
+            endpoint="/api/conversations/{conversation_id}/messages",
+            status="not_found",
+            meta={"conversationId": conversation_id},
+        )
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     if not req.content or not req.content.strip():
@@ -599,6 +644,12 @@ def send_message(conversation_id: str, req: SendMessageRequest, db: Session = De
     db.commit()
     db.refresh(assistant_msg)
 
+    log_audit(
+        event="v2_message_send",
+        endpoint="/api/conversations/{conversation_id}/messages",
+        status="success",
+        meta={"conversationId": conversation_id, "chatRole": conv.chat_role},
+    )
     return {
         "message": _serialize_message(assistant_msg),
         "intentAnalysis": analysis,

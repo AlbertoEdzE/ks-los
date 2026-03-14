@@ -6,7 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.api.routers.v2_auth import require_officer_role
+from src.shared.audit import log_audit
 from src.shared.db import LoanPhase, get_db
+from src.shared.metrics import request_counter, request_errors_total
 
 
 router = APIRouter(prefix="/api/phases", tags=["v2_phases"])
@@ -128,6 +130,7 @@ def _validate_phase_actions(raw: list[dict[str, Any]]) -> list[PhaseAction]:
 
 @router.get("")
 def list_phases(db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/phases").inc()
     _ensure_seeded(db)
     rows = db.execute(select(LoanPhase).order_by(LoanPhase.sort_order.asc())).scalars().all()
     return [
@@ -148,6 +151,7 @@ def list_phases(db: Session = Depends(get_db)):
 
 @router.get("/active")
 def list_active_phases(db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/phases/active").inc()
     _ensure_seeded(db)
     rows = (
         db.execute(
@@ -174,6 +178,7 @@ def list_active_phases(db: Session = Depends(get_db)):
 
 @router.post("/actions", dependencies=[Depends(require_officer_role)])
 def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/phases/actions").inc()
     _ensure_seeded(db)
     actions = _validate_phase_actions(req.actions)
 
@@ -193,6 +198,13 @@ def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db
         if isinstance(a, SetPhaseActiveAction):
             phase = db.get(LoanPhase, a.phaseId)
             if not phase:
+                request_errors_total.labels(endpoint="/api/phases/actions").inc()
+                log_audit(
+                    event="v2_phase_actions",
+                    endpoint="/api/phases/actions",
+                    status="not_found",
+                    meta={"phaseId": a.phaseId},
+                )
                 raise HTTPException(status_code=404, detail="Phase not found")
             phase.is_active = a.isActive
             db.add(phase)
@@ -203,8 +215,10 @@ def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db
             rows = db.execute(select(LoanPhase)).scalars().all()
             phases_by_id = {p.id: p for p in rows}
             if len(a.phaseIds) != len(phases_by_id):
+                request_errors_total.labels(endpoint="/api/phases/actions").inc()
                 raise HTTPException(status_code=400, detail="phaseIds must include all phases")
             if set(a.phaseIds) != set(phases_by_id.keys()):
+                request_errors_total.labels(endpoint="/api/phases/actions").inc()
                 raise HTTPException(status_code=400, detail="phaseIds must match existing phases")
 
             for idx, pid in enumerate(a.phaseIds, start=1):
@@ -213,6 +227,8 @@ def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db
             db.commit()
             continue
 
+        request_errors_total.labels(endpoint="/api/phases/actions").inc()
         raise HTTPException(status_code=400, detail="Unsupported action")
 
+    log_audit(event="v2_phase_actions", endpoint="/api/phases/actions", status="success", meta={"count": len(actions)})
     return {"ok": True}

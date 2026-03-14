@@ -7,7 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.api.routers.v2_auth import require_officer_role
+from src.shared.audit import log_audit
 from src.shared.db import LoanProductCatalog, get_db
+from src.shared.metrics import request_counter, request_errors_total
 
 
 router = APIRouter(
@@ -202,6 +204,7 @@ class PatchCatalogProductRequest(BaseModel):
 
 @router.get("")
 def list_catalog_products(db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/catalog-products").inc()
     _ensure_seeded(db)
     rows = db.execute(select(LoanProductCatalog).order_by(LoanProductCatalog.created_at.desc())).scalars().all()
     return [_serialize_product(p) for p in rows]
@@ -209,6 +212,7 @@ def list_catalog_products(db: Session = Depends(get_db)):
 
 @router.post("")
 def create_catalog_product(req: CreateCatalogProductRequest, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/catalog-products").inc()
     _ensure_seeded(db)
     product = LoanProductCatalog(
         id=str(uuid.uuid4()),
@@ -242,16 +246,37 @@ def create_catalog_product(req: CreateCatalogProductRequest, db: Session = Depen
         db.add(product)
         db.commit()
         db.refresh(product)
+        log_audit(
+            event="v2_catalog_product_create",
+            endpoint="/api/catalog-products",
+            status="success",
+            meta={"productId": product.id, "code": product.code, "statusValue": product.status},
+        )
         return _serialize_product(product)
     except Exception as e:
         db.rollback()
+        request_errors_total.labels(endpoint="/api/catalog-products").inc()
+        log_audit(
+            event="v2_catalog_product_create",
+            endpoint="/api/catalog-products",
+            status="error",
+            meta={"error": str(e)},
+        )
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.patch("/{product_id}")
 def patch_catalog_product(product_id: str, req: PatchCatalogProductRequest, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/catalog-products/{product_id}").inc()
     product = db.get(LoanProductCatalog, product_id)
     if not product:
+        request_errors_total.labels(endpoint="/api/catalog-products/{product_id}").inc()
+        log_audit(
+            event="v2_catalog_product_patch",
+            endpoint="/api/catalog-products/{product_id}",
+            status="not_found",
+            meta={"productId": product_id},
+        )
         raise HTTPException(status_code=404, detail="Product not found")
 
     if req.name is not None:
@@ -309,8 +334,20 @@ def patch_catalog_product(product_id: str, req: PatchCatalogProductRequest, db: 
         db.add(product)
         db.commit()
         db.refresh(product)
+        log_audit(
+            event="v2_catalog_product_patch",
+            endpoint="/api/catalog-products/{product_id}",
+            status="success",
+            meta={"productId": product_id, "code": product.code, "statusValue": product.status},
+        )
         return _serialize_product(product)
     except Exception as e:
         db.rollback()
+        request_errors_total.labels(endpoint="/api/catalog-products/{product_id}").inc()
+        log_audit(
+            event="v2_catalog_product_patch",
+            endpoint="/api/catalog-products/{product_id}",
+            status="error",
+            meta={"productId": product_id, "error": str(e)},
+        )
         raise HTTPException(status_code=400, detail=str(e))
-

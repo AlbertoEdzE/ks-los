@@ -7,7 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.api.routers.v2_auth import require_officer_role
+from src.shared.audit import log_audit
 from src.shared.db import Loan, LoanProductCatalog, get_db
+from src.shared.metrics import request_counter, request_errors_total
 
 
 router = APIRouter(prefix="/api/loans", tags=["v2_loans"], dependencies=[Depends(require_officer_role)])
@@ -249,19 +251,23 @@ def _serialize_loan(l: Loan) -> dict[str, Any]:
 
 @router.get("")
 def list_loans(db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/loans").inc()
     rows = db.execute(select(Loan).order_by(Loan.updated_at.desc(), Loan.created_at.desc())).scalars().all()
     return [_serialize_loan(l) for l in rows]
 
 @router.get("/{loan_id}")
 def get_loan(loan_id: str, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/loans/{loan_id}").inc()
     loan = db.get(Loan, loan_id)
     if not loan:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}").inc()
         raise HTTPException(status_code=404, detail="Loan not found")
     return _serialize_loan(loan)
 
 
 @router.post("")
 def create_loan(req: CreateLoanRequest, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/loans").inc()
     product = _get_product_by_code(db, req.catalogProductCode) if req.catalogProductCode else None
     checklist = _build_document_checklist(req.catalogProductCode, product.required_documents if product else None)
 
@@ -278,11 +284,18 @@ def create_loan(req: CreateLoanRequest, db: Session = Depends(get_db)):
     db.add(loan)
     db.commit()
     db.refresh(loan)
+    log_audit(
+        event="v2_loan_create",
+        endpoint="/api/loans",
+        status="success",
+        meta={"loanId": loan.id, "catalogProductCode": loan.catalog_product_code},
+    )
     return _serialize_loan(loan)
 
 
 @router.post("/actions")
 def execute_loan_actions(req: LoanActionsRequest, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/loans/actions").inc()
     actions = _validate_loan_actions(req.actions)
     results: list[dict[str, Any]] = []
 
@@ -310,6 +323,7 @@ def execute_loan_actions(req: LoanActionsRequest, db: Session = Depends(get_db))
         if isinstance(a, UpdateLoanAction):
             loan = db.get(Loan, a.loanId)
             if not loan:
+                request_errors_total.labels(endpoint="/api/loans/actions").inc()
                 raise HTTPException(status_code=404, detail="Loan not found")
             _apply_patch(loan, a.patch, db)
             db.add(loan)
@@ -318,8 +332,10 @@ def execute_loan_actions(req: LoanActionsRequest, db: Session = Depends(get_db))
             results.append({"type": a.type, "loanId": loan.id})
             continue
 
+        request_errors_total.labels(endpoint="/api/loans/actions").inc()
         raise HTTPException(status_code=400, detail="Unsupported action")
 
+    log_audit(event="v2_loan_actions", endpoint="/api/loans/actions", status="success", meta={"count": len(results)})
     return {"results": results}
 
 
@@ -327,32 +343,42 @@ def execute_loan_actions(req: LoanActionsRequest, db: Session = Depends(get_db))
 
 @router.patch("/{loan_id}")
 def patch_loan(loan_id: str, req: PatchLoanRequest, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/loans/{loan_id}").inc()
     loan = db.get(Loan, loan_id)
     if not loan:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}").inc()
+        log_audit(event="v2_loan_patch", endpoint="/api/loans/{loan_id}", status="not_found", meta={"loanId": loan_id})
         raise HTTPException(status_code=404, detail="Loan not found")
 
     _apply_patch(loan, req, db)
     db.add(loan)
     db.commit()
     db.refresh(loan)
+    log_audit(event="v2_loan_patch", endpoint="/api/loans/{loan_id}", status="success", meta={"loanId": loan_id})
     return _serialize_loan(loan)
 
 
 @router.patch("/{loan_id}/documents")
 def patch_loan_document(loan_id: str, req: PatchLoanDocumentRequest, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/loans/{loan_id}/documents").inc()
     if req.status not in _DOC_STATUSES:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents").inc()
         raise HTTPException(status_code=400, detail="Invalid document status")
 
     loan = db.get(Loan, loan_id)
     if not loan:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents").inc()
+        log_audit(event="v2_loan_document_patch", endpoint="/api/loans/{loan_id}/documents", status="not_found", meta={"loanId": loan_id})
         raise HTTPException(status_code=404, detail="Loan not found")
 
     checklist = loan.document_checklist
     if not isinstance(checklist, dict) or not isinstance(checklist.get("items"), list):
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents").inc()
         raise HTTPException(status_code=400, detail="Loan has no document checklist")
 
     target = req.name.strip()
     if not target:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents").inc()
         raise HTTPException(status_code=400, detail="Document name is required")
 
     updated = False
@@ -368,10 +394,17 @@ def patch_loan_document(loan_id: str, req: PatchLoanDocumentRequest, db: Session
             updated_items.append({**item})
 
     if not updated:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents").inc()
         raise HTTPException(status_code=400, detail="Document not found in checklist")
 
     loan.document_checklist = {**checklist, "items": updated_items, "asOf": now}
     db.add(loan)
     db.commit()
     db.refresh(loan)
+    log_audit(
+        event="v2_loan_document_patch",
+        endpoint="/api/loans/{loan_id}/documents",
+        status="success",
+        meta={"loanId": loan_id, "document": target, "statusValue": req.status},
+    )
     return _serialize_loan(loan)
