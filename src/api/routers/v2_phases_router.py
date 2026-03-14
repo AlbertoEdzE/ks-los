@@ -1,7 +1,11 @@
-from fastapi import APIRouter, Depends
+from typing import Any, Optional, Literal, Annotated, Union
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.api.routers.v2_auth import require_officer_role
 from src.shared.db import LoanPhase, get_db
 
 
@@ -90,6 +94,38 @@ def _ensure_seeded(db: Session):
     _seeded = True
 
 
+class PhaseActionsRequest(BaseModel):
+    actions: list[dict[str, Any]]
+
+
+class AddPhaseAction(BaseModel):
+    type: Literal["add_phase"]
+    name: str
+    description: Optional[str] = None
+
+
+class SetPhaseActiveAction(BaseModel):
+    type: Literal["set_phase_active"]
+    phaseId: str
+    isActive: bool
+
+
+class ReorderPhasesAction(BaseModel):
+    type: Literal["reorder_phases"]
+    phaseIds: list[str]
+
+
+PhaseAction = Annotated[Union[AddPhaseAction, SetPhaseActiveAction, ReorderPhasesAction], Field(discriminator="type")]
+
+
+def _validate_phase_actions(raw: list[dict[str, Any]]) -> list[PhaseAction]:
+    adapter = TypeAdapter(list[PhaseAction])
+    try:
+        return adapter.validate_python(raw)
+    except ValidationError as e:
+        raise ValueError(e.errors())
+
+
 @router.get("")
 def list_phases(db: Session = Depends(get_db)):
     _ensure_seeded(db)
@@ -135,3 +171,48 @@ def list_active_phases(db: Session = Depends(get_db)):
         for r in rows
     ]
 
+
+@router.post("/actions", dependencies=[Depends(require_officer_role)])
+def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db)):
+    _ensure_seeded(db)
+    actions = _validate_phase_actions(req.actions)
+
+    for a in actions:
+        if isinstance(a, AddPhaseAction):
+            max_order = db.execute(select(LoanPhase.sort_order).order_by(LoanPhase.sort_order.desc()).limit(1)).scalar_one_or_none() or 0
+            phase = LoanPhase(
+                name=a.name,
+                description=a.description,
+                sort_order=max_order + 1,
+                is_active=True,
+            )
+            db.add(phase)
+            db.commit()
+            continue
+
+        if isinstance(a, SetPhaseActiveAction):
+            phase = db.get(LoanPhase, a.phaseId)
+            if not phase:
+                raise HTTPException(status_code=404, detail="Phase not found")
+            phase.is_active = a.isActive
+            db.add(phase)
+            db.commit()
+            continue
+
+        if isinstance(a, ReorderPhasesAction):
+            rows = db.execute(select(LoanPhase)).scalars().all()
+            phases_by_id = {p.id: p for p in rows}
+            if len(a.phaseIds) != len(phases_by_id):
+                raise HTTPException(status_code=400, detail="phaseIds must include all phases")
+            if set(a.phaseIds) != set(phases_by_id.keys()):
+                raise HTTPException(status_code=400, detail="phaseIds must match existing phases")
+
+            for idx, pid in enumerate(a.phaseIds, start=1):
+                phases_by_id[pid].sort_order = idx
+                db.add(phases_by_id[pid])
+            db.commit()
+            continue
+
+        raise HTTPException(status_code=400, detail="Unsupported action")
+
+    return {"ok": True}

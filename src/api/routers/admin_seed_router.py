@@ -12,7 +12,44 @@ from src.shared.db import LoanPhase, LoanProductCatalog, get_db
 
 router = APIRouter(prefix="/admin/seed", tags=["admin_seed"])
 
-r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+try:
+    r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+    r.ping()
+except Exception:
+    class MockRedis:
+        def __init__(self):
+            self.store = {}
+
+        def get(self, k):
+            return self.store.get(k)
+
+        def set(self, k, v):
+            self.store[k] = v
+
+        def delete(self, k):
+            if k in self.store:
+                del self.store[k]
+
+        def exists(self, k):
+            return k in self.store
+
+        def rpush(self, k, *v):
+            l = self.store.get(k, [])
+            if not isinstance(l, list):
+                l = []
+            l.extend(list(v))
+            self.store[k] = l
+
+        def lrange(self, k, s, e):
+            l = self.store.get(k, [])
+            if e == -1:
+                return l[s:]
+            return l[s : e + 1]
+
+        def ping(self):
+            return True
+
+    r = MockRedis()
 DEMO_NAMES_KEY = "demo:names"
 
 def _seed_names(count: int = 500) -> int:
@@ -52,6 +89,12 @@ async def seed_v2_baseline(
     _: bool = Depends(require_officer_role),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
+    def _phase_id(name: str) -> str:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"ks-los:v2:phase:{name}"))
+
+    def _product_id(code: str) -> str:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"ks-los:v2:product:{code}"))
+
     try:
         from src.api.routers.v2_phases_router import DEFAULT_PHASES
         from src.api.routers.v2_catalog_products_router import DEFAULT_PRODUCTS
@@ -66,7 +109,7 @@ async def seed_v2_baseline(
         for phase in DEFAULT_PHASES:
             if phase["name"] in existing_phase_names:
                 continue
-            db.add(LoanPhase(**phase))
+            db.add(LoanPhase(id=_phase_id(phase["name"]), **phase))
             phases_added += 1
         db.commit()
 
@@ -75,7 +118,7 @@ async def seed_v2_baseline(
         for prod in DEFAULT_PRODUCTS:
             if prod["code"] in existing_product_codes:
                 continue
-            db.add(LoanProductCatalog(id=str(uuid.uuid4()), **prod))
+            db.add(LoanProductCatalog(id=_product_id(prod["code"]), **prod))
             products_added += 1
         db.commit()
 

@@ -67,12 +67,12 @@ export const GlobalProgressBar: React.FC<Props> = ({ fullName, onComplete, isAct
 
   useEffect(() => {
     if (!fullName || !isActive) return;
-
-    // Reset state on new name/activation
-    setCurrentStepId('intake');
-    setCompletedSteps(new Set(['intake']));
-    
     const es = new EventSource(`http://localhost:8000/chat/progress/stream?full_name=${encodeURIComponent(fullName)}`);
+
+    es.onopen = () => {
+      setCurrentStepId('intake');
+      setCompletedSteps(new Set(['intake']));
+    };
     
     es.onmessage = (ev) => {
       try {
@@ -190,4 +190,3 @@ export const GlobalProgressBar: React.FC<Props> = ({ fullName, onComplete, isAct
     </div>
   );
 };
-

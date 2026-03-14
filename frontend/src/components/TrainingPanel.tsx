@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Types ---
 interface TrainingPlan {
-  hyperparameters: any;
+  hyperparameters: Record<string, unknown>;
   n_samples: number;
   notes: string;
 }
@@ -19,6 +19,17 @@ interface TrainingResult {
   dataset_size: number;
   train_size: number;
   test_size: number;
+}
+
+interface BatchTestResult {
+  input: {
+    credit_score?: number;
+    total_debt?: number;
+    [key: string]: unknown;
+  };
+  prediction: number;
+  probability: number;
+  risk_level: string;
 }
 
 interface TrainingStatus {
@@ -109,7 +120,7 @@ export const TrainingPanel: React.FC = () => {
 
   // Step 4: Testing
   const [testInput, setTestInput] = useState('{\n  "age": 35,\n  "credit_score": 720,\n  "utilization_ratio": 0.3,\n  "total_debt": 5000,\n  "history_length_months": 48,\n  "derogatory_marks": 0,\n  "thin_file_flag": 0\n}');
-  const [testResults, setTestResults] = useState<any[]>([]);
+  const [testResults, setTestResults] = useState<BatchTestResult[]>([]);
 
   // Step 5: Deployment
   const [deployStatus, setDeployStatus] = useState<'idle' | 'deploying' | 'deployed' | 'failed'>('idle');
@@ -222,9 +233,9 @@ export const TrainingPanel: React.FC = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        setTestResults(data.results);
+        setTestResults(Array.isArray(data.results) ? (data.results as BatchTestResult[]) : []);
       }
-    } catch (e) {
+    } catch {
       alert('Invalid JSON input or API error');
     }
   };
@@ -240,7 +251,7 @@ export const TrainingPanel: React.FC = () => {
       } else {
         setDeployStatus('failed');
       }
-    } catch (e) {
+    } catch {
       setDeployStatus('failed');
     }
   };
@@ -261,7 +272,7 @@ export const TrainingPanel: React.FC = () => {
         setRollbackStatus('failed');
         setRollbackMessage(data.detail || 'Failed to rollback');
       }
-    } catch (e) {
+    } catch {
       setRollbackStatus('failed');
       setRollbackMessage('Network error');
     }
@@ -496,7 +507,7 @@ export const TrainingPanel: React.FC = () => {
                   </td>
                   <td style={{ padding: '8px' }}>{(res.probability * 100).toFixed(1)}%</td>
                   <td style={{ padding: '8px', fontFamily: 'monospace', fontSize: '0.75rem' }}>
-                    Credit: {res.input.credit_score}, Debt: {res.input.total_debt}
+                    Credit: {typeof res.input.credit_score === 'number' ? res.input.credit_score : '—'}, Debt: {typeof res.input.total_debt === 'number' ? res.input.total_debt : '—'}
                   </td>
                 </tr>
               ))}

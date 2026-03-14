@@ -12,12 +12,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Build frontend
+      - name: Lint, test, and build frontend
         working-directory: frontend
         run: |
           if [ -f package.json ]; then
             npm ci
-            npm run build || npm run build
+            npm run lint
+            npm run test -- --run
+            npm run build
           else
             echo "No frontend package.json; skipping"
           fi

@@ -11,7 +11,9 @@ const SuggestionsToggle: React.FC = () => {
           const data = await r.json();
           setEnabled(!!data.value);
         }
-      } catch {}
+      } catch (err) {
+        console.error('Failed to load suggestions configuration', err);
+      }
     })();
   }, []);
 
@@ -22,7 +24,9 @@ const SuggestionsToggle: React.FC = () => {
         const data = await r.json();
         setEnabled(!!data.value);
       }
-    } catch {}
+    } catch (err) {
+      console.error('Failed to update suggestions configuration', err);
+    }
   };
 
   return (

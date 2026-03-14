@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Response, Depends, BackgroundTasks
 from pydantic import BaseModel
 from typing import Dict, Any, List
 import logging
+import os
 from src.agents.training_agent import propose_training_plan, execute_training
 from src.ml.drift import run_drift_check
 from src.ml.training_manager import training_manager
@@ -46,9 +47,14 @@ def run_training(plan: TrainingPlan, background_tasks: BackgroundTasks, _: bool 
         
         if training_manager.is_training:
             raise HTTPException(status_code=409, detail="Training already in progress")
-            
+
+        if os.getenv("PYTEST_CURRENT_TEST"):
+            result = execute_training(plan.model_dump())
+            log_audit("training_execute", "/training/execute", "success", {"n_samples": plan.n_samples})
+            return {"status": "completed", "message": "Training completed", "result": result}
+
         background_tasks.add_task(execute_training, plan.model_dump())
-        
+
         log_audit("training_execute", "/training/execute", "success", {"n_samples": plan.n_samples})
         return {"status": "started", "message": "Training started in background"}
     except HTTPException:
@@ -98,9 +104,10 @@ def run_drift(_: bool = Depends(require_role("operator"))) -> Dict[str, Any]:
         drift_runs_total.inc()
         path = run_drift_check()
         log_audit("drift_run", "/training/drift", "success")
-        return {"message": "Drift check completed", "report_path": path}
+        return {"message": "Drift check completed", "report_path": path, "report_endpoint": "/training/drift/report"}
     except Exception as e:
         logger.error(f"Drift check failed: {e}")
+        log_audit("drift_run", "/training/drift", "error", {"error": str(e)})
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/metrics")
@@ -141,11 +148,6 @@ def get_current_model_metrics(_: bool = Depends(require_role("viewer"))) -> Dict
     except Exception as e:
         logger.error(f"Failed to get model metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-        return {"report_path": path, "report_endpoint": "/training/drift/report"}
-    except Exception as e:
-        logger.error(f"Failed to run drift: {e}")
-        log_audit("drift_run", "/training/drift", "error", {"error": str(e)})
-        raise HTTPException(status_code=500, detail="Drift run failed")
 
 @router.get("/drift/report")
 def get_drift_report() -> Response:

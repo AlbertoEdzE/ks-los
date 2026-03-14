@@ -86,6 +86,8 @@ class Loan(Base):
     property_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     ltv: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     current_phase_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    catalog_product_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    document_checklist: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     conversation_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -163,6 +165,7 @@ def init_db():
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
     _ensure_conversation_schema(engine)
+    _ensure_loans_schema(engine)
     _SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     _initialized = True
 
@@ -217,3 +220,40 @@ def _ensure_conversation_schema(engine) -> None:
                 conn.commit()
     except Exception as e:
         logger.warning(f"Schema ensure failed for conversations: {e}")
+
+
+def _ensure_loans_schema(engine) -> None:
+    missing_columns: list[tuple[str, str]] = []
+    try:
+        with engine.connect() as conn:
+            dialect = engine.dialect.name
+            if dialect == "postgresql":
+                rows = conn.execute(
+                    text(
+                        """
+                        select column_name
+                        from information_schema.columns
+                        where table_schema = 'public'
+                          and table_name = :table_name
+                        """
+                    ),
+                    {"table_name": "loans"},
+                ).fetchall()
+                existing = {r[0] for r in rows}
+            elif dialect == "sqlite":
+                rows = conn.execute(text("pragma table_info(loans)")).fetchall()
+                existing = {r[1] for r in rows}
+            else:
+                return
+
+            if "catalog_product_code" not in existing:
+                missing_columns.append(("catalog_product_code", "TEXT"))
+            if "document_checklist" not in existing:
+                missing_columns.append(("document_checklist", "JSON"))
+
+            for col, col_type in missing_columns:
+                conn.execute(text(f"alter table loans add column {col} {col_type}"))
+            if missing_columns:
+                conn.commit()
+    except Exception as e:
+        logger.warning(f"Schema ensure failed for loans: {e}")

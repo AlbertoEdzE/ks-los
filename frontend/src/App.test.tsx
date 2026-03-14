@@ -68,7 +68,6 @@ describe('App', () => {
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'admin123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Login' }));
 
-    fireEvent.click(await screen.findByRole('link', { name: 'Dashboard' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Leads' }));
 
     await screen.findByTestId('text-leads-title');

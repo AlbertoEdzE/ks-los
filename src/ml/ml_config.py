@@ -1,8 +1,15 @@
 import os
+import sys
+import tempfile
+import uuid
 
 # MLOps Configuration
 # Local SQLite backend for simplicity and portability (Scientific Rigor: Reproducibility)
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+if "pytest" in sys.modules:
+    _mlflow_db = os.path.join(tempfile.gettempdir(), f"ks_los_mlflow_{uuid.uuid4().hex}.db")
+    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{_mlflow_db}")
+else:
+    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
 EXPERIMENT_NAME = "credit_risk_model_v2"
 
 # Model Parameters

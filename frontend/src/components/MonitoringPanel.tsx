@@ -18,11 +18,11 @@ export function MonitoringPanel() {
     try {
       const res = await fetch("http://localhost:8000/observability/summary", { headers: { "X-Correlation-ID": getCorrelationId(), "traceparent": getTraceparent() || "" } })
       if (!res.ok) throw new Error("Failed to load summary")
-      const data = await res.json()
+      const data = (await res.json()) as Summary
       setTraceparentFromResponse(res)
       setSummary(data)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load summary")
     }
   }
 

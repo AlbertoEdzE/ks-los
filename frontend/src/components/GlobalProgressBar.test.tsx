@@ -4,20 +4,27 @@ import '@testing-library/jest-dom';
 import { GlobalProgressBar } from './GlobalProgressBar';
 
 describe('GlobalProgressBar', () => {
-  let eventSourceMock: any;
+  let eventSourceMock: {
+    onmessage: ((ev: { data: string }) => void) | null;
+    onerror: ((ev: Event) => void) | null;
+    onopen?: ((ev: Event) => void) | null;
+    close: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(() => {
     // Mock EventSource
     eventSourceMock = {
       onmessage: null,
       onerror: null,
+      onopen: null,
       close: vi.fn(),
     };
     
     // Mock EventSource properly using a class
     vi.stubGlobal('EventSource', class {
-      constructor() {
-        return eventSourceMock;
+      constructor(_url: string) {
+        void _url;
+        return eventSourceMock as unknown as EventSource;
       }
     });
   });

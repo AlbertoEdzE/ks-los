@@ -165,10 +165,24 @@ export interface V2Loan {
   propertyValue: string | null;
   ltv: string | null;
   currentPhaseId: string | null;
+  catalogProductCode: string | null;
+  documentChecklist: {
+    productCode: string | null;
+    items: { name: string; status: string; updatedAt: string }[];
+    asOf: string;
+  } | null;
   status: string | null;
   notes: string | null;
   conversationId: string | null;
   createdBy: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+}
+
+export interface V2CatalogProduct {
+  id: string;
+  name: string;
+  code: string;
+  requiredDocuments: string[] | null;
+  status: string;
 }

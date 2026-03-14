@@ -1,12 +1,16 @@
 import React from 'react';
 
+export type AdminTabId = 'leads' | 'loans' | 'configuration' | 'synthetic' | 'simulator' | 'metrics' | 'training';
+
 interface SidebarProps {
-  activeTab: string;
-  onTabChange: (tab: 'configuration' | 'synthetic' | 'simulator' | 'metrics' | 'training') => void;
+  activeTab: AdminTabId;
+  onTabChange: (tab: AdminTabId) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
-  const tabs = [
+  const tabs: Array<{ id: AdminTabId; label: string }> = [
+    { id: 'leads', label: 'Leads' },
+    { id: 'loans', label: 'Loans' },
     { id: 'synthetic', label: 'Synthetic Data' },
     { id: 'configuration', label: 'Configuration' },
     { id: 'simulator', label: 'Simulator' },
@@ -22,7 +26,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
           {tabs.map((tab) => (
             <li key={tab.id} style={{ marginBottom: '8px' }}>
               <button
-                onClick={() => onTabChange(tab.id as any)}
+                onClick={() => onTabChange(tab.id)}
                 style={{
                   width: '100%',
                   textAlign: 'left',

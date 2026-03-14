@@ -115,3 +115,11 @@ e2e/test-results/
 # macOS
 .DS_Store
 **/.DS_Store
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Runtime artifacts
+data/inference_log.csv
+doc/04_documentation/

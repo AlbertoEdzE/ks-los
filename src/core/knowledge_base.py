@@ -1,10 +1,16 @@
 import os
 import logging
-from typing import List, Optional
-from langchain_core.documents import Document
-from langchain_ollama import OllamaEmbeddings
-from langchain_postgres import PGVector
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from typing import List, Optional, Any
+
+try:
+    from langchain_core.documents import Document
+    from langchain_ollama import OllamaEmbeddings
+    from langchain_postgres import PGVector
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    _KB_DEPS_AVAILABLE = True
+except Exception:
+    Document = Any
+    _KB_DEPS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +25,8 @@ class KnowledgeBase:
     """
     
     def __init__(self, connection_string: str = DEFAULT_CONNECTION_STRING):
+        if not _KB_DEPS_AVAILABLE:
+            raise RuntimeError("KnowledgeBase dependencies are not available")
         self.connection_string = connection_string
         # Use nomic-embed-text for high-quality retrieval
         self.embeddings = OllamaEmbeddings(

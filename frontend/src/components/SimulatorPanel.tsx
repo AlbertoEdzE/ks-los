@@ -7,7 +7,7 @@ const MetricCard: React.FC<{ label: string; value: string | number | React.React
   </div>
 );
 
-const JsonView: React.FC<{ data: any }> = ({ data }) => (
+const JsonView: React.FC<{ data: unknown }> = ({ data }) => (
   <pre style={{ 
     backgroundColor: '#f8fafc', 
     padding: '12px', 
@@ -31,7 +31,7 @@ const InputGroup: React.FC<{ label: string; children: React.ReactNode }> = ({ la
 );
 
 export const SimulatorPanel: React.FC = () => {
-  const [summary, setSummary] = useState<any>(null);
+  const [summary, setSummary] = useState<Record<string, unknown> | null>(null);
   const [score, setScore] = useState<number | null>(null);
   
   // Feature states
@@ -45,7 +45,6 @@ export const SimulatorPanel: React.FC = () => {
 
   // Derived / Other states
   const [territory, setTerritory] = useState('ECCU');
-  const [scenario, setScenario] = useState<string>('MANUAL_ENTRY');
   const [featureValues, setFeatureValues] = useState<Record<string, number>>({});
   const [importances, setImportances] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
@@ -55,10 +54,12 @@ export const SimulatorPanel: React.FC = () => {
       try {
         const r = await fetch('http://localhost:8000/observability/summary');
         if (r.ok) {
-          const data = await r.json();
+          const data = (await r.json()) as Record<string, unknown>;
           setSummary(data);
         }
-      } catch {}
+      } catch (err) {
+        console.error('Failed to load observability summary', err);
+      }
     })();
   }, []);
 

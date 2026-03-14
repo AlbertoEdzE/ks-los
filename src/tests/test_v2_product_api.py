@@ -198,6 +198,53 @@ def test_v2_loans_list_and_patch_requires_officer():
     assert updated["notes"] == "Docs pending"
 
 
+def test_wp_v2_016_document_checklist_is_derived_from_catalog_product_and_persists():
+    seeded = client.get("/api/catalog-products", headers=OFFICER_HEADERS)
+    assert seeded.status_code == 200
+    products = seeded.json()
+    with_docs = [p for p in products if isinstance(p.get("requiredDocuments"), list) and len(p.get("requiredDocuments")) > 0]
+    assert len(with_docs) >= 1
+    product = with_docs[0]
+
+    created = client.post(
+        "/api/loans",
+        json={
+            "borrowerName": "Checklist Borrower",
+            "loanType": "Home Loan",
+            "loanAmount": "250000",
+            "catalogProductCode": product["code"],
+        },
+        headers=OFFICER_HEADERS,
+    )
+    assert created.status_code == 200
+    loan = created.json()
+    assert loan["catalogProductCode"] == product["code"]
+    assert loan["documentChecklist"] is not None
+    checklist = loan["documentChecklist"]
+    assert checklist["productCode"] == product["code"]
+
+    names = [i["name"] for i in checklist["items"]]
+    assert names == product["requiredDocuments"]
+    assert all(i["status"] == "missing" for i in checklist["items"])
+
+    first_doc = checklist["items"][0]["name"]
+    updated = client.patch(
+        f"/api/loans/{loan['id']}/documents",
+        json={"name": first_doc, "status": "submitted"},
+        headers=OFFICER_HEADERS,
+    )
+    assert updated.status_code == 200
+    payload = updated.json()
+    by_name = {i["name"]: i for i in payload["documentChecklist"]["items"]}
+    assert by_name[first_doc]["status"] == "submitted"
+
+    fetched = client.get(f"/api/loans/{loan['id']}", headers=OFFICER_HEADERS)
+    assert fetched.status_code == 200
+    fetched_payload = fetched.json()
+    by_name_fetched = {i["name"]: i for i in fetched_payload["documentChecklist"]["items"]}
+    assert by_name_fetched[first_doc]["status"] == "submitted"
+
+
 def test_wp_v2_013_loan_action_validator_rejects_invalid_payload():
     from src.api.routers.v2_loans_router import _validate_loan_actions
 

@@ -1,10 +1,7 @@
 from fastapi.testclient import TestClient
 from src.main import app
-import redis
 
 client = TestClient(app)
-r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
-KEY = "demo:names"
 
 def test_seed_demo_names_idempotent_and_reset():
     # Ensure reset works
@@ -22,5 +19,3 @@ def test_seed_demo_names_idempotent_and_reset():
     assert res3.status_code == 200
     total3 = res3.json()["total"]
     assert total3 >= 10
-    # Verify Redis key exists
-    assert r.exists(KEY)

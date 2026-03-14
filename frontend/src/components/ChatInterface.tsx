@@ -35,12 +35,20 @@ export const ChatInterface: React.FC<Props> = ({ onProfileReceived, onNameDetect
       try {
         const res = await fetch('http://localhost:8000/chat/suggestions');
         if (res.ok) {
-          const data = await res.json();
-          const items = data.items.map((item: any) => 
-            typeof item === 'string' 
-              ? { label: item, text: item } 
-              : item
-          );
+          const data = (await res.json()) as { items?: unknown };
+          const rawItems = Array.isArray(data.items) ? data.items : [];
+          const items: Suggestion[] = rawItems
+            .map((item) => {
+              if (typeof item === 'string') return { label: item, text: item };
+              if (item && typeof item === 'object') {
+                const candidate = item as Partial<Suggestion>;
+                if (typeof candidate.label === 'string' && typeof candidate.text === 'string') {
+                  return { label: candidate.label, text: candidate.text };
+                }
+              }
+              return null;
+            })
+            .filter((x): x is Suggestion => x !== null);
           setSeedSuggestions(items);
         }
       } catch (e) {
