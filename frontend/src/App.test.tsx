@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from './App';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
+import { MemoryRouter } from 'react-router-dom';
 
 describe('App', () => {
   beforeEach(() => {
@@ -15,7 +16,11 @@ describe('App', () => {
 
   it('renders login screen initially', () => {
     try {
-      render(<App />);
+      render(
+        <MemoryRouter initialEntries={['/login']}>
+          <App />
+        </MemoryRouter>
+      );
       expect(screen.getByText('Login')).toBeInTheDocument();
     } catch (error) {
       console.error('App render failed:', error);
@@ -62,13 +67,15 @@ describe('App', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<App />);
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <App />
+      </MemoryRouter>
+    );
 
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'admin' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'admin123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Login' }));
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Leads' }));
 
     await screen.findByTestId('text-leads-title');
     await waitFor(() => {

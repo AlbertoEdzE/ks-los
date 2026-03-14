@@ -15,6 +15,7 @@ test.describe('Training Agent Fallback', () => {
     }
     // Navigate to ML Training if not already there
     await page.getByRole('button', { name: 'ML Training' }).click();
+    await page.getByRole('button', { name: 'Training Workflow' }).click();
   });
 
   test('should display fallback plan when LLM is unavailable', async ({ page }) => {
@@ -32,7 +33,6 @@ test.describe('Training Agent Fallback', () => {
     };
 
     await page.route('**/training/plan', async route => {
-      console.log('Mocking /training/plan with fallback response');
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -41,27 +41,11 @@ test.describe('Training Agent Fallback', () => {
     });
 
     // Trigger plan generation
+    await expect(page.getByRole('button', { name: 'Generate Training Plan' })).toBeVisible();
     await page.getByRole('button', { name: 'Generate Training Plan' }).click();
 
     // Verify the fallback plan is displayed
-    // The UI should show the plan details. Since the UI might not display raw JSON,
-    // we check for visual confirmation or if the state updated (e.g. "Start Training" button becomes enabled or plan details appear)
-    
-    // In the current UI, the plan might be displayed or just stored in state.
-    // Let's assume there's a section that shows the generated plan or we can check if "Start Training" is visible/enabled
-    // If the UI doesn't explicitly show the notes, we can check if the next step is accessible.
-    
-    // Check console logs for debugging
-    page.on('console', msg => console.log(msg.text()));
-
-    // Wait for the plan to be generated (button might change or next section appears)
-    // Assuming "Start Training" appears in Step 2 or is enabled
-    // The current UI might not show the plan text directly, but let's check if we can proceed.
-    
-    // If we can see the "Start Training" button, it means the plan was accepted.
-    await expect(page.getByRole('button', { name: 'Start Training' })).toBeVisible();
-    
-    // Log success
-    console.log('Fallback plan accepted by UI');
+    await expect(page.getByText('Proposed Plan')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('button', { name: 'Approve & Start Training' })).toBeVisible();
   });
 });

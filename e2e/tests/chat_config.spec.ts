@@ -1,18 +1,36 @@
 import { test, expect } from '@playwright/test';
 
 test('chat shows suggestions and progress', async ({ page }) => {
-  await page.goto('/');
-  // Ensure suggestions are enabled in case admin toggled them off
-  await page.request.post('http://localhost:8000/admin/config/suggestions_enabled?value=true');
-  await page.getByRole('radio', { name: 'User' }).check();
+  await page.route('http://localhost:8000/chat/suggestions', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: ['Katie Brady, Antigua and Barbuda, 34 years old'] }),
+    });
+  });
+
+  await page.route('http://localhost:8000/agent/chat', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ response: 'Thanks — I can help with that.' }),
+    });
+  });
+
+  await page.goto('/login');
   await page.getByLabel('Username').fill('demo');
   await page.getByLabel('Password').fill('demo123');
   await page.getByRole('button', { name: 'Login' }).click();
   await expect(page.getByText('Chat with Journey Coach')).toBeVisible();
-  // Type name to trigger suggestions
-  await page.getByLabel('Name', { exact: true }).fill('Jo');
-  await expect(page.getByText('Suggestions')).toBeVisible({ timeout: 10000 });
-  // Start chat and expect progress bar appears
-  await page.getByPlaceholder('Type your message...').fill('I am 30, ECCU');
-  await page.getByRole('button', { name: 'Login' }).isHidden();
+
+  await expect(page.getByText(/Quick Start|Suggested inputs/i)).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole('button', { name: /Katie Brady/i })).toBeVisible({ timeout: 10000 });
+
+  await page.getByRole('button', { name: /Katie Brady/i }).click();
+  await expect(page.getByTestId('chat-message-assistant')).toHaveCount(2, { timeout: 10000 });
+  await expect(page.getByRole('status')).toBeVisible();
 });

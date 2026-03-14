@@ -7,6 +7,7 @@ test.describe('ML Training Workflow', () => {
     await page.getByLabel('Password').fill('admin123');
     await page.getByRole('button', { name: 'Login' }).click();
     await page.getByRole('button', { name: 'ML Training' }).click();
+    await page.getByRole('button', { name: 'Training Workflow' }).click();
   });
 
   test('Complete 5-step training lifecycle with mocked backend', async ({ page }) => {

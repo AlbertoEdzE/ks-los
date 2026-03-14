@@ -142,6 +142,7 @@ export const SyntheticDataControl: React.FC = () => {
         <InputGroup label="Count">
           <input 
             type="number" 
+            aria-label="Count"
             value={count} 
             onChange={(e) => setCount(parseInt(e.target.value || '0', 10))} 
             style={inputStyle} 
@@ -150,6 +151,7 @@ export const SyntheticDataControl: React.FC = () => {
         
         <InputGroup label="Territory">
           <select 
+            aria-label="Territory"
             value={territory} 
             onChange={(e) => setTerritory(e.target.value)} 
             style={inputStyle}
@@ -164,6 +166,7 @@ export const SyntheticDataControl: React.FC = () => {
         
         <InputGroup label="Archetype">
           <select 
+            aria-label="Archetype"
             value={archetype} 
             onChange={(e) => setArchetype(e.target.value)} 
             style={inputStyle}
@@ -179,6 +182,7 @@ export const SyntheticDataControl: React.FC = () => {
         <InputGroup label="Seed (Optional)" info="Use a numeric seed for reproducible data generation">
           <input
             type="number"
+            aria-label="Seed (Optional)"
             value={seed}
             onChange={(e) => setSeed(e.target.value)}
             placeholder="0"

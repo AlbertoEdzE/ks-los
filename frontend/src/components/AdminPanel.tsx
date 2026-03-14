@@ -654,8 +654,10 @@ const LoansPanel: React.FC = () => {
   );
 };
 
-export const AdminPanel: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'leads' | 'loans' | 'configuration' | 'synthetic' | 'simulator' | 'metrics' | 'training'>('synthetic');
+export const AdminPanel: React.FC<{ initialTab?: 'leads' | 'loans' | 'configuration' | 'synthetic' | 'simulator' | 'metrics' | 'training' }> = ({
+  initialTab = 'synthetic',
+}) => {
+  const [activeTab, setActiveTab] = useState<'leads' | 'loans' | 'configuration' | 'synthetic' | 'simulator' | 'metrics' | 'training'>(initialTab);
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#ffffff' }}>
