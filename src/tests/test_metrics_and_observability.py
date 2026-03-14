@@ -22,9 +22,11 @@ def test_observability_summary():
 def test_v2_endpoints_emit_request_metrics():
     client.get("/api/phases")
     client.get("/api/catalog-products", headers=OFFICER_HEADERS)
+    client.get("/api/conversations", headers=OFFICER_HEADERS)
     metrics = client.get("/metrics").text
     assert 'requests_total{endpoint="/api/phases"}' in metrics
     assert 'requests_total{endpoint="/api/catalog-products"}' in metrics
+    assert 'requests_total{endpoint="/api/conversations"}' in metrics
 
 
 def test_v2_errors_emit_error_metrics():

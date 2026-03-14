@@ -506,13 +506,9 @@ def create_conversation(
 
 @router.get("")
 def list_conversations(_: bool = Depends(require_officer_role), db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/conversations").inc()
     rows = db.execute(select(Conversation).order_by(Conversation.created_at.desc())).scalars().all()
     return [_serialize_conversation(c) for c in rows]
-
-    request_counter.labels(endpoint="/api/conversations").inc()
-
-@router.get("/{conversation_id}")
-
 
 @router.get("/{conversation_id}")
 def get_conversation(conversation_id: str, db: Session = Depends(get_db)):
