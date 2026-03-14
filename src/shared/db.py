@@ -129,6 +129,18 @@ class LoanProductCatalog(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    event: Mapped[str] = mapped_column(Text, nullable=False)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    correlation_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 _engine = None
 _SessionLocal: Optional[sessionmaker[Session]] = None
 _initialized = False
@@ -178,6 +190,12 @@ def get_db() -> Iterator[Session]:
         yield db
     finally:
         db.close()
+
+
+def create_session() -> Session:
+    init_db()
+    assert _SessionLocal is not None
+    return _SessionLocal()
 
 
 def reset_db_for_tests():

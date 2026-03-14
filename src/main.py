@@ -1,9 +1,11 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import logging
 import os
 from src.shared.logging import setup_json_logging
-from src.shared.correlation import set_correlation_id
+from src.shared.correlation import get_correlation_id, set_correlation_id
 from src.shared.metrics import request_counter, request_errors_total, request_latency_seconds
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -85,10 +87,41 @@ app.include_router(v2_phases_router)
 app.include_router(v2_loans_router)
 app.include_router(v2_catalog_products_router)
 
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_: Request, exc: HTTPException):
+    cid = get_correlation_id() or set_correlation_id(None)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "correlationId": cid},
+        headers={"X-Correlation-ID": cid},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(_: Request, exc: RequestValidationError):
+    cid = get_correlation_id() or set_correlation_id(None)
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "correlationId": cid},
+        headers={"X-Correlation-ID": cid},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_: Request, __: Exception):
+    cid = get_correlation_id() or set_correlation_id(None)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error", "correlationId": cid},
+        headers={"X-Correlation-ID": cid},
+    )
+
+
 @app.middleware("http")
 async def correlation_middleware(request: Request, call_next):
     cid = request.headers.get("X-Correlation-ID")
-    set_correlation_id(cid)
+    correlation_id = set_correlation_id(cid)
     endpoint = request.url.path
     request_counter.labels(endpoint=endpoint).inc()
     import time
@@ -102,6 +135,7 @@ async def correlation_middleware(request: Request, call_next):
         raise
     duration = time.monotonic() - start
     request_latency_seconds.labels(endpoint=endpoint).observe(duration)
+    response.headers["X-Correlation-ID"] = correlation_id
     # Inject traceparent header
     span = trace.get_current_span()
     ctx = span.get_span_context()

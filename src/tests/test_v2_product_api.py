@@ -3,6 +3,7 @@ import tempfile
 import uuid
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 
@@ -13,7 +14,7 @@ if os.path.exists(DB_PATH):
 os.environ["SQLITE_FALLBACK_URL"] = f"sqlite:///{DB_PATH}"
 os.environ["DATABASE_URL"] = "postgresql+psycopg://invalid:invalid@localhost:1/invalid"
 
-from src.shared.db import Loan, get_engine, init_db, reset_db_for_tests
+from src.shared.db import AuditEvent, Loan, get_engine, init_db, reset_db_for_tests
 
 reset_db_for_tests()
 
@@ -529,3 +530,48 @@ def test_wp_v2_008_intent_summary_schema_rejects_unknown_fields():
         assert False, "Expected ValidationError"
     except ValidationError:
         assert True
+
+
+def test_wp_v2_019_error_envelope_includes_correlation_id():
+    cid = "test-correlation-id-123"
+    r = client.get(
+        "/api/loans/does-not-exist",
+        headers={**OFFICER_HEADERS, "X-Correlation-ID": cid},
+    )
+    assert r.status_code == 404
+    payload = r.json()
+    assert "detail" in payload
+    assert payload["correlationId"] == cid
+    assert r.headers.get("X-Correlation-ID") == cid
+
+
+def test_wp_v2_019_audit_events_persist_for_v2_writes():
+    cid = "test-correlation-id-audit-1"
+    create = client.post(
+        "/api/loans",
+        json={
+            "borrowerName": "Audit Test Borrower",
+            "loanType": "Home Loan",
+            "loanAmount": "250000",
+            "catalogProductCode": "HL-PUR-001",
+        },
+        headers={**OFFICER_HEADERS, "X-Correlation-ID": cid},
+    )
+    assert create.status_code == 200
+    loan_id = create.json()["id"]
+
+    with _db_session() as db:
+        rows = (
+            db.execute(
+                select(AuditEvent).where(
+                    AuditEvent.correlation_id == cid,
+                    AuditEvent.event == "v2_loan_create",
+                    AuditEvent.status == "success",
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) >= 1
+        assert rows[-1].meta is not None
+        assert rows[-1].meta.get("loanId") == loan_id
