@@ -14,6 +14,32 @@ test.describe('V2 Route Skeleton', () => {
     const conversationId = createdPayload.conversation?.id;
     expect(conversationId).toBeTruthy();
 
+    const phasesResponse = await page.request.get('http://localhost:8000/api/phases');
+    const phases = (await phasesResponse.json()) as Array<{ id?: string }>;
+    const firstPhaseId = phases[0]?.id;
+    expect(firstPhaseId).toBeTruthy();
+
+    const borrowerName = `E2E Phase Group ${Date.now()}`;
+    const createdLoan = await page.request.post('http://localhost:8000/api/loans', {
+      headers: { 'content-type': 'application/json', 'x-officer-role': 'loan-officer-access' },
+      data: {
+        borrowerName,
+        loanType: 'home_loan',
+        loanAmount: '250000',
+        catalogProductCode: 'HL-PUR-001',
+        conversationId,
+        createdBy: 'e2e',
+      },
+    });
+    const createdLoanPayload = (await createdLoan.json()) as { id?: string };
+    const loanId = createdLoanPayload.id;
+    expect(loanId).toBeTruthy();
+
+    await page.request.patch(`http://localhost:8000/api/loans/${loanId as string}`, {
+      headers: { 'content-type': 'application/json', 'x-officer-role': 'loan-officer-access' },
+      data: { currentPhaseId: firstPhaseId },
+    });
+
     await page.goto('/dashboard');
     await page.getByLabel('Username').fill('admin');
     await page.getByLabel('Password').fill('admin123');
@@ -28,6 +54,8 @@ test.describe('V2 Route Skeleton', () => {
 
     await page.getByRole('link', { name: 'Pipeline' }).click();
     await expect(page.getByRole('heading', { name: 'Loans' })).toBeVisible();
+    await expect(page.getByTestId(`pipeline-group-${firstPhaseId as string}`)).toContainText(borrowerName, { timeout: 20000 });
+    await expect(page.getByTestId(`loan-row-${loanId as string}`)).toBeVisible({ timeout: 20000 });
 
     await page.getByRole('link', { name: 'Loan Products' }).click();
     await expect(page.getByTestId('heading-loan-products')).toBeVisible();

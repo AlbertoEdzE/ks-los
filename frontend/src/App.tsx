@@ -810,6 +810,14 @@ function App() {
     const officerHeaders = React.useMemo<Record<string, string>>(() => ({ 'x-officer-role': 'loan-officer-access' }), []);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [phases, setPhases] = useState<
+      Array<{
+        id: string;
+        name: string;
+        sortOrder?: number | null;
+        isActive?: boolean | null;
+      }>
+    >([]);
     const [loans, setLoans] = useState<
       Array<{
         id: string;
@@ -817,12 +825,24 @@ function App() {
         loanType?: string | null;
         loanAmount?: string | null;
         catalogProductCode?: string | null;
+        currentPhaseId?: string | null;
         status?: string | null;
         documentChecklist?: unknown;
       }>
     >([]);
     const [selectedId, setSelectedId] = useState<string>('');
     const selected = React.useMemo(() => loans.find((l) => l.id === selectedId) || null, [loans, selectedId]);
+
+    const refreshPhases = React.useCallback(async () => {
+      try {
+        const res = await fetch('http://localhost:8000/api/phases');
+        if (!res.ok) return;
+        const data = (await res.json()) as typeof phases;
+        setPhases(data);
+      } catch {
+        setPhases([]);
+      }
+    }, []);
 
     const refresh = React.useCallback(async () => {
       setLoading(true);
@@ -845,8 +865,36 @@ function App() {
     }, [officerHeaders, selectedId]);
 
     React.useEffect(() => {
+      void refreshPhases();
       void refresh();
-    }, [refresh]);
+    }, [refresh, refreshPhases]);
+
+    const phasesById = React.useMemo(() => {
+      const out: Record<string, (typeof phases)[number]> = {};
+      for (const p of phases) out[p.id] = p;
+      return out;
+    }, [phases]);
+
+    const orderedPhaseIds = React.useMemo(() => {
+      return [...phases]
+        .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+        .map((p) => p.id);
+    }, [phases]);
+
+    const grouped = React.useMemo(() => {
+      const groups: Record<string, typeof loans> = { unassigned: [] };
+      for (const pid of orderedPhaseIds) groups[pid] = [];
+      for (const l of loans) {
+        const pid = l.currentPhaseId || '';
+        if (pid && phasesById[pid]) {
+          if (!groups[pid]) groups[pid] = [];
+          groups[pid].push(l);
+        } else {
+          groups.unassigned.push(l);
+        }
+      }
+      return groups;
+    }, [loans, orderedPhaseIds, phasesById]);
 
     const checklistItems = React.useMemo(() => {
       const raw = selected?.documentChecklist as unknown;
@@ -876,6 +924,18 @@ function App() {
       setLoans((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
     };
 
+    const updateLoanPhase = async (phaseId: string | null) => {
+      if (!selected) return;
+      const res = await fetch(`http://localhost:8000/api/loans/${selected.id}`, {
+        method: 'PATCH',
+        headers: { ...officerHeaders, 'content-type': 'application/json' },
+        body: JSON.stringify({ currentPhaseId: phaseId }),
+      });
+      if (!res.ok) return;
+      const updated = (await res.json()) as (typeof loans)[number];
+      setLoans((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+    };
+
     return (
       <OfficerChrome>
         <div style={{ padding: '16px' }}>
@@ -886,30 +946,68 @@ function App() {
               {loading ? <div style={{ padding: '12px 14px', color: '#6b7280' }}>Loading…</div> : null}
               {error ? <div style={{ padding: '12px 14px', color: '#b91c1c' }}>{error}</div> : null}
               <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
-                {loans.map((l) => (
-                  <button
-                    key={l.id}
-                    type="button"
-                    onClick={() => setSelectedId(l.id)}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      border: 'none',
-                      borderBottom: '1px solid #f3f4f6',
-                      backgroundColor: selectedId === l.id ? '#eff6ff' : '#ffffff',
-                      padding: '12px 14px',
-                      cursor: 'pointer',
-                    }}
-                    data-testid={`loan-row-${l.id}`}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                      <div style={{ fontWeight: 800, color: '#111827' }}>{l.borrowerName || 'Borrower'}</div>
-                      <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>{l.status || '—'}</div>
+                <div data-testid="pipeline-group-unassigned">
+                  <div style={{ padding: '10px 14px', background: '#f9fafb', borderBottom: '1px solid #f3f4f6', fontWeight: 900 }}>
+                    Unassigned ({grouped.unassigned.length})
+                  </div>
+                  {grouped.unassigned.map((l) => (
+                    <button
+                      key={l.id}
+                      type="button"
+                      onClick={() => setSelectedId(l.id)}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        border: 'none',
+                        borderBottom: '1px solid #f3f4f6',
+                        backgroundColor: selectedId === l.id ? '#eff6ff' : '#ffffff',
+                        padding: '12px 14px',
+                        cursor: 'pointer',
+                      }}
+                      data-testid={`loan-row-${l.id}`}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                        <div style={{ fontWeight: 800, color: '#111827' }}>{l.borrowerName || 'Borrower'}</div>
+                        <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>{l.status || '—'}</div>
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '4px' }}>
+                        {l.loanType || 'Loan'} · {l.loanAmount || '—'} {l.catalogProductCode ? `· ${l.catalogProductCode}` : ''}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {orderedPhaseIds.map((pid) => (
+                  <div key={pid} data-testid={`pipeline-group-${pid}`}>
+                    <div style={{ padding: '10px 14px', background: '#f9fafb', borderBottom: '1px solid #f3f4f6', fontWeight: 900 }}>
+                      {phasesById[pid]?.name || 'Phase'} ({grouped[pid]?.length || 0})
                     </div>
-                    <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '4px' }}>
-                      {l.loanType || 'Loan'} · {l.loanAmount || '—'} {l.catalogProductCode ? `· ${l.catalogProductCode}` : ''}
-                    </div>
-                  </button>
+                    {(grouped[pid] || []).map((l) => (
+                      <button
+                        key={l.id}
+                        type="button"
+                        onClick={() => setSelectedId(l.id)}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          border: 'none',
+                          borderBottom: '1px solid #f3f4f6',
+                          backgroundColor: selectedId === l.id ? '#eff6ff' : '#ffffff',
+                          padding: '12px 14px',
+                          cursor: 'pointer',
+                        }}
+                        data-testid={`loan-row-${l.id}`}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                          <div style={{ fontWeight: 800, color: '#111827' }}>{l.borrowerName || 'Borrower'}</div>
+                          <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>{l.status || '—'}</div>
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '4px' }}>
+                          {l.loanType || 'Loan'} · {l.loanAmount || '—'} {l.catalogProductCode ? `· ${l.catalogProductCode}` : ''}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 ))}
                 {!loading && loans.length === 0 ? <div style={{ padding: '12px 14px', color: '#6b7280' }}>No loans yet.</div> : null}
               </div>
@@ -923,6 +1021,23 @@ function App() {
                 <div style={{ display: 'grid', gap: '14px' }}>
                   <div style={{ fontSize: '0.9rem', color: '#6b7280' }}>
                     ID: <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{selected.id}</span>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: '6px' }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 900, color: '#111827' }}>Phase</div>
+                    <select
+                      value={selected.currentPhaseId || ''}
+                      onChange={(e) => void updateLoanPhase(e.target.value ? e.target.value : null)}
+                      style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #e5e7eb', backgroundColor: '#ffffff' }}
+                      data-testid="select-loan-phase"
+                    >
+                      <option value="">Unassigned</option>
+                      {orderedPhaseIds.map((pid) => (
+                        <option key={pid} value={pid}>
+                          {phasesById[pid]?.name || 'Phase'}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div style={{ border: '1px solid #f3f4f6', borderRadius: '10px', padding: '12px', backgroundColor: '#fafafa' }}>
