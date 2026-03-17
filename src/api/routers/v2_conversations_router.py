@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from src.api.routers.v2_auth import OFFICER_HEADER, OFFICER_TOKEN, require_officer_role
 from src.shared.audit import log_audit
-from src.shared.db import Conversation, LoanPhase, Message, LoanProductCatalog, get_db
+from src.shared.db import Conversation, Loan, LoanPhase, Message, LoanProductCatalog, get_db
 from src.shared.metrics import request_counter, request_errors_total
 
 
@@ -512,6 +512,182 @@ def apply_phase_guardrails(db: Session, conversation: Conversation) -> dict[str,
     }
 
 
+def _extract_amount_text(text: str) -> Optional[str]:
+    candidates = re.findall(r"(?i)(?:usd|xcd|ec\$|\$)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k|m)?", text)
+    if not candidates:
+        return None
+    raw, suffix = candidates[0]
+    cleaned = raw.replace(",", "").strip()
+    if not cleaned:
+        return None
+    try:
+        value = float(cleaned)
+    except ValueError:
+        return None
+    if suffix:
+        s = suffix.lower()
+        if s == "k":
+            value *= 1_000
+        elif s == "m":
+            value *= 1_000_000
+    if value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _infer_loan_type(text: str, intent: Optional[dict]) -> str:
+    lower = text.lower()
+    if any(k in lower for k in ["home", "mortgage", "property"]):
+        return "Home Loan"
+    if any(k in lower for k in ["car", "auto", "vehicle"]):
+        return "Car Loan"
+    if any(k in lower for k in ["personal", "debt"]):
+        return "Personal Loan"
+    if any(k in lower for k in ["business", "sme"]):
+        return "Business Loan"
+    if any(k in lower for k in ["education", "school", "tuition"]):
+        return "Education Loan"
+
+    purpose = ((intent or {}).get("purpose") or "").lower().strip()
+    if purpose in {"home", "mortgage", "property"}:
+        return "Home Loan"
+    if purpose in {"car", "auto", "vehicle"}:
+        return "Car Loan"
+    if purpose in {"personal", "education", "business", "debt_consolidation"}:
+        return "Personal Loan"
+    return "Loan"
+
+
+def _loan_catalog_category(loan_type: str) -> Optional[str]:
+    t = loan_type.lower()
+    if "home" in t or "mortgage" in t:
+        return "home_loan"
+    if "car" in t or "auto" in t or "vehicle" in t:
+        return "auto_loan"
+    if "personal" in t or "debt" in t:
+        return "personal_loan"
+    return None
+
+
+def _maybe_pick_catalog_code(db: Session, loan_type: str) -> Optional[str]:
+    category = _loan_catalog_category(loan_type)
+    if not category:
+        return None
+    from src.api.routers.v2_catalog_products_router import _ensure_seeded as _ensure_products_seeded
+
+    _ensure_products_seeded(db)
+    row = (
+        db.execute(
+            select(LoanProductCatalog)
+            .where(LoanProductCatalog.status == "active")
+            .where(LoanProductCatalog.category == category)
+            .order_by(LoanProductCatalog.created_at.asc())
+        )
+        .scalars()
+        .first()
+    )
+    return row.code if row else None
+
+
+def _create_loan_from_conversation(
+    db: Session,
+    conversation: Conversation,
+    borrower_name: Optional[str],
+    loan_type: str,
+    loan_amount: Optional[str],
+) -> Optional[str]:
+    name = (borrower_name or conversation.borrower_name or "").strip()
+    if not name:
+        return None
+    amount = (loan_amount or "").strip()
+    if not amount:
+        return None
+
+    catalog_code = _maybe_pick_catalog_code(db, loan_type)
+    product = None
+    checklist = None
+    if catalog_code:
+        from src.api.routers.v2_loans_router import _build_document_checklist, _get_product_by_code
+
+        product = _get_product_by_code(db, catalog_code)
+        checklist = _build_document_checklist(catalog_code, product.required_documents if product else None)
+
+    intent = conversation.intent_summary if isinstance(conversation.intent_summary, dict) else {}
+    loan = Loan(
+        borrower_name=name,
+        loan_type=loan_type,
+        loan_amount=amount,
+        purpose=intent.get("purpose") if isinstance(intent, dict) else None,
+        employment_type=intent.get("employmentType") if isinstance(intent, dict) else None,
+        monthly_income=intent.get("monthlyIncome") if isinstance(intent, dict) else None,
+        existing_debts=intent.get("existingDebts") if isinstance(intent, dict) else None,
+        credit_score=intent.get("creditHistory") if isinstance(intent, dict) else None,
+        tenure=intent.get("preferredTenure") if isinstance(intent, dict) else None,
+        catalog_product_code=catalog_code,
+        document_checklist=checklist,
+        conversation_id=conversation.id,
+        current_phase_id=conversation.current_phase_id,
+        status="draft",
+    )
+    db.add(loan)
+    db.commit()
+    db.refresh(loan)
+    return loan.id
+
+
+def _apply_officer_directives(db: Session, conversation: Conversation, content: str) -> dict[str, Any]:
+    text = content.strip()
+    lower = text.lower()
+    updates: dict[str, Any] = {}
+    created_loan_id: Optional[str] = None
+    phase_target: Optional[str] = None
+
+    assign_match = re.search(r"(?i)\b(?:assign|set)\s+officer\s+(?:to\s+)?(.+)$", text)
+    if assign_match:
+        officer = assign_match.group(1).strip()
+        if officer:
+            conversation.assigned_officer = officer
+            updates["assignedOfficer"] = officer
+
+    status_match = re.search(r"(?i)\b(?:set|mark)\s+status\s+(?:to\s+)?(active|reviewing|qualified|closed)\b", text)
+    if status_match:
+        status = status_match.group(1).strip().lower()
+        conversation.status = status
+        updates["status"] = status
+
+    phase_match = re.search(r"(?i)\b(?:move|advance)\s+(?:to\s+)?phase\s+(.+)$", text)
+    if phase_match:
+        phase_label = phase_match.group(1).strip()
+        if phase_label:
+            phase_target = phase_label
+
+    if "create loan" in lower or "open loan" in lower:
+        name_match = re.search(r"(?i)\bfor\s+([a-z][a-z\s\-']{1,80})\b", text)
+        borrower_name = name_match.group(1).strip() if name_match else conversation.borrower_name
+        fallback_amount = (conversation.intent_summary or {}).get("loanAmount") if isinstance(conversation.intent_summary, dict) else None
+        amount = _extract_amount_text(text) or fallback_amount
+        loan_type = _infer_loan_type(text, conversation.intent_summary if isinstance(conversation.intent_summary, dict) else None)
+        created_loan_id = _create_loan_from_conversation(db, conversation, borrower_name, loan_type, amount)
+
+    if phase_target:
+        phases = (
+            db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc()))
+            .scalars()
+            .all()
+        )
+        desired = next((p for p in phases if p.name.strip().lower() == phase_target.strip().lower()), None)
+        if desired:
+            conversation.current_phase_id = desired.id
+            updates["currentPhaseId"] = desired.id
+
+    if updates:
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+
+    return {"conversationPatch": updates or None, "loanId": created_loan_id}
+
+
 @router.post("")
 def create_conversation(
     req: CreateConversationRequest,
@@ -640,7 +816,12 @@ def list_messages(conversation_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{conversation_id}/messages")
-def send_message(conversation_id: str, req: SendMessageRequest, db: Session = Depends(get_db)):
+def send_message(
+    conversation_id: str,
+    req: SendMessageRequest,
+    db: Session = Depends(get_db),
+    x_officer_role: str | None = Header(default=None, alias=OFFICER_HEADER),
+):
     request_counter.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
     conv = db.get(Conversation, conversation_id)
     if not conv:
@@ -656,17 +837,22 @@ def send_message(conversation_id: str, req: SendMessageRequest, db: Session = De
     if not req.content or not req.content.strip():
         raise HTTPException(status_code=400, detail="Content is required")
 
+    if x_officer_role is not None and x_officer_role != OFFICER_TOKEN:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
+        raise HTTPException(status_code=403, detail="Officer access required")
+
+    actor_is_officer = x_officer_role == OFFICER_TOKEN
     user_msg = Message(
         id=str(uuid.uuid4()),
         conversation_id=conversation_id,
         role="user",
         content=req.content,
-        metadata_json=None,
+        metadata_json={"actorRole": "officer"} if actor_is_officer else None,
     )
     db.add(user_msg)
     db.commit()
 
-    if conv.chat_role == "borrower":
+    if conv.chat_role == "borrower" and not actor_is_officer:
         analysis = analyze_intent_message(req.content, conv.intent_summary)
         conv.intent_summary = analysis["intentSummary"]
         conv.seriousness_score = analysis["seriousnessScore"]
@@ -690,14 +876,31 @@ def send_message(conversation_id: str, req: SendMessageRequest, db: Session = De
         phase_action = None
 
     assistant_text = "Got it. I’ll ask a few quick questions to narrow down the best option for you."
-    if conv.chat_role == "borrower":
+    loan_action: Optional[dict[str, Any]] = None
+    conversation_patch: Optional[dict[str, Any]] = None
+    if actor_is_officer:
+        applied = _apply_officer_directives(db, conv, req.content)
+        conversation_patch = applied.get("conversationPatch")
+        created_loan_id = applied.get("loanId")
+        loan_action = {"type": "create_loan", "loanId": created_loan_id} if created_loan_id else None
+        lines: list[str] = []
+        if conversation_patch:
+            lines.append(f"Updated lead fields: {', '.join(sorted(conversation_patch.keys()))}.")
+        if created_loan_id:
+            lines.append(f"Created draft loan: {created_loan_id}.")
+        if not lines:
+            lines.append("Officer note recorded. You can: assign officer, set status, move phase, or create loan.")
+        assistant_text = "\n".join(lines)
+    elif conv.chat_role == "borrower":
         assistant_text = _build_borrower_assistant_reply(analysis["intentSummary"])
     assistant_metadata = {
+        "actorRole": "officer_assistant" if actor_is_officer else None,
         "intentAnalysis": analysis,
-        "loanRecommendations": conv.recommended_products if conv.chat_role == "borrower" else None,
+        "loanRecommendations": conv.recommended_products if (conv.chat_role == "borrower" and not actor_is_officer) else None,
         "approvalProbability": approval_probability,
         "phaseAction": phase_action,
-        "loanAction": None,
+        "loanAction": loan_action,
+        "conversationPatch": conversation_patch,
     }
     assistant_msg = Message(
         id=str(uuid.uuid4()),
@@ -714,13 +917,13 @@ def send_message(conversation_id: str, req: SendMessageRequest, db: Session = De
         event="v2_message_send",
         endpoint="/api/conversations/{conversation_id}/messages",
         status="success",
-        meta={"conversationId": conversation_id, "chatRole": conv.chat_role},
+        meta={"conversationId": conversation_id, "chatRole": conv.chat_role, "actorRole": "officer" if actor_is_officer else "borrower"},
     )
     return {
         "message": _serialize_message(assistant_msg),
         "intentAnalysis": analysis,
-        "loanRecommendations": conv.recommended_products if conv.chat_role == "borrower" else None,
+        "loanRecommendations": conv.recommended_products if (conv.chat_role == "borrower" and not actor_is_officer) else None,
         "approvalProbability": approval_probability,
         "phaseAction": phase_action,
-        "loanAction": None,
+        "loanAction": loan_action,
     }

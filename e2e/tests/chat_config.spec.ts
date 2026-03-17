@@ -74,3 +74,34 @@ test('phase tracker navigates to phase detail view', async ({ page }) => {
   await expect(page.getByTestId('phase-list')).toBeVisible({ timeout: 20000 });
   await expect(page.getByTestId('phase-list-item-selected')).toBeVisible({ timeout: 20000 });
 });
+
+test('borrower chat hides officer-only notes from the thread', async ({ page }) => {
+  await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
+    headers: { 'x-officer-role': 'loan-officer-access' },
+  });
+
+  const createdConversation = await page.request.post('http://localhost:8000/api/conversations', {
+    headers: { 'content-type': 'application/json' },
+    data: { chatRole: 'borrower' },
+  });
+  const createdPayload = (await createdConversation.json()) as { conversation?: { id?: string } };
+  const conversationId = createdPayload.conversation?.id;
+  expect(conversationId).toBeTruthy();
+
+  await page.request.post(`http://localhost:8000/api/conversations/${conversationId as string}/messages`, {
+    headers: { 'content-type': 'application/json', 'x-officer-role': 'loan-officer-access' },
+    data: { content: 'OFFICER_INTERNAL_NOTE_DO_NOT_SHOW' },
+  });
+
+  await page.addInitScript((id) => {
+    window.localStorage.setItem('v2_borrower_conversation_id', id);
+  }, conversationId as string);
+
+  await page.goto('/login');
+  await page.getByLabel('Username').fill('demo');
+  await page.getByLabel('Password').fill('demo123');
+  await page.getByRole('button', { name: 'Login' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Tell me what you need' })).toBeVisible();
+  await expect(page.getByText('OFFICER_INTERNAL_NOTE_DO_NOT_SHOW')).toHaveCount(0);
+});

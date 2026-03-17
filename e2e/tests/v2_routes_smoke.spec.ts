@@ -55,9 +55,17 @@ test.describe('V2 Route Skeleton', () => {
     await page.getByTestId(`officer-chat-lead-${conversationId as string}`).click();
     await expect(page.getByTestId('officer-chat-message-assistant')).toHaveCount(1, { timeout: 20000 });
 
-    await page.getByTestId('officer-chat-input').fill('Review this lead and suggest next steps.');
+    await page.getByTestId('officer-chat-input').fill('Assign officer to officer-99');
     await page.getByTestId('officer-chat-send').click();
     await expect(page.getByTestId('officer-chat-message-assistant')).toHaveCount(2, { timeout: 20000 });
+
+    const leadRow = page.getByTestId(`officer-chat-lead-${conversationId as string}`);
+    await expect(leadRow).toContainText('Officer: officer-99', { timeout: 20000 });
+
+    await page.getByTestId('officer-chat-input').fill('Set status to reviewing');
+    await page.getByTestId('officer-chat-send').click();
+    await expect(page.getByTestId('officer-chat-message-assistant')).toHaveCount(3, { timeout: 20000 });
+    await expect(leadRow).toContainText('reviewing', { timeout: 20000 });
   });
 
   test('Borrower route renders after login', async ({ page }) => {

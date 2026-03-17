@@ -51,6 +51,17 @@ const STORAGE_KEY = 'v2_borrower_conversation_id';
 
 type ViewState = 'welcome' | 'exiting' | 'chat';
 
+const getActorRole = (metadata: unknown): string | null => {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const role = (metadata as { actorRole?: unknown }).actorRole;
+  return typeof role === 'string' ? role : null;
+};
+
+const isOfficerOnlyMessage = (message: V2Message): boolean => {
+  const actorRole = getActorRole(message.metadata);
+  return actorRole === 'officer' || actorRole === 'officer_assistant';
+};
+
 const DEFAULT_QUICK_PROMPTS: Array<{ title: string; prompt: string }> = [
   { title: 'Home Loan', prompt: 'I want a home loan to buy a house.' },
   { title: 'Car Loan', prompt: 'I need a car loan for a vehicle purchase.' },
@@ -130,7 +141,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
 
       const msgsRes = await fetchJson<V2Message[]>(`http://localhost:8000/api/conversations/${activeConversationId}/messages`);
       if (msgsRes.ok) {
-        setMessages(msgsRes.value);
+        setMessages(msgsRes.value.filter((m) => !isOfficerOnlyMessage(m)));
       } else {
         setMessages([
           {
@@ -194,7 +205,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       }
 
       const payload = (await res.json()) as { message?: V2Message };
-      if (payload.message && payload.message.role && payload.message.content) {
+      if (payload.message && payload.message.role && payload.message.content && !isOfficerOnlyMessage(payload.message as V2Message)) {
         setMessages((prev) => [...prev, payload.message as V2Message]);
       }
 
