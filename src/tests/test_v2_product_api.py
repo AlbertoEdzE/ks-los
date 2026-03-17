@@ -121,6 +121,16 @@ def test_v2_conversation_patch_and_messages_flow():
     assert send_payload["approvalProbability"]["band"] in {"low", "medium", "high"}
     assert isinstance(send_payload["approvalProbability"]["topBlockers"], list)
     assert isinstance(send_payload["approvalProbability"]["topActions"], list)
+    assert len(send_payload["approvalProbability"]["topBlockers"]) >= 1
+    assert len(send_payload["approvalProbability"]["topActions"]) >= 1
+    first_blocker = send_payload["approvalProbability"]["topBlockers"][0]
+    assert isinstance(first_blocker.get("title"), str)
+    assert first_blocker.get("severity") in {"low", "medium", "high"}
+    assert isinstance(first_blocker.get("detail"), str)
+    first_action = send_payload["approvalProbability"]["topActions"][0]
+    assert isinstance(first_action.get("title"), str)
+    assert first_action.get("impact") in {"low", "medium", "high"}
+    assert isinstance(first_action.get("detail"), str)
     assert isinstance(send_payload["loanRecommendations"], list)
     assert len(send_payload["loanRecommendations"]) >= 1
 
@@ -177,6 +187,25 @@ def test_wp_v2_008_intent_summary_filters_unknown_keys():
     prev = {"purpose": "home", "evil": "x"}
     res = analyze_intent_message("income is 5000", prev)
     assert "evil" not in res["intentSummary"]
+
+
+def test_wp_v2_015_approval_probability_navigator_schema_is_stable():
+    from src.api.routers.v2_conversations_router import _compute_approval_probability, ApprovalProbabilityNavigator
+
+    payload = _compute_approval_probability(
+        {
+            "creditHistory": "750",
+            "monthlyIncome": "5000",
+            "existingDebts": "1000",
+            "loanAmount": "150000",
+        }
+    )
+    validated = ApprovalProbabilityNavigator.model_validate(payload)
+    assert 0.0 <= float(validated.probability) <= 1.0
+    assert validated.band in {"low", "medium", "high"}
+    assert len(validated.topBlockers) <= 3
+    assert len(validated.topActions) <= 3
+    assert validated.method
 
 
 def test_wp_v2_009_phase_progression_is_sequential_and_no_skips():

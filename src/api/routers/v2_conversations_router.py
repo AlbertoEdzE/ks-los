@@ -1,10 +1,10 @@
 import uuid
 import re
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Header
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -45,6 +45,37 @@ class IntentSummary(BaseModel):
     collateralAvailable: Optional[str] = None
     employmentType: Optional[str] = None
     creditHistory: Optional[str] = None
+
+
+class ApprovalProbabilityInputs(BaseModel):
+    creditScore: Optional[int] = None
+    monthlyIncome: Optional[float] = None
+    existingDebts: Optional[float] = None
+    loanAmount: Optional[float] = None
+    dti: Optional[float] = None
+    loanToIncome: Optional[float] = None
+
+
+class ApprovalBlocker(BaseModel):
+    title: str
+    severity: Literal["low", "medium", "high"]
+    detail: str
+
+
+class ApprovalNextAction(BaseModel):
+    title: str
+    impact: Literal["low", "medium", "high"]
+    detail: str
+
+
+class ApprovalProbabilityNavigator(BaseModel):
+    probability: float = Field(ge=0.0, le=1.0)
+    band: Literal["low", "medium", "high"]
+    topBlockers: list[ApprovalBlocker] = Field(default_factory=list, max_length=3)
+    topActions: list[ApprovalNextAction] = Field(default_factory=list, max_length=3)
+    inputsUsed: ApprovalProbabilityInputs
+    method: str
+    asOf: datetime
 
 
 def _serialize_conversation(c: Conversation) -> dict[str, Any]:
@@ -447,7 +478,7 @@ def _compute_approval_probability(intent: dict) -> dict[str, Any]:
     else:
         band = "low"
 
-    return {
+    payload = {
         "probability": round(prob, 4),
         "band": band,
         "topBlockers": blockers[:3],
@@ -463,6 +494,11 @@ def _compute_approval_probability(intent: dict) -> dict[str, Any]:
         "method": "heuristic_v1",
         "asOf": datetime.now(timezone.utc).isoformat(),
     }
+    try:
+        validated = ApprovalProbabilityNavigator.model_validate(payload)
+        return validated.model_dump(mode="json")
+    except ValidationError:
+        return payload
 
 
 def _desired_phase_index(intent: dict) -> int:

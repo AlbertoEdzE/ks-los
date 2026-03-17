@@ -39,7 +39,15 @@ describe('App', () => {
       seriousnessScore: 10,
       fitScore: 55,
       intentSummary: null,
-      approvalProbability: null,
+      approvalProbability: {
+        probability: 0.6,
+        band: 'medium',
+        topBlockers: [{ title: 'Missing credit score', severity: 'high', detail: 'Credit score not provided yet.' }],
+        topActions: [{ title: 'Share credit score range', impact: 'high', detail: 'Provide an estimated credit score or bureau range.' }],
+        inputsUsed: { creditScore: null, monthlyIncome: null, existingDebts: null, loanAmount: null, dti: null, loanToIncome: null },
+        method: 'heuristic_v1',
+        asOf: '2026-03-17T00:00:00Z',
+      },
       recommendedProducts: null,
       nextConversationAngle: null,
       assignedOfficer: null,
@@ -84,7 +92,10 @@ describe('App', () => {
 
     fireEvent.click(await screen.findByTestId(`lead-row-${leadId}`));
     expect(screen.getByTestId('text-approval-probability-title')).toBeInTheDocument();
-    expect(screen.getByTestId('text-approval-probability-score')).toHaveTextContent('—');
+    expect(screen.getByTestId('text-approval-probability-score')).toHaveTextContent('60%');
+    expect(screen.getByTestId('approval-navigator-officer')).toBeInTheDocument();
+    expect(screen.getByTestId('approval-blocker-officer-0')).toHaveTextContent('Missing credit score');
+    expect(screen.getByTestId('approval-action-officer-0')).toHaveTextContent('Share credit score range');
 
     fireEvent.change(screen.getByTestId('input-borrower-name'), { target: { value: 'Jane Doe' } });
     fireEvent.change(screen.getByTestId('input-assigned-officer'), { target: { value: 'officer-1' } });

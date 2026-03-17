@@ -26,6 +26,8 @@ test.describe('Chat Flow', () => {
     await expect(page.getByTestId('recommended-products')).toBeVisible({ timeout: 20000 });
     await expect(page.getByText('Home Purchase Loan')).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId('approval-probability')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('approval-blocker-0')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('approval-action-0')).toBeVisible({ timeout: 20000 });
 
     await page.getByTestId('input-chat-message').fill('fasdf');
     await page.getByTestId('button-send-message').click();

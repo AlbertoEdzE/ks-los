@@ -268,6 +268,26 @@ function App() {
       return null;
     }, [conversation?.approvalProbability]);
 
+    const approvalTopBlockers = React.useMemo(() => {
+      const raw = conversation?.approvalProbability as unknown;
+      if (!raw || typeof raw !== 'object') return [];
+      const items = (raw as { topBlockers?: unknown }).topBlockers;
+      if (!Array.isArray(items)) return [];
+      return items
+        .filter((i) => i && typeof i === 'object' && typeof (i as { title?: unknown }).title === 'string')
+        .slice(0, 3) as Array<Record<string, unknown>>;
+    }, [conversation?.approvalProbability]);
+
+    const approvalTopActions = React.useMemo(() => {
+      const raw = conversation?.approvalProbability as unknown;
+      if (!raw || typeof raw !== 'object') return [];
+      const items = (raw as { topActions?: unknown }).topActions;
+      if (!Array.isArray(items)) return [];
+      return items
+        .filter((i) => i && typeof i === 'object' && typeof (i as { title?: unknown }).title === 'string')
+        .slice(0, 3) as Array<Record<string, unknown>>;
+    }, [conversation?.approvalProbability]);
+
     const recommendedProducts = React.useMemo(() => {
       const raw = conversation?.recommendedProducts as unknown;
       return Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
@@ -444,6 +464,44 @@ function App() {
                       <div className="mt-1 text-2xl font-black tracking-tight text-slate-900 dark:text-white" data-testid="approval-probability">
                         {approvalProbability === null ? '—' : `${Math.round(approvalProbability * 100)}%`}
                       </div>
+                      {approvalTopBlockers.length === 0 && approvalTopActions.length === 0 ? null : (
+                        <div className="mt-3 grid grid-cols-1 gap-3" data-testid="approval-navigator">
+                          {approvalTopBlockers.length === 0 ? null : (
+                            <div data-testid="approval-top-blockers">
+                              <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Top blockers</div>
+                              <div className="mt-1 grid gap-1.5">
+                                {approvalTopBlockers.map((b, idx) => {
+                                  const title = typeof b.title === 'string' ? b.title : '';
+                                  const detail = typeof b.detail === 'string' ? b.detail : '';
+                                  return (
+                                    <div key={`${title}-${idx}`} className="text-xs text-slate-700 dark:text-slate-200" data-testid={`approval-blocker-${idx}`}>
+                                      <div className="font-semibold">{title}</div>
+                                      {detail ? <div className="text-[11px] text-slate-500 dark:text-slate-400">{detail}</div> : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          {approvalTopActions.length === 0 ? null : (
+                            <div data-testid="approval-top-actions">
+                              <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Next actions</div>
+                              <div className="mt-1 grid gap-1.5">
+                                {approvalTopActions.map((a, idx) => {
+                                  const title = typeof a.title === 'string' ? a.title : '';
+                                  const detail = typeof a.detail === 'string' ? a.detail : '';
+                                  return (
+                                    <div key={`${title}-${idx}`} className="text-xs text-slate-700 dark:text-slate-200" data-testid={`approval-action-${idx}`}>
+                                      <div className="font-semibold">{title}</div>
+                                      {detail ? <div className="text-[11px] text-slate-500 dark:text-slate-400">{detail}</div> : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-3">
@@ -645,6 +703,26 @@ function App() {
       return null;
     }, [selected?.approvalProbability]);
 
+    const approvalTopBlockers = React.useMemo(() => {
+      const raw = selected?.approvalProbability as unknown;
+      if (!raw || typeof raw !== 'object') return [];
+      const items = (raw as { topBlockers?: unknown }).topBlockers;
+      if (!Array.isArray(items)) return [];
+      return items
+        .filter((i) => i && typeof i === 'object' && typeof (i as { title?: unknown }).title === 'string')
+        .slice(0, 3) as Array<Record<string, unknown>>;
+    }, [selected?.approvalProbability]);
+
+    const approvalTopActions = React.useMemo(() => {
+      const raw = selected?.approvalProbability as unknown;
+      if (!raw || typeof raw !== 'object') return [];
+      const items = (raw as { topActions?: unknown }).topActions;
+      if (!Array.isArray(items)) return [];
+      return items
+        .filter((i) => i && typeof i === 'object' && typeof (i as { title?: unknown }).title === 'string')
+        .slice(0, 3) as Array<Record<string, unknown>>;
+    }, [selected?.approvalProbability]);
+
     const recommendedProducts = React.useMemo(() => {
       const raw = selected?.recommendedProducts as unknown;
       return Array.isArray(raw) ? raw : [];
@@ -774,6 +852,44 @@ function App() {
                       <div style={{ fontSize: '1.5rem', fontWeight: 900 }} data-testid="text-approval-probability-score">
                         {probability === null ? '—' : `${Math.round(probability * 100)}%`}
                       </div>
+                      {approvalTopBlockers.length === 0 && approvalTopActions.length === 0 ? null : (
+                        <div style={{ marginTop: '10px', display: 'grid', gap: '10px' }} data-testid="approval-navigator-officer">
+                          {approvalTopBlockers.length === 0 ? null : (
+                            <div data-testid="approval-top-blockers-officer">
+                              <div style={{ fontSize: '0.8rem', fontWeight: 900, color: '#374151', marginBottom: '6px' }}>Top blockers</div>
+                              <div style={{ display: 'grid', gap: '8px' }}>
+                                {approvalTopBlockers.map((b, idx) => {
+                                  const title = typeof b.title === 'string' ? b.title : '';
+                                  const detail = typeof b.detail === 'string' ? b.detail : '';
+                                  return (
+                                    <div key={`${title}-${idx}`} data-testid={`approval-blocker-officer-${idx}`}>
+                                      <div style={{ fontWeight: 800, color: '#111827', fontSize: '0.9rem' }}>{title}</div>
+                                      {detail ? <div style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '2px' }}>{detail}</div> : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          {approvalTopActions.length === 0 ? null : (
+                            <div data-testid="approval-top-actions-officer">
+                              <div style={{ fontSize: '0.8rem', fontWeight: 900, color: '#374151', marginBottom: '6px' }}>Next actions</div>
+                              <div style={{ display: 'grid', gap: '8px' }}>
+                                {approvalTopActions.map((a, idx) => {
+                                  const title = typeof a.title === 'string' ? a.title : '';
+                                  const detail = typeof a.detail === 'string' ? a.detail : '';
+                                  return (
+                                    <div key={`${title}-${idx}`} data-testid={`approval-action-officer-${idx}`}>
+                                      <div style={{ fontWeight: 800, color: '#111827', fontSize: '0.9rem' }}>{title}</div>
+                                      {detail ? <div style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '2px' }}>{detail}</div> : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div style={{ border: '1px solid #f3f4f6', borderRadius: '10px', padding: '12px', backgroundColor: '#fafafa' }}>
