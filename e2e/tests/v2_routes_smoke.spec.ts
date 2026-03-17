@@ -59,6 +59,27 @@ test.describe('V2 Route Skeleton', () => {
     await expect(page.getByTestId(`pipeline-group-${firstPhaseId as string}`)).toContainText(borrowerName, { timeout: 20000 });
     await expect(page.getByTestId(`loan-row-${loanId as string}`)).toBeVisible({ timeout: 20000 });
 
+    await page.getByTestId(`loan-row-${loanId as string}`).click();
+    await expect(page.getByTestId('text-underwriting-memo-title')).toBeVisible();
+    await page.getByTestId('button-generate-underwriting-memo').click();
+    await expect(page.getByTestId('underwriting-memo')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('underwriting-memo-disclaimer')).toBeVisible();
+
+    await page.reload();
+    try {
+      await page.getByLabel('Username').waitFor({ state: 'visible', timeout: 3000 });
+      await page.getByLabel('Username').fill('admin');
+      await page.getByLabel('Password').fill('admin123');
+      await page.getByRole('button', { name: 'Login' }).click();
+    } catch {
+      // already logged in
+    }
+
+    await page.getByRole('link', { name: 'Pipeline', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Loans' })).toBeVisible();
+    await page.getByTestId(`loan-row-${loanId as string}`).click();
+    await expect(page.getByTestId('underwriting-memo')).toBeVisible({ timeout: 20000 });
+
     await page.getByTestId(`pipeline-phase-header-${firstPhaseId as string}`).click();
     await expect(page.getByTestId('phase-title')).toContainText(firstPhaseName as string);
     await expect(page.getByTestId('card-summary')).toBeVisible();

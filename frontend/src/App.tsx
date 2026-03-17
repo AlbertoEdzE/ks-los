@@ -944,10 +944,12 @@ function App() {
         currentPhaseId?: string | null;
         status?: string | null;
         documentChecklist?: unknown;
+        underwritingMemo?: unknown;
       }>
     >([]);
     const [selectedId, setSelectedId] = useState<string>('');
     const selected = React.useMemo(() => loans.find((l) => l.id === selectedId) || null, [loans, selectedId]);
+    const [memoBusy, setMemoBusy] = useState(false);
 
     const refreshPhases = React.useCallback(async () => {
       try {
@@ -1037,6 +1039,29 @@ function App() {
         .filter((x) => Boolean(x.name));
     }, [selected?.documentChecklist]);
 
+    const underwritingMemo = React.useMemo(() => {
+      const raw = selected?.underwritingMemo as unknown;
+      if (!raw || typeof raw !== 'object') return null;
+      const memo = raw as Record<string, unknown>;
+      const sectionsRaw = memo.sections;
+      const sections = Array.isArray(sectionsRaw)
+        ? sectionsRaw
+            .map((s) => (s && typeof s === 'object' ? (s as Record<string, unknown>) : null))
+            .filter(Boolean)
+            .map((s) => {
+              const title = typeof s?.title === 'string' ? s.title : '';
+              const bullets = Array.isArray(s?.bullets) ? s.bullets.filter((b): b is string => typeof b === 'string') : [];
+              return { title, bullets };
+            })
+            .filter((s) => Boolean(s.title))
+        : [];
+      const flags = Array.isArray(memo.flags) ? memo.flags.filter((f): f is string => typeof f === 'string') : [];
+      const nextActions = Array.isArray(memo.nextActions) ? memo.nextActions.filter((a): a is string => typeof a === 'string') : [];
+      const disclaimer = typeof memo.disclaimer === 'string' ? memo.disclaimer : '';
+      const generatedAt = typeof memo.generatedAt === 'string' ? memo.generatedAt : '';
+      return { sections, flags, nextActions, disclaimer, generatedAt };
+    }, [selected?.underwritingMemo]);
+
     const updateDocStatus = async (name: string, status: DocumentStatus) => {
       if (!selected) return;
       const res = await fetch(`http://localhost:8000/api/loans/${selected.id}/documents`, {
@@ -1047,6 +1072,22 @@ function App() {
       if (!res.ok) return;
       const updated = (await res.json()) as (typeof loans)[number];
       setLoans((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+    };
+
+    const generateMemo = async () => {
+      if (!selected) return;
+      setMemoBusy(true);
+      try {
+        const res = await fetch(`http://localhost:8000/api/loans/${selected.id}/underwriting-memo`, {
+          method: 'POST',
+          headers: { ...officerHeaders, 'content-type': 'application/json' },
+        });
+        if (!res.ok) return;
+        const updated = (await res.json()) as (typeof loans)[number];
+        setLoans((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+      } finally {
+        setMemoBusy(false);
+      }
     };
 
     const updateLoanPhase = async (phaseId: string | null) => {
@@ -1211,6 +1252,85 @@ function App() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ border: '1px solid #f3f4f6', borderRadius: '10px', padding: '12px', backgroundColor: '#fafafa' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 900, color: '#111827' }} data-testid="text-underwriting-memo-title">
+                        Underwriting Memo
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void generateMemo()}
+                        disabled={memoBusy}
+                        style={{
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '10px',
+                          padding: '8px 10px',
+                          backgroundColor: memoBusy ? '#f3f4f6' : '#ffffff',
+                          cursor: memoBusy ? 'not-allowed' : 'pointer',
+                          fontWeight: 800,
+                        }}
+                        data-testid="button-generate-underwriting-memo"
+                      >
+                        {underwritingMemo ? 'Regenerate' : 'Generate'}
+                      </button>
+                    </div>
+
+                    {!underwritingMemo ? (
+                      <div style={{ color: '#6b7280', marginTop: '10px' }}>No memo generated yet.</div>
+                    ) : (
+                      <div style={{ display: 'grid', gap: '12px', marginTop: '10px' }} data-testid="underwriting-memo">
+                        {underwritingMemo.generatedAt ? (
+                          <div style={{ fontSize: '0.85rem', color: '#6b7280' }} data-testid="underwriting-memo-generated-at">
+                            Generated: {underwritingMemo.generatedAt}
+                          </div>
+                        ) : null}
+                        {underwritingMemo.flags.length > 0 ? (
+                          <div style={{ display: 'grid', gap: '6px' }} data-testid="underwriting-memo-flags">
+                            <div style={{ fontSize: '0.8rem', fontWeight: 900, color: '#111827' }}>Flags</div>
+                            <ul style={{ margin: 0, paddingLeft: '18px', color: '#111827' }}>
+                              {underwritingMemo.flags.map((f, idx) => (
+                                <li key={`${f}-${idx}`} data-testid={`underwriting-memo-flag-${idx}`}>
+                                  {f}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                        {underwritingMemo.nextActions.length > 0 ? (
+                          <div style={{ display: 'grid', gap: '6px' }} data-testid="underwriting-memo-next-actions">
+                            <div style={{ fontSize: '0.8rem', fontWeight: 900, color: '#111827' }}>Next Actions</div>
+                            <ul style={{ margin: 0, paddingLeft: '18px', color: '#111827' }}>
+                              {underwritingMemo.nextActions.map((a, idx) => (
+                                <li key={`${a}-${idx}`} data-testid={`underwriting-memo-next-action-${idx}`}>
+                                  {a}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                        {underwritingMemo.sections.map((s, idx) => (
+                          <div key={`${s.title}-${idx}`} style={{ display: 'grid', gap: '6px' }} data-testid={`underwriting-memo-section-${idx}`}>
+                            <div style={{ fontSize: '0.8rem', fontWeight: 900, color: '#111827' }}>{s.title}</div>
+                            {s.bullets.length === 0 ? null : (
+                              <ul style={{ margin: 0, paddingLeft: '18px', color: '#111827' }}>
+                                {s.bullets.map((b, j) => (
+                                  <li key={`${b}-${j}`} data-testid={`underwriting-memo-section-${idx}-bullet-${j}`}>
+                                    {b}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        ))}
+                        {underwritingMemo.disclaimer ? (
+                          <div style={{ fontSize: '0.85rem', color: '#6b7280' }} data-testid="underwriting-memo-disclaimer">
+                            {underwritingMemo.disclaimer}
+                          </div>
+                        ) : null}
                       </div>
                     )}
                   </div>

@@ -74,6 +74,7 @@ This plan defines a **view-by-view integration sequence** where each screen is c
 - Phases: [v2_phases_router.py](file:///Users/albertohernandez/Documents/projects/ks-los/src/api/routers/v2_phases_router.py)
   - `GET /api/phases`
   - `GET /api/phases/active`
+  - `GET /api/phases/{id}/detail`
   - `POST /api/phases/actions` (officer-only)
 - Loans: [v2_loans_router.py](file:///Users/albertohernandez/Documents/projects/ks-los/src/api/routers/v2_loans_router.py) (officer-only)
   - `GET /api/loans`
@@ -81,6 +82,8 @@ This plan defines a **view-by-view integration sequence** where each screen is c
   - `POST /api/loans`
   - `PATCH /api/loans/{id}`
   - `PATCH /api/loans/{id}/documents`
+  - `GET /api/loans/{id}/underwriting-memo`
+  - `POST /api/loans/{id}/underwriting-memo`
   - `POST /api/loans/actions`
 - Catalog products: [v2_catalog_products_router.py](file:///Users/albertohernandez/Documents/projects/ks-los/src/api/routers/v2_catalog_products_router.py) (officer-only)
   - `GET /api/catalog-products`
@@ -106,8 +109,8 @@ This plan defines a **view-by-view integration sequence** where each screen is c
 | Officer Dashboard ([officer-dashboard.tsx](file:///Users/albertohernandez/Documents/projects/ks-los/doc/02_Loan-Navigator-AI/client/src/pages/officer-dashboard.tsx)) | `/dashboard` | `/dashboard` | List leads, view details/history, update status + assignment, show seriousness/fit/next angle | `/api/conversations` + PATCH | E2E officer lead edit persists + integration auth tests | **Implemented (baseline)** |
 | Loan Pipeline ([loan-pipeline.tsx](file:///Users/albertohernandez/Documents/projects/ks-los/doc/02_Loan-Navigator-AI/client/src/pages/loan-pipeline.tsx)) | `/pipeline` | `/pipeline` | Group loans by phase, unassigned bucket, open loan detail, persist edits | `/api/loans`, `/api/phases` | E2E grouping + patch persist + integration | **Implemented (baseline)** |
 | Product Catalog ([loan-products.tsx](file:///Users/albertohernandez/Documents/projects/ks-los/doc/02_Loan-Navigator-AI/client/src/pages/loan-products.tsx)) | `/loan-products` | `/loan-products` | List products, create/edit products, required docs drive checklist logic | `/api/catalog-products` | E2E create/edit + backend integration | **Implemented (baseline)** |
-| Officer Lifecycle Chat ([officer-chat.tsx](file:///Users/albertohernandez/Documents/projects/ks-los/doc/02_Loan-Navigator-AI/client/src/pages/officer-chat.tsx)) | `/officer-chat` | `/officer-chat` | Officer chat session that triggers validated actions and refreshes pipeline/loans | `/api/conversations` (officer), `/api/loans/actions`, `/api/phases/actions` | E2E: officer action → loan created/updated | **Partial (UI baseline)** |
-| Phase Detail ([phase-detail.tsx](file:///Users/albertohernandez/Documents/projects/ks-los/doc/02_Loan-Navigator-AI/client/src/pages/phase-detail.tsx)) | `/phases/:id` | (missing) | View phase knowledge + metrics and link back; phase id is stable | `/api/phases` (+ optional derived metrics) | E2E: open phase detail from tracker | **Planned** |
+| Officer Lifecycle Chat ([officer-chat.tsx](file:///Users/albertohernandez/Documents/projects/ks-los/doc/02_Loan-Navigator-AI/client/src/pages/officer-chat.tsx)) | `/officer-chat` | `/officer-chat` | Officer chat session that triggers validated actions and refreshes pipeline/loans | `/api/conversations` (officer), `/api/loans/actions`, `/api/phases/actions` | E2E: officer action → loan created/updated | **Implemented (baseline)** |
+| Phase Detail ([phase-detail.tsx](file:///Users/albertohernandez/Documents/projects/ks-los/doc/02_Loan-Navigator-AI/client/src/pages/phase-detail.tsx)) | `/phases/:id` | `/phases/:id` | View phase knowledge + metrics and link back; phase id is stable | `/api/phases`, `/api/phases/{id}/detail` | E2E: open phase detail from tracker | **Implemented (baseline)** |
 
 ### 5.2 Functional Parity Matrix (Behavior-Level Contract)
 
@@ -273,9 +276,9 @@ A view is accepted only when all are true:
 This document aligns with the v2 work packages in: [02_work_packages.md](file:///Users/albertohernandez/Documents/projects/ks-los/doc/02_v2/02_work_packages.md)
 
 - **Implemented (baseline):** WP-V2-001 .. WP-V2-012 (route set + core APIs + borrower workflow + pipeline baseline)
-- **Partial:** WP-V2-013 .. WP-V2-014 (officer lifecycle chat action semantics)
-- **In-progress/Incremental:** WP-V2-015 .. WP-V2-017 (probability navigator, checklist depth, underwriting memo)
-- **Planned:** Phase detail parity route and metrics (shell `/phases/:id`)
+- **Implemented (baseline):** WP-V2-013 .. WP-V2-014 (officer lifecycle chat action semantics)
+- **Implemented (incremental):** WP-V2-015 .. WP-V2-017 (probability navigator, checklist baseline, underwriting memo)
+- **Planned (Phase 5 hardening):** WP-V2-018 .. WP-V2-020 (RBAC auth, observability completeness, deterministic regression hardening)
 
 ---
 
@@ -289,4 +292,3 @@ This document aligns with the v2 work packages in: [02_work_packages.md](file://
   - Mitigation: integration tests that verify derived behaviors when products change.
 - **Risk: Non-deterministic test data**
   - Mitigation: reset-based seed endpoint and localStorage cleanup in E2E.
-

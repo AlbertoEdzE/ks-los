@@ -1,8 +1,9 @@
+import re
 from typing import Any, Optional, Literal, Annotated, Union
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,13 @@ from src.shared.metrics import request_counter, request_errors_total
 router = APIRouter(prefix="/api/loans", tags=["v2_loans"], dependencies=[Depends(require_officer_role)])
 
 _DOC_STATUSES = {"missing", "submitted", "verified", "rejected"}
+
+_MEMO_PROHIBITED_PATTERNS = [
+    r"\bguarantee(?:d|s)?\b",
+    r"\b(fully\s+)?approved\b",
+    r"\bwill\s+be\s+approved\b",
+    r"\b100%\b",
+]
 
 
 def _now_iso() -> str:
@@ -78,6 +86,250 @@ def _get_product_by_code(db: Session, code: str) -> Optional[LoanProductCatalog]
 
     _ensure_products_seeded(db)
     return db.execute(select(LoanProductCatalog).where(LoanProductCatalog.code == code)).scalar_one_or_none()
+
+def _parse_float(value: Optional[str]) -> Optional[float]:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    cleaned = re.sub(r"[^0-9.\-]", "", raw)
+    if cleaned in {"", "-", ".", "-."}:
+        return None
+    try:
+        return float(cleaned)
+    except Exception:
+        return None
+
+
+def _format_money(value: Optional[float]) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        if abs(value) >= 1000:
+            return f"{value:,.0f}"
+        return f"{value:.2f}"
+    except Exception:
+        return str(value)
+
+
+def _guardrail_validate_text(text: str) -> None:
+    for pat in _MEMO_PROHIBITED_PATTERNS:
+        if re.search(pat, text, flags=re.IGNORECASE):
+            raise ValueError("Memo guardrail violation")
+
+
+class EvidenceItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    field: str
+    value: Optional[str] = None
+    source: str
+
+
+class MemoSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str
+    bullets: list[str]
+    evidence: list[EvidenceItem] = Field(default_factory=list)
+
+
+class UnderwritingMemo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    loanId: str
+    productCode: Optional[str] = None
+    generatedAt: str
+    method: str
+    disclaimer: str
+    flags: list[str]
+    nextActions: list[str]
+    sections: list[MemoSection]
+
+
+def _generate_underwriting_memo(loan: Loan, product: Optional[LoanProductCatalog]) -> UnderwritingMemo:
+    now = _now_iso()
+
+    loan_amount = _parse_float(loan.loan_amount)
+    monthly_income = _parse_float(loan.monthly_income)
+    existing_debts = _parse_float(loan.existing_debts)
+    credit_score = _parse_float(loan.credit_score)
+    property_value = _parse_float(loan.property_value)
+    stated_ltv = _parse_float(loan.ltv)
+
+    computed_ltv: Optional[float] = None
+    if stated_ltv is not None:
+        computed_ltv = stated_ltv
+    elif loan_amount is not None and property_value is not None and property_value > 0:
+        computed_ltv = (loan_amount / property_value) * 100.0
+
+    dti: Optional[float] = None
+    if monthly_income is not None and monthly_income > 0 and existing_debts is not None:
+        dti = (existing_debts / monthly_income) * 100.0
+
+    required_docs = []
+    missing_names: list[str] = []
+    missing_docs = 0
+    submitted_docs = 0
+    verified_docs = 0
+    rejected_docs = 0
+    if isinstance(loan.document_checklist, dict) and isinstance(loan.document_checklist.get("items"), list):
+        for item in loan.document_checklist["items"]:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            status = item.get("status")
+            if isinstance(name, str) and name.strip():
+                required_docs.append(name.strip())
+            if status == "missing":
+                missing_docs += 1
+                if isinstance(name, str) and name.strip():
+                    missing_names.append(name.strip())
+            elif status == "submitted":
+                submitted_docs += 1
+            elif status == "verified":
+                verified_docs += 1
+            elif status == "rejected":
+                rejected_docs += 1
+
+    flags: list[str] = []
+    next_actions: list[str] = []
+
+    if credit_score is None:
+        flags.append("Credit score not provided")
+        next_actions.append("Collect credit score / bureau range")
+    elif product and product.min_credit_score is not None and credit_score < float(product.min_credit_score):
+        flags.append(f"Credit score below product minimum ({product.min_credit_score})")
+        next_actions.append("Review alternative products or add mitigations (co-applicant / collateral)")
+
+    if monthly_income is None:
+        flags.append("Monthly income not provided")
+        next_actions.append("Collect salary slips / income proof and confirm net monthly income")
+
+    if computed_ltv is None:
+        flags.append("LTV not computable (missing property value / LTV)")
+        next_actions.append("Collect property value and compute LTV")
+    elif product:
+        max_ltv = _parse_float(product.max_ltv)
+        if max_ltv is not None and computed_ltv > max_ltv:
+            flags.append(f"LTV above product maximum ({max_ltv:.0f}%)")
+            next_actions.append("Increase down payment or consider lower LTV product")
+
+    if missing_docs > 0:
+        flags.append(f"{missing_docs} required documents missing")
+        next_actions.append("Request missing documents and update checklist")
+    if rejected_docs > 0:
+        flags.append(f"{rejected_docs} documents rejected")
+        next_actions.append("Resolve rejected documents (re-upload / correction / verification)")
+
+    snapshot_section = MemoSection(
+        title="Borrower & Loan Snapshot",
+        bullets=[
+            f"Borrower: {loan.borrower_name or '—'}",
+            f"Loan type: {loan.loan_type or '—'}",
+            f"Requested amount: {_format_money(loan_amount) or loan.loan_amount or '—'}",
+            f"Catalog product: {loan.catalog_product_code or '—'}",
+        ],
+        evidence=[
+            EvidenceItem(field="borrowerName", value=loan.borrower_name, source="loans.borrower_name"),
+            EvidenceItem(field="loanType", value=loan.loan_type, source="loans.loan_type"),
+            EvidenceItem(field="loanAmount", value=loan.loan_amount, source="loans.loan_amount"),
+            EvidenceItem(field="catalogProductCode", value=loan.catalog_product_code, source="loans.catalog_product_code"),
+        ],
+    )
+
+    affordability_bullets: list[str] = [
+        f"Monthly income: {_format_money(monthly_income) or loan.monthly_income or '—'}",
+        f"Existing monthly debts: {_format_money(existing_debts) or loan.existing_debts or '—'}",
+    ]
+    if dti is not None:
+        affordability_bullets.append(f"Debt-to-income (DTI): {dti:.1f}%")
+    if credit_score is not None:
+        affordability_bullets.append(f"Credit score (stated): {credit_score:.0f}")
+
+    affordability_section = MemoSection(
+        title="Affordability & Credit Signals",
+        bullets=affordability_bullets,
+        evidence=[
+            EvidenceItem(field="monthlyIncome", value=loan.monthly_income, source="loans.monthly_income"),
+            EvidenceItem(field="existingDebts", value=loan.existing_debts, source="loans.existing_debts"),
+            EvidenceItem(field="creditScore", value=loan.credit_score, source="loans.credit_score"),
+        ],
+    )
+
+    collateral_bullets: list[str] = [
+        f"Property value: {_format_money(property_value) or loan.property_value or '—'}",
+        f"Down payment: {loan.down_payment or '—'}",
+        f"Loan-to-value (LTV): {f'{computed_ltv:.1f}%' if computed_ltv is not None else (loan.ltv or '—')}",
+    ]
+    collateral_section = MemoSection(
+        title="Collateral & LTV",
+        bullets=collateral_bullets,
+        evidence=[
+            EvidenceItem(field="propertyValue", value=loan.property_value, source="loans.property_value"),
+            EvidenceItem(field="downPayment", value=loan.down_payment, source="loans.down_payment"),
+            EvidenceItem(field="ltv", value=loan.ltv, source="loans.ltv"),
+        ],
+    )
+
+    docs_section = MemoSection(
+        title="Documents & Checklist Status",
+        bullets=[
+            f"Required documents: {len(required_docs)}",
+            f"Missing: {missing_docs} · Submitted: {submitted_docs} · Verified: {verified_docs} · Rejected: {rejected_docs}",
+        ]
+        + ([f"Missing items: {', '.join(missing_names[:6])}"] if missing_names else []),
+        evidence=[
+            EvidenceItem(field="documentChecklist", value=str(loan.document_checklist.get("asOf")) if isinstance(loan.document_checklist, dict) else None, source="loans.document_checklist"),
+        ],
+    )
+
+    risks_section = MemoSection(
+        title="Risks & Mitigations (Preliminary)",
+        bullets=(flags if flags else ["No material flags detected from currently available fields."]),
+        evidence=[],
+    )
+
+    recommendation_text = (
+        "This memo is a preliminary, rules-based underwriting summary to support officer workflow. "
+        "It is not a credit decision and does not imply approval."
+    )
+    recommendation_section = MemoSection(
+        title="Recommendation & Next Steps",
+        bullets=[
+            "Recommendation: proceed to underwriting review after resolving the highest-impact gaps.",
+            *(_unique_ordered(next_actions) if next_actions else ["Confirm remaining borrower profile fields and document status."]),
+        ],
+        evidence=[],
+    )
+
+    memo = UnderwritingMemo(
+        loanId=loan.id,
+        productCode=loan.catalog_product_code,
+        generatedAt=now,
+        method="rules_v1",
+        disclaimer=recommendation_text,
+        flags=_unique_ordered(flags),
+        nextActions=_unique_ordered(next_actions),
+        sections=[
+            MemoSection(
+                title="Executive Summary",
+                bullets=[
+                    f"Generated at: {now}",
+                    f"Scope: uses available loan fields and document checklist as evidence signals.",
+                ],
+                evidence=[],
+            ),
+            snapshot_section,
+            affordability_section,
+            collateral_section,
+            docs_section,
+            risks_section,
+            recommendation_section,
+        ],
+    )
+
+    full_text = memo.model_dump_json()
+    _guardrail_validate_text(full_text)
+    return memo
 
 
 class CreateLoanRequest(BaseModel):
@@ -239,6 +491,7 @@ def _serialize_loan(l: Loan) -> dict[str, Any]:
         "ltv": l.ltv,
         "catalogProductCode": l.catalog_product_code,
         "documentChecklist": l.document_checklist,
+        "underwritingMemo": l.underwriting_memo,
         "currentPhaseId": l.current_phase_id,
         "status": l.status,
         "notes": l.notes,
@@ -406,5 +659,48 @@ def patch_loan_document(loan_id: str, req: PatchLoanDocumentRequest, db: Session
         endpoint="/api/loans/{loan_id}/documents",
         status="success",
         meta={"loanId": loan_id, "document": target, "statusValue": req.status},
+    )
+    return _serialize_loan(loan)
+
+
+@router.get("/{loan_id}/underwriting-memo")
+def get_underwriting_memo(loan_id: str, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/loans/{loan_id}/underwriting-memo").inc()
+    loan = db.get(Loan, loan_id)
+    if not loan:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/underwriting-memo").inc()
+        raise HTTPException(status_code=404, detail="Loan not found")
+    if loan.underwriting_memo is None:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/underwriting-memo").inc()
+        raise HTTPException(status_code=404, detail="Underwriting memo not found")
+    return loan.underwriting_memo
+
+
+@router.post("/{loan_id}/underwriting-memo")
+def generate_underwriting_memo(loan_id: str, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/loans/{loan_id}/underwriting-memo").inc()
+    loan = db.get(Loan, loan_id)
+    if not loan:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/underwriting-memo").inc()
+        log_audit(event="v2_underwriting_memo_generate", endpoint="/api/loans/{loan_id}/underwriting-memo", status="not_found", meta={"loanId": loan_id})
+        raise HTTPException(status_code=404, detail="Loan not found")
+
+    product = _get_product_by_code(db, loan.catalog_product_code) if loan.catalog_product_code else None
+    try:
+        memo = _generate_underwriting_memo(loan, product)
+    except Exception:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/underwriting-memo").inc()
+        log_audit(event="v2_underwriting_memo_generate", endpoint="/api/loans/{loan_id}/underwriting-memo", status="error", meta={"loanId": loan_id})
+        raise HTTPException(status_code=500, detail="Failed to generate memo")
+
+    loan.underwriting_memo = memo.model_dump()
+    db.add(loan)
+    db.commit()
+    db.refresh(loan)
+    log_audit(
+        event="v2_underwriting_memo_generate",
+        endpoint="/api/loans/{loan_id}/underwriting-memo",
+        status="success",
+        meta={"loanId": loan.id, "method": memo.method},
     )
     return _serialize_loan(loan)

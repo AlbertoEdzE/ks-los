@@ -105,4 +105,75 @@ describe('App', () => {
     await screen.findByTestId('text-save-ok');
     expect(screen.getByText('Jane Doe')).toBeInTheDocument();
   });
+
+  it('allows officer to generate underwriting memo in pipeline', async () => {
+    const phaseId = 'phase-1';
+    const loanId = 'loan-1';
+    const baseLoan = {
+      id: loanId,
+      borrowerName: 'Memo Borrower',
+      loanType: 'Home Loan',
+      loanAmount: '250000',
+      catalogProductCode: 'HL-PUR-001',
+      currentPhaseId: phaseId,
+      status: 'draft',
+      documentChecklist: {
+        productCode: 'HL-PUR-001',
+        items: [{ name: 'PAN Card', status: 'missing', updatedAt: '2026-03-17T00:00:00.000Z' }],
+        asOf: '2026-03-17T00:00:00.000Z',
+      },
+      underwritingMemo: null,
+    };
+
+    const loanWithMemo = {
+      ...baseLoan,
+      underwritingMemo: {
+        loanId,
+        productCode: 'HL-PUR-001',
+        generatedAt: '2026-03-17T00:01:00.000Z',
+        method: 'rules_v1',
+        disclaimer: 'This is not a credit decision and does not imply approval.',
+        flags: ['Credit score not provided'],
+        nextActions: ['Collect credit score / bureau range'],
+        sections: [{ title: 'Executive Summary', bullets: ['Scope: rules-based'] }],
+      },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const method = (init?.method || 'GET').toUpperCase();
+
+      if (url.endsWith('/api/phases') && method === 'GET') {
+        return new Response(JSON.stringify([{ id: phaseId, name: 'Lead & Inquiry', sortOrder: 1, isActive: true }]), { status: 200 });
+      }
+      if (url.endsWith('/api/loans') && method === 'GET') {
+        return new Response(JSON.stringify([baseLoan]), { status: 200 });
+      }
+      if (url.endsWith(`/api/loans/${loanId}/underwriting-memo`) && method === 'POST') {
+        return new Response(JSON.stringify(loanWithMemo), { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={['/pipeline']}>
+        <App />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'admin' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'admin123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Login' }));
+
+    await screen.findByRole('heading', { name: 'Loans' });
+    await screen.findByTestId(`loan-row-${loanId}`);
+
+    fireEvent.click(screen.getByTestId(`loan-row-${loanId}`));
+    expect(await screen.findByTestId('text-underwriting-memo-title')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('button-generate-underwriting-memo'));
+    await screen.findByTestId('underwriting-memo');
+    expect(screen.getByTestId('underwriting-memo-disclaimer')).toHaveTextContent('not a credit decision');
+  });
 });

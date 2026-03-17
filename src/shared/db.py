@@ -88,6 +88,7 @@ class Loan(Base):
     current_phase_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     catalog_product_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     document_checklist: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    underwriting_memo: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     conversation_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -268,6 +269,8 @@ def _ensure_loans_schema(engine) -> None:
                 missing_columns.append(("catalog_product_code", "TEXT"))
             if "document_checklist" not in existing:
                 missing_columns.append(("document_checklist", "JSON"))
+            if "underwriting_memo" not in existing:
+                missing_columns.append(("underwriting_memo", "JSON"))
 
             for col, col_type in missing_columns:
                 conn.execute(text(f"alter table loans add column {col} {col_type}"))

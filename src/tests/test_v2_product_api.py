@@ -314,6 +314,56 @@ def test_wp_v2_016_document_checklist_is_derived_from_catalog_product_and_persis
     assert by_name_fetched[first_doc]["status"] == "submitted"
 
 
+def test_wp_v2_017_underwriting_memo_generates_persists_and_has_guardrails():
+    created = client.post(
+        "/api/loans",
+        json={
+            "borrowerName": "Memo Borrower",
+            "loanType": "Home Loan",
+            "loanAmount": "250000",
+            "catalogProductCode": "HL-PUR-001",
+            "monthlyIncome": "8000",
+            "existingDebts": "1500",
+            "creditScore": "750",
+            "propertyValue": "400000",
+        },
+        headers=OFFICER_HEADERS,
+    )
+    assert created.status_code == 200
+    loan = created.json()
+    loan_id = loan["id"]
+
+    generated = client.post(f"/api/loans/{loan_id}/underwriting-memo", headers=OFFICER_HEADERS)
+    assert generated.status_code == 200
+    updated = generated.json()
+    assert updated["id"] == loan_id
+    assert updated["underwritingMemo"] is not None
+    memo = updated["underwritingMemo"]
+    assert memo["loanId"] == loan_id
+    assert memo["method"] == "rules_v1"
+    assert isinstance(memo.get("sections"), list)
+    assert len(memo["sections"]) >= 3
+    assert "disclaimer" in memo and isinstance(memo["disclaimer"], str)
+
+    import json as _json
+
+    text = _json.dumps(memo).lower()
+    assert "guarantee" not in text
+    assert "will be approved" not in text
+    assert "100%" not in text
+
+    fetched = client.get(f"/api/loans/{loan_id}/underwriting-memo", headers=OFFICER_HEADERS)
+    assert fetched.status_code == 200
+    fetched_memo = fetched.json()
+    assert fetched_memo["loanId"] == loan_id
+    assert fetched_memo["generatedAt"] == memo["generatedAt"]
+
+    fetched_loan = client.get(f"/api/loans/{loan_id}", headers=OFFICER_HEADERS)
+    assert fetched_loan.status_code == 200
+    fetched_payload = fetched_loan.json()
+    assert fetched_payload["underwritingMemo"]["loanId"] == loan_id
+
+
 def test_wp_v2_013_loan_action_validator_rejects_invalid_payload():
     from src.api.routers.v2_loans_router import _validate_loan_actions
 
