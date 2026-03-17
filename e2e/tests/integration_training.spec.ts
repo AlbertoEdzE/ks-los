@@ -20,7 +20,7 @@ test.describe('End-to-End Integration: Training Workflow', () => {
     }
     
     // Go to ML Training
-    await page.getByRole('button', { name: 'ML Training' }).click();
+    await page.getByRole('link', { name: 'ML Training' }).click();
     await page.getByRole('button', { name: 'Training Workflow' }).click();
   });
 

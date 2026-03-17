@@ -6,7 +6,7 @@ test.describe('ML Training Workflow', () => {
     await page.getByLabel('Username').fill('admin');
     await page.getByLabel('Password').fill('admin123');
     await page.getByRole('button', { name: 'Login' }).click();
-    await page.getByRole('button', { name: 'ML Training' }).click();
+    await page.getByRole('link', { name: 'ML Training' }).click();
     await page.getByRole('button', { name: 'Training Workflow' }).click();
   });
 

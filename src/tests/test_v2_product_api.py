@@ -132,6 +132,24 @@ def test_v2_conversation_patch_and_messages_flow():
     assert isinstance(first.get("recommendation"), str)
 
 
+def test_v2_debt_consolidation_recommends_personal_loans():
+    create = client.post("/api/conversations", json={})
+    assert create.status_code == 200
+    conv_id = create.json()["conversation"]["id"]
+
+    send = client.post(
+        f"/api/conversations/{conv_id}/messages",
+        json={"content": "I want to consolidate multiple debts into one EMI."},
+    )
+    assert send.status_code == 200
+    payload = send.json()
+    assert payload["message"]["role"] == "assistant"
+    assert payload["intentAnalysis"]["intentSummary"]["purpose"] == "debt_consolidation"
+    assert isinstance(payload["loanRecommendations"], list)
+    assert len(payload["loanRecommendations"]) >= 1
+    assert payload["loanRecommendations"][0]["type"] == "personal_loan"
+
+
 def test_wp_v2_008_intent_summary_filters_unknown_keys():
     from src.api.routers.v2_conversations_router import analyze_intent_message
 

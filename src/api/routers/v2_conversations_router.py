@@ -110,7 +110,7 @@ def _recommend_products(db: Session, intent: dict) -> list[dict[str, Any]]:
         category = "home_loan"
     elif purpose in {"car", "auto", "vehicle"}:
         category = "auto_loan"
-    elif purpose in {"personal", "education", "business"}:
+    elif purpose in {"personal", "education", "business", "debt_consolidation"}:
         category = "personal_loan"
 
     stmt = select(LoanProductCatalog).where(LoanProductCatalog.status == "active")
@@ -175,6 +175,26 @@ def _extract_income(text: str) -> Optional[str]:
     if not m:
         return None
     return m.group(4).replace(",", "")
+
+
+def _extract_existing_debts(text: str) -> Optional[str]:
+    t = text.lower()
+    m = re.search(r"\b(debt|debts|outstanding|owe|balance)\b[\w\s]*?(\$|₹|usd\s*)?\s*([\d,]+)", t)
+    if not m:
+        return None
+    return m.group(3).replace(",", "")
+
+
+def _extract_tenure(text: str) -> Optional[str]:
+    t = text.lower()
+    m = re.search(r"\b(\d{1,3})\s*(years|year|yrs|yr|months|month|mos|mo)\b", t)
+    if not m:
+        return None
+    n = int(m.group(1))
+    unit = m.group(2)
+    if unit in {"years", "year", "yrs", "yr"}:
+        return f"{n * 12} months"
+    return f"{n} months"
 
 
 def _extract_credit_score(text: str) -> Optional[str]:
@@ -255,6 +275,8 @@ def _compute_scores(intent: dict) -> tuple[int, int]:
 
 
 def _next_angle(intent: dict) -> str:
+    if intent.get("purpose") == "debt_consolidation" and not intent.get("existingDebts"):
+        return "Confirm total outstanding debts and current monthly repayments."
     if not intent.get("loanAmount"):
         return "Confirm desired loan amount and timeline."
     if not intent.get("purpose"):
@@ -268,10 +290,54 @@ def _next_angle(intent: dict) -> str:
     return "Validate documents, collateral, and eligibility constraints."
 
 
+def _build_borrower_assistant_reply(intent: dict) -> str:
+    purpose = (intent.get("purpose") or "").strip()
+    purpose_label = {
+        "home": "a home loan",
+        "car": "a car loan",
+        "personal": "a personal loan",
+        "business": "a business loan",
+        "education": "an education loan",
+        "debt_consolidation": "debt consolidation",
+    }.get(purpose, "a loan")
+
+    questions: list[str] = []
+
+    if not purpose:
+        questions.append("What’s the loan for (home, car, personal, business, or debt consolidation)?")
+
+    if purpose == "debt_consolidation" and not intent.get("existingDebts"):
+        questions.append("Roughly how much total outstanding debt do you want to consolidate, and what’s your current total monthly payment?")
+
+    if not intent.get("loanAmount") and purpose != "debt_consolidation":
+        questions.append("What loan amount are you considering (even an approximate range)?")
+
+    if not intent.get("monthlyIncome"):
+        questions.append("What’s your approximate monthly income?")
+
+    if not intent.get("employmentType"):
+        questions.append("Are you salaried or self-employed?")
+
+    if not intent.get("creditHistory"):
+        questions.append("Do you know your credit score (or a rough range)?")
+
+    if not intent.get("preferredTenure"):
+        questions.append("What tenure would you be comfortable with (e.g., 36 months, 5 years)?")
+
+    if not questions:
+        return "Thanks — I have enough to refine recommendations. Do you want the lowest EMI, lowest total interest, or fastest approval?"
+
+    top = questions[:3]
+    bullets = "\n".join([f"- {q}" for q in top])
+    return f"Got it — for {purpose_label}, I just need a few quick details:\n\n{bullets}"
+
+
 def analyze_intent_message(content: str, previous_intent: Optional[dict]) -> dict[str, Any]:
     amount = _extract_amount(content)
     income = _extract_income(content)
     credit = _extract_credit_score(content)
+    debts = _extract_existing_debts(content)
+    tenure = _extract_tenure(content)
     intent = IntentSummary(
         purpose=_infer_purpose(content),
         urgency=_infer_urgency(content),
@@ -279,6 +345,8 @@ def analyze_intent_message(content: str, previous_intent: Optional[dict]) -> dic
         monthlyIncome=income,
         employmentType=_infer_employment(content),
         creditHistory=credit,
+        existingDebts=debts,
+        preferredTenure=tenure,
     )
     merged = _merge_intent(previous_intent, intent)
     seriousness, fit = _compute_scores(merged)
@@ -622,6 +690,8 @@ def send_message(conversation_id: str, req: SendMessageRequest, db: Session = De
         phase_action = None
 
     assistant_text = "Got it. I’ll ask a few quick questions to narrow down the best option for you."
+    if conv.chat_role == "borrower":
+        assistant_text = _build_borrower_assistant_reply(analysis["intentSummary"])
     assistant_metadata = {
         "intentAnalysis": analysis,
         "loanRecommendations": conv.recommended_products if conv.chat_role == "borrower" else None,

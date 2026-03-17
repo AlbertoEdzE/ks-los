@@ -1,36 +1,76 @@
 import { test, expect } from '@playwright/test';
 
-test('chat shows suggestions and progress', async ({ page }) => {
-  await page.route('http://localhost:8000/chat/suggestions', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ items: ['Katie Brady, Antigua and Barbuda, 34 years old'] }),
-    });
+test('borrower chat shows suggestions and phase tracker', async ({ page }) => {
+  await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
+    headers: { 'x-officer-role': 'loan-officer-access' },
   });
-
-  await page.route('http://localhost:8000/agent/chat', async (route) => {
-    if (route.request().method() !== 'POST') {
-      await route.fallback();
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ response: 'Thanks — I can help with that.' }),
-    });
+  await page.addInitScript(() => {
+    window.localStorage.removeItem('v2_borrower_conversation_id');
   });
 
   await page.goto('/login');
   await page.getByLabel('Username').fill('demo');
   await page.getByLabel('Password').fill('demo123');
   await page.getByRole('button', { name: 'Login' }).click();
-  await expect(page.getByText('Chat with Journey Coach')).toBeVisible();
+  await expect(page.getByTestId('text-app-title')).toHaveText('LoanAssist AI');
+  await expect(page.getByRole('heading', { name: 'Tell me what you need' })).toBeVisible();
 
-  await expect(page.getByText(/Quick Start|Suggested inputs/i)).toBeVisible({ timeout: 10000 });
-  await expect(page.getByRole('button', { name: /Katie Brady/i })).toBeVisible({ timeout: 10000 });
+  const homeLoanButton = page.getByRole('button', { name: /Home Loan/i });
+  await expect(homeLoanButton).toBeVisible({ timeout: 10000 });
 
-  await page.getByRole('button', { name: /Katie Brady/i }).click();
-  await expect(page.getByTestId('chat-message-assistant')).toHaveCount(2, { timeout: 10000 });
-  await expect(page.getByRole('status')).toBeVisible();
+  await homeLoanButton.click();
+  await expect(page.getByTestId('chat-message-user')).toHaveCount(1, { timeout: 20000 });
+  await expect(page.getByTestId('chat-message-assistant')).toHaveCount(1, { timeout: 20000 });
+  await expect(page.getByTestId('chat-message-assistant').first()).toContainText('What loan amount', { timeout: 20000 });
+
+  await expect(page.getByTestId('phase-progress-tracker')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByTestId('recommended-products')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByText('Home Purchase Loan')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByTestId('next-conversation-angle')).not.toHaveText('—', { timeout: 20000 });
+});
+
+test('debt consolidation recommends personal loan products', async ({ page }) => {
+  await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
+    headers: { 'x-officer-role': 'loan-officer-access' },
+  });
+  await page.addInitScript(() => {
+    window.localStorage.removeItem('v2_borrower_conversation_id');
+  });
+
+  await page.goto('/login');
+  await page.getByLabel('Username').fill('demo');
+  await page.getByLabel('Password').fill('demo123');
+  await page.getByRole('button', { name: 'Login' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Tell me what you need' })).toBeVisible();
+  const debtButton = page.getByRole('button', { name: /Debt Consolidation/i });
+  await debtButton.click();
+
+  await expect(page.getByTestId('recommended-products')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByText('Personal Loan — Salaried')).toBeVisible({ timeout: 20000 });
+});
+
+test('phase tracker navigates to phase detail view', async ({ page }) => {
+  await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
+    headers: { 'x-officer-role': 'loan-officer-access' },
+  });
+  await page.addInitScript(() => {
+    window.localStorage.removeItem('v2_borrower_conversation_id');
+  });
+
+  await page.goto('/login');
+  await page.getByLabel('Username').fill('demo');
+  await page.getByLabel('Password').fill('demo123');
+  await page.getByRole('button', { name: 'Login' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Tell me what you need' })).toBeVisible();
+  await page.getByRole('button', { name: /Home Loan/i }).click();
+
+  await expect(page.getByTestId('phase-progress-tracker')).toBeVisible({ timeout: 20000 });
+  await page.getByTestId('phase-step-0').click();
+
+  await expect(page).toHaveURL(/\/phases\/.+/);
+  await expect(page.getByTestId('phase-title')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByTestId('phase-list')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByTestId('phase-list-item-selected')).toBeVisible({ timeout: 20000 });
 });

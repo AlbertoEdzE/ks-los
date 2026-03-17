@@ -1,35 +1,20 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Ensure we are in the project root
 cd "$(dirname "$0")/.."
 
 echo "Starting Integration Tests..."
 
-# Check if backend is running
-if ! lsof -i :8000 > /dev/null; then
-    echo "Backend not running. Starting backend..."
-    source venv/bin/activate
-    python -m src.main &
-    BACKEND_PID=$!
-    echo "Backend started with PID $BACKEND_PID"
-    
-    # Wait for backend to be ready
-    echo "Waiting for backend to be ready..."
-    sleep 10
-else
-    echo "Backend already running."
-fi
+cleanup() {
+  bash ./scripts/stop_dev.sh || true
+}
 
-# Run frontend tests
+trap cleanup EXIT
+
+echo "Launching stack..."
+bash ./scripts/launch_dev.sh
+
 echo "Running Playwright E2E tests..."
-cd frontend
-pnpm exec playwright test
-
-# Cleanup if we started the backend
-if [ ! -z "$BACKEND_PID" ]; then
-    echo "Stopping backend (PID $BACKEND_PID)..."
-    kill $BACKEND_PID
-fi
+npm -C e2e test
 
 echo "Integration tests completed successfully."

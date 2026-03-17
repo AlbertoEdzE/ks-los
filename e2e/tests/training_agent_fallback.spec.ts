@@ -14,7 +14,7 @@ test.describe('Training Agent Fallback', () => {
         // Already logged in
     }
     // Navigate to ML Training if not already there
-    await page.getByRole('button', { name: 'ML Training' }).click();
+    await page.getByRole('link', { name: 'ML Training' }).click();
     await page.getByRole('button', { name: 'Training Workflow' }).click();
   });
 

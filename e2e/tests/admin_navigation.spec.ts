@@ -12,23 +12,19 @@ test.describe('Admin Panel Navigation', () => {
     // Check initial state
     await expect(page.getByRole('heading', { name: 'Leads' })).toBeVisible();
 
-    // Click Configuration
-    await page.getByRole('button', { name: 'Configuration' }).click();
+    await page.getByRole('link', { name: 'Configuration' }).click();
     await expect(page.getByRole('heading', { name: 'System Configuration' })).toBeVisible();
 
-    // Click Simulator
-    await page.getByRole('button', { name: 'Simulator' }).click();
+    await page.getByRole('link', { name: 'Simulator' }).click();
     await expect(page.getByRole('heading', { name: 'Model Simulator' })).toBeVisible();
 
-    // Click Metrics
-    await page.getByRole('button', { name: 'Metrics' }).click();
+    await page.getByRole('link', { name: 'Metrics' }).click();
     await expect(page.getByRole('heading', { name: 'Metrics' })).toBeVisible();
 
-    // Click Leads
-    await page.getByRole('button', { name: 'Leads' }).click();
+    await page.getByRole('link', { name: 'Dashboard' }).click();
     await expect(page.getByRole('heading', { name: 'Leads' })).toBeVisible();
 
-    // Click Loans (mocked backend)
+    // Pipeline (mocked backend)
     const loanId = 'loan-1';
     const docName = 'Government ID';
     let loan = {
@@ -65,15 +61,6 @@ test.describe('Admin Panel Navigation', () => {
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
 
-    await page.route('http://localhost:8000/api/catalog-products', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify([
-          { id: 'p1', name: 'Home Standard', code: 'HOME_STD', requiredDocuments: [docName], status: 'active' },
-        ]),
-      });
-    });
     await page.route('http://localhost:8000/api/loans', async (route) => {
       if (route.request().method() === 'GET') {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([loan]) });
@@ -96,15 +83,14 @@ test.describe('Admin Panel Navigation', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(loan) });
     });
 
-    await page.getByRole('button', { name: 'Loans' }).click();
+    await page.getByRole('link', { name: 'Pipeline' }).click();
     await expect(page.getByRole('heading', { name: 'Loans' })).toBeVisible();
     await page.getByTestId(`loan-row-${loanId}`).click();
     await expect(page.getByTestId('text-doc-checklist-title')).toBeVisible();
     await page.getByTestId(`select-doc-status-${docName}`).selectOption('submitted');
     await expect(page.getByTestId(`doc-status-${docName}`)).toHaveText('submitted');
 
-    // Click Training
-    await page.getByRole('button', { name: 'ML Training' }).click();
+    await page.getByRole('link', { name: 'ML Training' }).click();
     await expect(page.getByRole('heading', { name: 'ML Model Training Pipeline' })).toBeVisible();
   });
 
@@ -145,30 +131,12 @@ test.describe('Admin Panel Navigation', () => {
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
 
-    await page.route('http://localhost:8000/api/catalog-products', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify([
-          { id: 'p1', name: 'Home Purchase', code: 'HL-PUR-001', requiredDocuments: ['PAN Card'], status: 'active' },
-        ]),
-      });
-    });
-
     await page.route('http://localhost:8000/api/loans', async (route) => {
       if (route.request().method() === 'GET') {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([loan]) });
         return;
       }
       await route.fulfill({ status: 405, body: '' });
-    });
-
-    await page.route(`http://localhost:8000/api/loans/${loanId}`, async (route) => {
-      if (route.request().method() === 'GET') {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(loan) });
-        return;
-      }
-      await route.fallback();
     });
 
     await page.route(`http://localhost:8000/api/loans/${loanId}/documents`, async (route) => {
@@ -186,7 +154,7 @@ test.describe('Admin Panel Navigation', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(loan) });
     });
 
-    await page.getByRole('button', { name: 'Loans' }).click();
+    await page.getByRole('link', { name: 'Pipeline' }).click();
     await expect(page.getByRole('heading', { name: 'Loans' })).toBeVisible();
 
     await expect(page.getByTestId(`loan-row-${loanId}`)).toBeVisible({ timeout: 30000 });
@@ -205,14 +173,14 @@ test.describe('Admin Panel Navigation', () => {
       // already logged in
     }
 
-    await page.getByRole('button', { name: 'Loans' }).click();
+    await page.getByRole('link', { name: 'Pipeline' }).click();
     await expect(page.getByRole('heading', { name: 'Loans' })).toBeVisible();
     await page.getByTestId(`loan-row-${loanId}`).click();
     await expect(page.getByTestId('doc-status-PAN Card')).toHaveText('submitted');
   });
 
   test('Training tab shows steps', async ({ page }) => {
-    await page.getByRole('button', { name: 'ML Training' }).click();
+    await page.getByRole('link', { name: 'ML Training' }).click();
     await page.getByRole('button', { name: 'Training Workflow' }).click();
     
     // Check steps

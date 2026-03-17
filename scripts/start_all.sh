@@ -1,35 +1,36 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Function to clean up background processes on exit
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+export ROOT_DIR
+
 cleanup() {
-    echo "Stopping services..."
-    kill $(jobs -p) 2>/dev/null
-    make down
-    exit
+  echo "Stopping services..."
+  bash "$ROOT_DIR/scripts/stop_dev.sh" || true
+  exit
 }
-
 trap cleanup SIGINT SIGTERM
 
 echo "Starting Infrastructure..."
-make up
+cd "$ROOT_DIR"
 
-echo "Waiting for services to be healthy..."
-sleep 10
-make check-infra
+echo "Launching dev stack..."
+bash "$ROOT_DIR/scripts/launch_dev.sh"
 
-echo "Initializing Knowledge Base..."
-source venv/bin/activate
-python scripts/init_kb.py
+PYTHON_BIN=""
+if [ -x "$ROOT_DIR/venv/bin/python" ]; then
+  PYTHON_BIN="$ROOT_DIR/venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3)"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python)"
+fi
 
-echo "Starting Backend..."
-python -m src.main &
-BACKEND_PID=$!
-
-echo "Starting Frontend..."
-cd frontend
-pnpm dev &
-FRONTEND_PID=$!
-
+if [ -n "$PYTHON_BIN" ] && [ -f "$ROOT_DIR/scripts/init_kb.py" ]; then
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/init_kb.py" || true
+fi
 echo "System running. Press Ctrl+C to stop."
 wait $BACKEND_PID $FRONTEND_PID
+while true; do
+  sleep 2
+done

@@ -1,13 +1,10 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -28,9 +25,96 @@ body {
   height: 100vh;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html.glass .glass-card {
+  background: rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+html.glass .glass-surface {
+  background: rgba(255, 255, 255, 0.05) !important;
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html.glass .glass-header {
+  background: rgba(255, 255, 255, 0.06) !important;
+  backdrop-filter: blur(30px) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+html.glass .glass-input {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+html.glass .glass-input:focus {
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.15) !important;
+}
+
+html.glass .glass-bubble-user {
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.3), rgba(59, 130, 246, 0.3)) !important;
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(45, 212, 191, 0.2) !important;
+}
+
+html.glass .glass-bubble-bot {
+  background: rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+@keyframes welcome-exit {
+  0% { opacity: 1; transform: scale(1) translateY(0); }
+  100% { opacity: 0; transform: scale(0.96) translateY(-12px); }
+}
+
+@keyframes chat-enter {
+  0% { opacity: 0; transform: translateY(24px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes float-in {
+  0% { opacity: 0; transform: translateY(16px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: scale(0); }
+  40% { transform: scale(1); }
+}
+
+.anim-welcome-exit {
+  animation: welcome-exit 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.anim-chat-enter {
+  animation: chat-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: 0.15s;
+  opacity: 0;
+}
+
+.anim-float-in {
+  animation: float-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }

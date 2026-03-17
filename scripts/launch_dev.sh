@@ -3,18 +3,25 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/infrastructure/docker-compose.yml"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-5174}"
 
-# Function to check and free a port
 check_and_free_port() {
     local port=$1
     local service_name=$2
     
     if lsof -i :$port >/dev/null 2>&1; then
         echo "[KS LOS] Port $port ($service_name) is in use. Attempting to free..."
-        local pids=$(lsof -ti :$port || true)
+        local pids
+        pids="$(lsof -ti :"$port" 2>/dev/null || true)"
         if [ -n "$pids" ]; then
-            echo "$pids" | xargs kill -9 2>/dev/null || true
-            echo "[KS LOS] Freed port $port."
+            echo "$pids" | xargs kill 2>/dev/null || true
+            sleep 1
+            pids="$(lsof -ti :"$port" 2>/dev/null || true)"
+            if [ -n "$pids" ]; then
+              echo "$pids" | xargs kill -9 2>/dev/null || true
+            fi
+            echo "[KS LOS] Freed port $port ($service_name)."
         fi
     fi
 }
@@ -68,18 +75,35 @@ check_and_free_port 4317 "Otel Collector"
 check_and_free_port 16686 "Jaeger"
 
 # App ports
-check_and_free_port 8000 "Backend API"
+check_and_free_port "$BACKEND_PORT" "Backend API"
 check_and_free_port 5173 "Frontend"
+check_and_free_port "$FRONTEND_PORT" "Frontend"
+
+ensure_docker_running
 
 echo "[KS LOS] Bootstrapping observability stack (Prometheus, Grafana, MLflow)..."
 docker compose -f "$COMPOSE_FILE" up -d postgres redis mlflow prometheus grafana otel-collector jaeger
 
-echo "[KS LOS] Starting FastAPI (backend) on :8000..."
-# Install backend dependencies
-if [ -f "$ROOT_DIR/requirements.txt" ]; then
-    echo "[KS LOS] Installing backend dependencies..."
-    pip install -r "$ROOT_DIR/requirements.txt" || echo "Warning: pip install failed, continuing..."
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [ -z "$PYTHON_BIN" ]; then
+  if [ -x "$ROOT_DIR/venv/bin/python" ]; then
+    PYTHON_BIN="$ROOT_DIR/venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python)"
+  else
+    echo "[KS LOS] Error: Python not found."
+    exit 1
+  fi
 fi
+
+if ! "$PYTHON_BIN" -c "import uvicorn" >/dev/null 2>&1; then
+  echo "[KS LOS] Error: uvicorn not installed for $PYTHON_BIN."
+  exit 1
+fi
+
+echo "[KS LOS] Starting FastAPI (backend) on :$BACKEND_PORT..."
 
 export LOG_JSON=1
 export OTLP_URL="http://localhost:4317"
@@ -89,7 +113,7 @@ export MLFLOW_TRACKING_URI="http://localhost:5000"
 # Start Backend with nohup
 (
   cd "$ROOT_DIR"
-  nohup python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload > "$ROOT_DIR/backend.log" 2>&1 &
+  nohup "$PYTHON_BIN" -m uvicorn src.main:app --host 0.0.0.0 --port "$BACKEND_PORT" --reload > "$ROOT_DIR/backend.log" 2>&1 &
   echo $! > "$ROOT_DIR/.pid_api"
 )
 
@@ -119,24 +143,24 @@ if [ -f "$FRONT_DIR/package.json" ]; then
     
     echo "[KS LOS] Starting frontend dev server..."
     
-    nohup npm run dev -- --port 5173 --strictPort > "$ROOT_DIR/frontend.log" 2>&1 &
+    nohup npm run dev -- --port "$FRONTEND_PORT" --strictPort > "$ROOT_DIR/frontend.log" 2>&1 &
     echo $! > "$ROOT_DIR/.pid_frontend"
   )
 
   # Wait a bit for Vite to spin up
   sleep 5
   echo "[KS LOS] Opening frontend in default browser..."
-  open "http://localhost:5173"
+  open "http://localhost:$FRONTEND_PORT"
 
 else
   echo "[KS LOS] Frontend package.json not found; skipping frontend start."
 fi
 
 echo "[KS LOS] Stack URLs:"
-echo "  API:        http://localhost:8000/health"
-echo "  Metrics:    http://localhost:8000/metrics"
-echo "  Observability Summary: http://localhost:8000/observability/summary"
+echo "  API:        http://localhost:$BACKEND_PORT/health"
+echo "  Metrics:    http://localhost:$BACKEND_PORT/metrics"
+echo "  Observability Summary: http://localhost:$BACKEND_PORT/observability/summary"
 echo "  MLflow:     http://localhost:5000/"
 echo "  Prometheus: http://localhost:9090/"
 echo "  Grafana:    http://localhost:3000/"
-echo "  Drift Report: http://localhost:8000/training/drift/report"
+echo "  Drift Report: http://localhost:$BACKEND_PORT/training/drift/report"
