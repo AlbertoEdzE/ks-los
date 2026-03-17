@@ -59,6 +59,22 @@ test.describe('V2 Route Skeleton', () => {
     await expect(page.getByTestId(`pipeline-group-${firstPhaseId as string}`)).toContainText(borrowerName, { timeout: 20000 });
     await expect(page.getByTestId(`loan-row-${loanId as string}`)).toBeVisible({ timeout: 20000 });
 
+    await page.getByTestId(`pipeline-phase-header-${firstPhaseId as string}`).click();
+    await expect(page.getByTestId('phase-title')).toContainText(firstPhaseName as string);
+    await expect(page.getByTestId('card-summary')).toBeVisible();
+    await expect(page.getByTestId('text-phase-summary')).toBeVisible();
+    await expect(page.getByTestId('phase-timeline')).toBeVisible();
+    await expect(page.getByTestId('phase-loan-count')).toBeVisible();
+    await expect(page.getByTestId('phase-conversation-count')).toBeVisible();
+    await expect(page.getByTestId('card-activities')).toBeVisible();
+    await expect(page.getByTestId('card-documents')).toBeVisible();
+    await expect(page.getByTestId('card-stakeholders')).toBeVisible();
+    await expect(page.getByTestId('card-bottlenecks')).toBeVisible();
+    await expect(page.getByTestId('text-activity-0')).toBeVisible();
+
+    await page.getByTestId('phase-back-link').click();
+    await expect(page.getByRole('heading', { name: 'Leads' })).toBeVisible();
+
     await page.getByRole('link', { name: 'Loan Products' }).click();
     await expect(page.getByTestId('heading-loan-products')).toBeVisible();
     await expect(page.getByTestId('loan-product-HL-PUR-001')).toBeVisible();

@@ -48,6 +48,27 @@ def test_v2_phases_seed_and_list():
     assert all(p["isActive"] is True for p in active)
 
 
+def test_v2_phase_detail_includes_knowledge_and_metrics():
+    phases = client.get("/api/phases").json()
+    assert len(phases) >= 1
+    phase_id = phases[0]["id"]
+
+    detail = client.get(f"/api/phases/{phase_id}/detail")
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert payload["phase"]["id"] == phase_id
+    assert "knowledge" in payload
+    assert isinstance(payload["knowledge"]["timeline"], str)
+    assert isinstance(payload["knowledge"]["summary"], str)
+    assert isinstance(payload["knowledge"]["activities"], list)
+    assert isinstance(payload["knowledge"]["documents"], list)
+    assert isinstance(payload["knowledge"]["stakeholders"], list)
+    assert isinstance(payload["knowledge"]["bottlenecks"], list)
+    assert "metrics" in payload
+    assert isinstance(payload["metrics"]["loanCount"], int)
+    assert isinstance(payload["metrics"]["conversationCount"], int)
+
+
 def test_v2_conversation_create_and_list_requires_officer():
     create = client.post("/api/conversations", json={})
     assert create.status_code == 200

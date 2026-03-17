@@ -2,12 +2,12 @@ from typing import Any, Optional, Literal, Annotated, Union
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from src.api.routers.v2_auth import require_officer_role
 from src.shared.audit import log_audit
-from src.shared.db import LoanPhase, get_db
+from src.shared.db import Conversation, Loan, LoanPhase, get_db
 from src.shared.metrics import request_counter, request_errors_total
 
 
@@ -79,6 +79,229 @@ DEFAULT_PHASES = [
         "icon": "banknote",
     },
 ]
+
+_PHASE_KNOWLEDGE: dict[str, dict[str, Any]] = {
+    "lead & inquiry": {
+        "timeline": "Same day",
+        "summary": "Initial borrower contact where the loan purpose, approximate amount, and basic eligibility signals are captured to determine next steps.",
+        "activities": [
+            "Capture borrower identity and contact preferences",
+            "Confirm loan purpose and expected amount range",
+            "Collect high-level income and employment details",
+            "Record initial credit history signal (if available)",
+            "Set expectations for application and document requirements",
+        ],
+        "documents": [
+            "Government-issued ID (if available)",
+            "Basic income proof (latest payslip / salary credit statement)",
+        ],
+        "stakeholders": [
+            "Borrower",
+            "Loan Officer / Relationship Manager",
+        ],
+        "bottlenecks": [
+            "Incomplete borrower contact details",
+            "Unclear loan purpose or amount range",
+            "Borrower not ready to proceed with application",
+        ],
+    },
+    "application submission": {
+        "timeline": "1–3 days",
+        "summary": "The borrower submits a formal application with core personal, financial, and loan request details required for downstream verification.",
+        "activities": [
+            "Complete application form and declarations",
+            "Validate required fields and formatting",
+            "Select product and indicative terms (where applicable)",
+            "Create the initial loan record for processing",
+        ],
+        "documents": [
+            "Application form / e-consent",
+            "Address proof",
+            "Income proof (payslips / bank statements)",
+        ],
+        "stakeholders": [
+            "Borrower",
+            "Loan Officer / Relationship Manager",
+            "Operations / Intake team",
+        ],
+        "bottlenecks": [
+            "Missing mandatory fields",
+            "Mismatch between requested amount and basic eligibility",
+            "Delays in borrower submission",
+        ],
+    },
+    "document collection & kyc": {
+        "timeline": "2–7 days",
+        "summary": "KYC and supporting documents are gathered and validated to establish identity, income, and compliance readiness for verification and appraisal.",
+        "activities": [
+            "Collect required documents for the selected product",
+            "Perform KYC verification checks",
+            "Validate document authenticity and completeness",
+            "Resolve discrepancies via borrower follow-up",
+        ],
+        "documents": [
+            "Government-issued ID",
+            "Address proof",
+            "Bank statements",
+            "Income proof (salary slips / tax returns)",
+        ],
+        "stakeholders": [
+            "Borrower",
+            "Loan Officer / Relationship Manager",
+            "KYC / Compliance team",
+        ],
+        "bottlenecks": [
+            "Document mismatch (name/address inconsistencies)",
+            "Expired or illegible documents",
+            "Slow borrower turnaround on missing items",
+        ],
+    },
+    "verification & credit appraisal": {
+        "timeline": "2–5 days",
+        "summary": "Background verification and credit assessment determine creditworthiness using bureau inputs and internal verification outcomes.",
+        "activities": [
+            "Run credit bureau checks",
+            "Verify employment and income consistency",
+            "Confirm address and identity validation outcomes",
+            "Compute preliminary risk indicators",
+        ],
+        "documents": [
+            "Credit bureau report authorization",
+            "Employment verification artifacts (where applicable)",
+        ],
+        "stakeholders": [
+            "Borrower",
+            "Verification team",
+            "Credit / Risk analysts",
+        ],
+        "bottlenecks": [
+            "Credit bureau delays or thin-file profiles",
+            "Verification unable to confirm employment/address",
+            "Discrepancies requiring rework",
+        ],
+    },
+    "underwriting & credit decision": {
+        "timeline": "2–7 days",
+        "summary": "Underwriting evaluates the verified profile, applies policy rules, and issues a credit decision with conditions (if any).",
+        "activities": [
+            "Assess debt-to-income and affordability",
+            "Apply underwriting policy rules and exceptions",
+            "Review collateral/valuation inputs (if applicable)",
+            "Approve, decline, or request additional conditions",
+        ],
+        "documents": [
+            "Underwriting checklist",
+            "Collateral valuation report (if applicable)",
+        ],
+        "stakeholders": [
+            "Underwriting team",
+            "Credit / Risk team",
+            "Loan Officer / Relationship Manager",
+        ],
+        "bottlenecks": [
+            "Policy exceptions requiring escalation",
+            "Missing verification artifacts",
+            "Valuation delays (secured lending)",
+        ],
+    },
+    "conditional approval & offer": {
+        "timeline": "1–3 days",
+        "summary": "A conditional approval and offer are produced, capturing terms, conditions, and any remaining items required before final approval/disbursement.",
+        "activities": [
+            "Generate offer letter and term sheet",
+            "Review conditions with borrower",
+            "Capture acceptance and required acknowledgements",
+            "Update the loan record with offered terms",
+        ],
+        "documents": [
+            "Offer letter / term sheet",
+            "Borrower acceptance / consent",
+        ],
+        "stakeholders": [
+            "Borrower",
+            "Loan Officer / Relationship Manager",
+            "Operations team",
+        ],
+        "bottlenecks": [
+            "Borrower delays in offer acceptance",
+            "Terms negotiation and re-approval",
+            "Missing acknowledgements/consents",
+        ],
+    },
+    "security & legal documentation": {
+        "timeline": "3–14 days",
+        "summary": "Legal and security documentation is executed (where required), including collateral registration, to ensure enforceability prior to disbursement.",
+        "activities": [
+            "Prepare legal documentation pack",
+            "Execute agreements and security documents",
+            "Register collateral / lien (if applicable)",
+            "Confirm fulfillment of legal conditions",
+        ],
+        "documents": [
+            "Loan agreement",
+            "Security documents (mortgage / charge)",
+            "Insurance documents (if applicable)",
+        ],
+        "stakeholders": [
+            "Borrower",
+            "Legal team",
+            "Operations team",
+        ],
+        "bottlenecks": [
+            "Legal review iterations",
+            "Collateral registration delays",
+            "Missing signatures or incorrect paperwork",
+        ],
+    },
+    "pre-disbursement checks": {
+        "timeline": "1–3 days",
+        "summary": "Final operational checks confirm all approval conditions are satisfied, documents are complete, and disbursement prerequisites are met.",
+        "activities": [
+            "Confirm all conditions are cleared",
+            "Validate bank account and disbursement instructions",
+            "Final compliance and sanctions screening (if required)",
+            "Prepare disbursement authorization",
+        ],
+        "documents": [
+            "Final checklist / sign-offs",
+            "Disbursement instructions",
+        ],
+        "stakeholders": [
+            "Operations team",
+            "Compliance team",
+            "Loan Officer / Relationship Manager",
+        ],
+        "bottlenecks": [
+            "Pending conditions not cleared",
+            "Account verification issues",
+            "Operational queue delays",
+        ],
+    },
+    "disbursement": {
+        "timeline": "Same day",
+        "summary": "Funds are released according to approved terms and recorded as disbursed, completing the origination workflow.",
+        "activities": [
+            "Execute disbursement transaction",
+            "Confirm borrower receipt and settlement",
+            "Update loan status and artifacts",
+            "Initiate post-disbursement servicing handoff",
+        ],
+        "documents": [
+            "Disbursement confirmation",
+            "Repayment schedule",
+        ],
+        "stakeholders": [
+            "Borrower",
+            "Operations / Payments team",
+            "Servicing team (handoff)",
+        ],
+        "bottlenecks": [
+            "Bank settlement delays",
+            "Incorrect disbursement instructions",
+            "Last-minute compliance holds",
+        ],
+    },
+}
 
 
 _seeded = False
@@ -174,6 +397,45 @@ def list_active_phases(db: Session = Depends(get_db)):
         }
         for r in rows
     ]
+
+
+@router.get("/{phase_id}/detail")
+def get_phase_detail(phase_id: str, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/phases/{phase_id}/detail").inc()
+    _ensure_seeded(db)
+    phase = db.get(LoanPhase, phase_id)
+    if not phase:
+        request_errors_total.labels(endpoint="/api/phases/{phase_id}/detail").inc()
+        raise HTTPException(status_code=404, detail="Phase not found")
+
+    key = (phase.name or "").strip().lower()
+    knowledge = _PHASE_KNOWLEDGE.get(key) or {
+        "timeline": "Varies",
+        "summary": phase.description or "—",
+        "activities": [],
+        "documents": [],
+        "stakeholders": [],
+        "bottlenecks": [],
+    }
+
+    loan_count = db.execute(select(func.count(Loan.id)).where(Loan.current_phase_id == phase_id)).scalar_one()
+    conversation_count = db.execute(select(func.count(Conversation.id)).where(Conversation.current_phase_id == phase_id)).scalar_one()
+
+    return {
+        "phase": {
+            "id": phase.id,
+            "name": phase.name,
+            "description": phase.description,
+            "sortOrder": phase.sort_order,
+            "isActive": phase.is_active,
+            "color": phase.color,
+            "icon": phase.icon,
+            "createdAt": phase.created_at.isoformat() if phase.created_at else None,
+            "updatedAt": phase.updated_at.isoformat() if phase.updated_at else None,
+        },
+        "knowledge": knowledge,
+        "metrics": {"loanCount": int(loan_count or 0), "conversationCount": int(conversation_count or 0)},
+    }
 
 
 @router.post("/actions", dependencies=[Depends(require_officer_role)])

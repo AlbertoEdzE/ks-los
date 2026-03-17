@@ -988,9 +988,23 @@ function App() {
 
                 {orderedPhaseIds.map((pid) => (
                   <div key={pid} data-testid={`pipeline-group-${pid}`}>
-                    <div style={{ padding: '10px 14px', background: '#f9fafb', borderBottom: '1px solid #f3f4f6', fontWeight: 900 }}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/phases/${pid}`)}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '10px 14px',
+                        background: '#f9fafb',
+                        border: 'none',
+                        borderBottom: '1px solid #f3f4f6',
+                        fontWeight: 900,
+                        cursor: 'pointer',
+                      }}
+                      data-testid={`pipeline-phase-header-${pid}`}
+                    >
                       {phasesById[pid]?.name || 'Phase'} ({grouped[pid]?.length || 0})
-                    </div>
+                    </button>
                     {(grouped[pid] || []).map((l) => (
                       <button
                         key={l.id}
@@ -1957,12 +1971,30 @@ function App() {
     return children;
   };
 
+  type PhaseKnowledge = {
+    timeline: string;
+    summary: string;
+    activities: string[];
+    documents: string[];
+    stakeholders: string[];
+    bottlenecks: string[];
+  };
+
+  type PhaseDetailResponse = {
+    phase: V2Phase;
+    knowledge: PhaseKnowledge;
+    metrics: { loanCount: number; conversationCount: number };
+  };
+
   const PhaseDetailPage = () => {
     const params = useParams<{ id: string }>();
     const phaseId = (params.id || '').trim();
     const [phases, setPhases] = useState<V2Phase[] | null>(null);
     const [loading, setLoading] = useState(true);
+    const [detail, setDetail] = useState<PhaseDetailResponse | null>(null);
+    const [detailLoading, setDetailLoading] = useState(true);
     const [error, setError] = useState<string>('');
+    const [detailError, setDetailError] = useState<string>('');
 
     React.useEffect(() => {
       let mounted = true;
@@ -1989,6 +2021,37 @@ function App() {
       };
     }, []);
 
+    React.useEffect(() => {
+      let mounted = true;
+      const run = async () => {
+        if (!phaseId) {
+          setDetail(null);
+          setDetailLoading(false);
+          setDetailError('Missing phase id');
+          return;
+        }
+        setDetailLoading(true);
+        setDetailError('');
+        try {
+          const res = await fetch(`http://localhost:8000/api/phases/${encodeURIComponent(phaseId)}/detail`);
+          if (!res.ok) throw new Error(`Failed to load phase details (${res.status})`);
+          const payload = (await res.json()) as PhaseDetailResponse;
+          if (!mounted) return;
+          setDetail(payload);
+        } catch (e) {
+          if (!mounted) return;
+          setDetail(null);
+          setDetailError(e instanceof Error ? e.message : 'Failed to load phase details');
+        } finally {
+          if (mounted) setDetailLoading(false);
+        }
+      };
+      run();
+      return () => {
+        mounted = false;
+      };
+    }, [phaseId]);
+
     const activePhases = React.useMemo(() => {
       return (phases || [])
         .filter((p) => p.isActive)
@@ -1997,13 +2060,14 @@ function App() {
     }, [phases]);
 
     const phase = React.useMemo(() => {
+      if (detail?.phase) return detail.phase;
       if (!phases || !phaseId) return null;
       return phases.find((p) => p.id === phaseId) || null;
-    }, [phases, phaseId]);
+    }, [detail, phases, phaseId]);
 
     const homeHref = role === 'admin' ? '/dashboard' : '/';
 
-    if (loading) {
+    if (loading || detailLoading) {
       return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30 dark:from-[#0d0d0d] dark:via-[#111] dark:to-[#0d0d0d]">
           <header className="sticky top-0 z-50 bg-white/80 dark:bg-[#0d0d0d]/80 backdrop-blur-xl border-b border-slate-200/60 dark:border-white/[0.06]">
@@ -2050,7 +2114,7 @@ function App() {
               Phase Not Found
             </div>
             <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              {error ? error : 'The requested loan phase could not be found.'}
+              {detailError || error ? detailError || error : 'The requested loan phase could not be found.'}
             </div>
             <div className="mt-5 flex items-center justify-center gap-3">
               <Link
@@ -2064,6 +2128,18 @@ function App() {
         </div>
       );
     }
+
+    const knowledge: PhaseKnowledge = detail?.knowledge || {
+      timeline: 'Varies',
+      summary: phase.description || '—',
+      activities: [],
+      documents: [],
+      stakeholders: [],
+      bottlenecks: [],
+    };
+
+    const metrics = detail?.metrics || { loanCount: 0, conversationCount: 0 };
+    const phaseColor = phase.color || '#3b82f6';
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30 dark:from-[#0d0d0d] dark:via-[#111] dark:to-[#0d0d0d] relative overflow-hidden">
@@ -2102,7 +2178,7 @@ function App() {
                     style={{ boxShadow: '0 10px 25px rgba(0,0,0,0.06)' }}
                     aria-hidden="true"
                   >
-                    {phase.sortOrder}
+                    {phase.icon || phase.sortOrder}
                   </div>
                   <div>
                     <div className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white" data-testid="phase-title">
@@ -2129,35 +2205,123 @@ function App() {
                 <div className="rounded-2xl px-3 py-1.5 text-[11px] font-semibold bg-white/70 dark:bg-white/[0.03] border border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300">
                   Sort #{phase.sortOrder}
                 </div>
-                <div className="rounded-2xl px-3 py-1.5 text-[11px] font-semibold bg-white/70 dark:bg-white/[0.03] border border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300">
-                  {phase.icon || '—'}
+                <div
+                  className="rounded-2xl px-3 py-1.5 text-[11px] font-semibold border"
+                  style={{ backgroundColor: `${phaseColor}18`, color: phaseColor, borderColor: `${phaseColor}40` }}
+                  data-testid="phase-timeline"
+                >
+                  {knowledge.timeline}
                 </div>
               </div>
             </div>
 
             <div className="mt-6 grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4">
-              <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] p-5">
-                <div className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">Operational Notes</div>
-                <div className="mt-2 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                  This view is backed by the real phase catalog in the LOS database. Phase ordering and activation are used across borrower progress tracking and officer pipeline grouping.
+              <div className="grid gap-4">
+                <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] p-5">
+                  <div className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white" data-testid="card-summary">
+                    Overview
+                  </div>
+                  <div className="mt-2 text-sm text-slate-600 dark:text-slate-300 leading-relaxed" data-testid="text-phase-summary">
+                    {knowledge.summary}
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.02] px-4 py-3">
+                      <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Loans In Phase</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200" data-testid="phase-loan-count">
+                        {metrics.loanCount}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.02] px-4 py-3">
+                      <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Conversations In Phase</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200" data-testid="phase-conversation-count">
+                        {metrics.conversationCount}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.02] px-4 py-3">
+                      <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Phase ID</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200 break-all" data-testid="phase-id">
+                        {phase.id}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.02] px-4 py-3">
+                      <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Last Updated</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200" data-testid="phase-updated-at">
+                        {phase.updatedAt || phase.createdAt || '—'}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.02] px-4 py-3">
-                    <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Phase ID</div>
-                    <div className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200 break-all" data-testid="phase-id">
-                      {phase.id}
-                    </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] p-5" data-testid="card-activities">
+                  <div className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">Key Activities</div>
+                  {knowledge.activities.length ? (
+                    <ul className="mt-3 space-y-2.5">
+                      {knowledge.activities.map((activity, i) => (
+                        <li key={i} className="flex items-start gap-2.5" data-testid={`text-activity-${i}`}>
+                          <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400/80 shrink-0" />
+                          <span className="text-sm text-slate-600 dark:text-slate-300">{activity}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="mt-3 text-sm text-slate-500 dark:text-slate-400">No configured activities for this phase.</div>
+                  )}
                   </div>
-                  <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.02] px-4 py-3">
-                    <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Last Updated</div>
-                    <div className="mt-1 text-xs font-semibold text-slate-800 dark:text-slate-200" data-testid="phase-updated-at">
-                      {phase.updatedAt || phase.createdAt || '—'}
-                    </div>
-                  </div>
+
+                <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] p-5" data-testid="card-documents">
+                  <div className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">Required Documents</div>
+                  {knowledge.documents.length ? (
+                    <ul className="mt-3 space-y-2.5">
+                      {knowledge.documents.map((doc, i) => (
+                        <li key={i} className="flex items-start gap-2.5" data-testid={`text-document-${i}`}>
+                          <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-violet-400/80 shrink-0" />
+                          <span className="text-sm text-slate-600 dark:text-slate-300">{doc}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="mt-3 text-sm text-slate-500 dark:text-slate-400">No configured documents for this phase.</div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] p-5" data-testid="card-stakeholders">
+                  <div className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">Stakeholders Involved</div>
+                  {knowledge.stakeholders.length ? (
+                    <ul className="mt-3 space-y-2.5">
+                      {knowledge.stakeholders.map((person, i) => (
+                        <li key={i} className="flex items-start gap-2.5" data-testid={`text-stakeholder-${i}`}>
+                          <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-sky-400/80 shrink-0" />
+                          <span className="text-sm text-slate-600 dark:text-slate-300">{person}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="mt-3 text-sm text-slate-500 dark:text-slate-400">No configured stakeholders for this phase.</div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] p-5" data-testid="card-bottlenecks">
+                  <div className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">Common Bottlenecks</div>
+                  {knowledge.bottlenecks.length ? (
+                    <ul className="mt-3 space-y-2.5">
+                      {knowledge.bottlenecks.map((issue, i) => (
+                        <li key={i} className="flex items-start gap-2.5" data-testid={`text-bottleneck-${i}`}>
+                          <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-amber-400/80 shrink-0" />
+                          <span className="text-sm text-slate-600 dark:text-slate-300">{issue}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="mt-3 text-sm text-slate-500 dark:text-slate-400">No configured bottlenecks for this phase.</div>
+                  )}
                 </div>
               </div>
+            </div>
 
-              <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] p-5">
+            <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] p-5">
                 <div className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">All Active Phases</div>
                 <div className="mt-3 grid gap-2" data-testid="phase-list">
                   {activePhases.map((p) => {
