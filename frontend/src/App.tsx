@@ -1558,6 +1558,7 @@ function App() {
     conversationId: string;
     role: 'user' | 'assistant';
     content: string;
+    metadata?: unknown;
     createdAt: string | null;
   };
 
@@ -1653,6 +1654,23 @@ function App() {
       }
       return '—';
     };
+
+    const latestActionResults = React.useMemo(() => {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        if (m.role !== 'assistant') continue;
+        if (!m.metadata || typeof m.metadata !== 'object') continue;
+        const raw = (m.metadata as { actionResults?: unknown }).actionResults;
+        if (Array.isArray(raw)) return raw as Array<Record<string, unknown>>;
+      }
+      return null;
+    }, [messages]);
+
+    const latestLoanId = React.useMemo(() => {
+      if (!latestActionResults) return null;
+      const hit = latestActionResults.find((r) => r && typeof r === 'object' && typeof (r as { loanId?: unknown }).loanId === 'string');
+      return hit ? ((hit as { loanId: string }).loanId || null) : null;
+    }, [latestActionResults]);
 
     const handleSend = async () => {
       const text = input.trim();
@@ -1766,6 +1784,67 @@ function App() {
                 </div>
                 <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>Phase: {selected?.currentPhaseId || '—'}</div>
               </div>
+
+              {latestActionResults && latestActionResults.length > 0 ? (
+                <div style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#ffffff' }} data-testid="officer-chat-action-results">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
+                    <div style={{ fontWeight: 900, color: '#111827' }}>Action Results</div>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                      <Link to="/pipeline" style={{ fontSize: '0.85rem' }} data-testid="officer-chat-open-pipeline">
+                        Open pipeline
+                      </Link>
+                      {latestLoanId ? (
+                        <span style={{ fontSize: '0.85rem', color: '#6b7280' }} data-testid="officer-chat-last-loan">
+                          Loan: {latestLoanId.slice(0, 8)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {latestActionResults.map((r, idx) => {
+                      const row = r && typeof r === 'object' ? (r as Record<string, unknown>) : {};
+                      const type = typeof row.type === 'string' ? row.type : 'unknown';
+                      const status = typeof row.status === 'string' ? row.status : 'unknown';
+                      const loanId = typeof row.loanId === 'string' ? row.loanId : null;
+                      const phaseName = typeof row.phaseName === 'string' ? row.phaseName : null;
+                      const errorText = typeof row.error === 'string' ? row.error : null;
+                      const ok = status === 'success';
+                      return (
+                        <div
+                          key={`${type}-${idx}`}
+                          style={{
+                            borderRadius: '10px',
+                            padding: '8px 10px',
+                            border: `1px solid ${ok ? '#d1fae5' : '#fee2e2'}`,
+                            backgroundColor: ok ? '#ecfdf5' : '#fef2f2',
+                            color: '#111827',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: '12px',
+                            alignItems: 'baseline',
+                          }}
+                          data-testid={`officer-chat-action-${idx}`}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 900 }}>
+                              {type} · {status}
+                            </div>
+                            <div style={{ fontSize: '0.85rem', color: '#374151', marginTop: '2px' }}>
+                              {loanId ? `Loan: ${loanId}` : null}
+                              {loanId && phaseName ? ' · ' : null}
+                              {phaseName ? `Phase: ${phaseName}` : null}
+                              {!loanId && !phaseName ? '—' : null}
+                            </div>
+                            {errorText ? (
+                              <div style={{ fontSize: '0.85rem', color: '#b91c1c', marginTop: '4px', fontWeight: 700 }}>{errorText}</div>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
 
               <div
                 style={{

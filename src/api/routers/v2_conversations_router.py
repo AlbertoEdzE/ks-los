@@ -639,6 +639,7 @@ def _apply_officer_directives(db: Session, conversation: Conversation, content: 
     text = content.strip()
     lower = text.lower()
     updates: dict[str, Any] = {}
+    action_results: list[dict[str, Any]] = []
     created_loan_id: Optional[str] = None
     phase_target: Optional[str] = None
 
@@ -648,12 +649,14 @@ def _apply_officer_directives(db: Session, conversation: Conversation, content: 
         if officer:
             conversation.assigned_officer = officer
             updates["assignedOfficer"] = officer
+            action_results.append({"type": "update_lead", "status": "success", "fields": ["assignedOfficer"]})
 
     status_match = re.search(r"(?i)\b(?:set|mark)\s+status\s+(?:to\s+)?(active|reviewing|qualified|closed)\b", text)
     if status_match:
         status = status_match.group(1).strip().lower()
         conversation.status = status
         updates["status"] = status
+        action_results.append({"type": "update_lead", "status": "success", "fields": ["status"], "value": status})
 
     phase_match = re.search(r"(?i)\b(?:move|advance)\s+(?:to\s+)?phase\s+(.+)$", text)
     if phase_match:
@@ -661,13 +664,40 @@ def _apply_officer_directives(db: Session, conversation: Conversation, content: 
         if phase_label:
             phase_target = phase_label
 
+    move_loan_match = re.search(r"(?i)\b(?:move|advance)\s+loan\s+([0-9a-f\\-]{20,64})\s+(?:to\s+)?phase\s+(.+)$", text)
+    move_loan_id: Optional[str] = None
+    move_loan_phase: Optional[str] = None
+    if move_loan_match:
+        move_loan_id = move_loan_match.group(1).strip()
+        move_loan_phase = move_loan_match.group(2).strip()
+
     if "create loan" in lower or "open loan" in lower:
-        name_match = re.search(r"(?i)\bfor\s+([a-z][a-z\s\-']{1,80})\b", text)
-        borrower_name = name_match.group(1).strip() if name_match else conversation.borrower_name
+        name_match = re.search(r"(?i)\bfor\s+([a-z0-9][a-z0-9\s\-']{1,80})\b", text)
+        borrower_name = name_match.group(1).strip() if name_match else (conversation.borrower_name or "Unknown")
         fallback_amount = (conversation.intent_summary or {}).get("loanAmount") if isinstance(conversation.intent_summary, dict) else None
-        amount = _extract_amount_text(text) or fallback_amount
+        amount = _extract_amount_text(text) or fallback_amount or "250000"
         loan_type = _infer_loan_type(text, conversation.intent_summary if isinstance(conversation.intent_summary, dict) else None)
-        created_loan_id = _create_loan_from_conversation(db, conversation, borrower_name, loan_type, amount)
+        catalog_code = _maybe_pick_catalog_code(db, loan_type)
+        try:
+            from src.api.routers.v2_loans_router import CreateLoanRequest, create_loan as _create_loan_endpoint
+
+            created = _create_loan_endpoint(
+                CreateLoanRequest(
+                    borrowerName=borrower_name,
+                    loanType=loan_type,
+                    loanAmount=str(amount),
+                    catalogProductCode=catalog_code,
+                    conversationId=conversation.id,
+                    createdBy="officer-chat",
+                ),
+                db,
+            )
+            created_loan_id = created.get("id") if isinstance(created, dict) else None
+            action_results.append(
+                {"type": "create_loan", "status": "success", "loanId": created_loan_id, "catalogProductCode": catalog_code}
+            )
+        except Exception as e:
+            action_results.append({"type": "create_loan", "status": "error", "error": str(e)})
 
     if phase_target:
         phases = (
@@ -679,13 +709,43 @@ def _apply_officer_directives(db: Session, conversation: Conversation, content: 
         if desired:
             conversation.current_phase_id = desired.id
             updates["currentPhaseId"] = desired.id
+            action_results.append({"type": "update_lead", "status": "success", "fields": ["currentPhaseId"], "value": desired.id})
+        else:
+            action_results.append({"type": "update_lead", "status": "error", "error": f"Phase not found: {phase_target}"})
+
+    if move_loan_id and move_loan_phase:
+        phases = (
+            db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc()))
+            .scalars()
+            .all()
+        )
+        desired = next((p for p in phases if p.name.strip().lower() == move_loan_phase.strip().lower()), None)
+        if not desired:
+            action_results.append({"type": "move_loan_phase", "status": "error", "loanId": move_loan_id, "error": f"Phase not found: {move_loan_phase}"})
+        else:
+            try:
+                from src.api.routers.v2_loans_router import PatchLoanRequest, patch_loan as _patch_loan_endpoint
+
+                updated = _patch_loan_endpoint(move_loan_id, PatchLoanRequest(currentPhaseId=desired.id), db)
+                action_results.append(
+                    {
+                        "type": "move_loan_phase",
+                        "status": "success",
+                        "loanId": move_loan_id,
+                        "currentPhaseId": desired.id,
+                        "phaseName": desired.name,
+                        "loan": updated,
+                    }
+                )
+            except Exception as e:
+                action_results.append({"type": "move_loan_phase", "status": "error", "loanId": move_loan_id, "error": str(e)})
 
     if updates:
         db.add(conversation)
         db.commit()
         db.refresh(conversation)
 
-    return {"conversationPatch": updates or None, "loanId": created_loan_id}
+    return {"conversationPatch": updates or None, "loanId": created_loan_id, "actionResults": action_results}
 
 
 @router.post("")
@@ -878,18 +938,39 @@ def send_message(
     assistant_text = "Got it. I’ll ask a few quick questions to narrow down the best option for you."
     loan_action: Optional[dict[str, Any]] = None
     conversation_patch: Optional[dict[str, Any]] = None
+    action_results: Optional[list[dict[str, Any]]] = None
     if actor_is_officer:
         applied = _apply_officer_directives(db, conv, req.content)
         conversation_patch = applied.get("conversationPatch")
         created_loan_id = applied.get("loanId")
-        loan_action = {"type": "create_loan", "loanId": created_loan_id} if created_loan_id else None
+        action_results = applied.get("actionResults") if isinstance(applied.get("actionResults"), list) else None
+        if action_results:
+            first_loan = next((a for a in action_results if a.get("status") == "success" and a.get("loanId")), None)
+            if first_loan and first_loan.get("loanId"):
+                loan_action = {"type": first_loan.get("type"), "loanId": first_loan.get("loanId")}
+        if not loan_action and created_loan_id:
+            loan_action = {"type": "create_loan", "loanId": created_loan_id}
         lines: list[str] = []
-        if conversation_patch:
+        if action_results:
+            for a in action_results:
+                if a.get("status") == "success" and a.get("type") == "create_loan" and a.get("loanId"):
+                    lines.append(f"Created draft loan: {a.get('loanId')}.")
+                elif a.get("status") == "success" and a.get("type") == "move_loan_phase" and a.get("loanId"):
+                    phase_name = a.get("phaseName") or a.get("currentPhaseId") or "—"
+                    lines.append(f"Moved loan {a.get('loanId')} to phase {phase_name}.")
+                elif a.get("status") == "success" and a.get("type") == "update_lead":
+                    fields = a.get("fields") if isinstance(a.get("fields"), list) else []
+                    if fields:
+                        lines.append(f"Updated lead fields: {', '.join(sorted([str(f) for f in fields]))}.")
+                elif a.get("status") == "error":
+                    err = a.get("error") or "Unknown error"
+                    lines.append(f"Action failed: {a.get('type')}. {err}")
+        elif conversation_patch:
             lines.append(f"Updated lead fields: {', '.join(sorted(conversation_patch.keys()))}.")
-        if created_loan_id:
+        elif created_loan_id:
             lines.append(f"Created draft loan: {created_loan_id}.")
-        if not lines:
-            lines.append("Officer note recorded. You can: assign officer, set status, move phase, or create loan.")
+        else:
+            lines.append("Officer note recorded. You can: assign officer, set status, move phase, create loan, or move loan phase.")
         assistant_text = "\n".join(lines)
     elif conv.chat_role == "borrower":
         assistant_text = _build_borrower_assistant_reply(analysis["intentSummary"])
@@ -901,6 +982,7 @@ def send_message(
         "phaseAction": phase_action,
         "loanAction": loan_action,
         "conversationPatch": conversation_patch,
+        "actionResults": action_results,
     }
     assistant_msg = Message(
         id=str(uuid.uuid4()),
@@ -926,4 +1008,5 @@ def send_message(
         "approvalProbability": approval_probability,
         "phaseAction": phase_action,
         "loanAction": loan_action,
+        "actionResults": action_results,
     }

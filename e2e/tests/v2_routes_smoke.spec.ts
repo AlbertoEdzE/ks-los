@@ -15,9 +15,11 @@ test.describe('V2 Route Skeleton', () => {
     expect(conversationId).toBeTruthy();
 
     const phasesResponse = await page.request.get('http://localhost:8000/api/phases');
-    const phases = (await phasesResponse.json()) as Array<{ id?: string }>;
+    const phases = (await phasesResponse.json()) as Array<{ id?: string; name?: string }>;
     const firstPhaseId = phases[0]?.id;
+    const firstPhaseName = phases[0]?.name;
     expect(firstPhaseId).toBeTruthy();
+    expect(firstPhaseName).toBeTruthy();
 
     const borrowerName = `E2E Phase Group ${Date.now()}`;
     const createdLoan = await page.request.post('http://localhost:8000/api/loans', {
@@ -94,6 +96,31 @@ test.describe('V2 Route Skeleton', () => {
     await page.getByTestId('officer-chat-send').click();
     await expect(page.getByTestId('officer-chat-message-assistant')).toHaveCount(3, { timeout: 20000 });
     await expect(leadRow).toContainText('reviewing', { timeout: 20000 });
+
+    const chatBorrowerName = `E2E Chat Loan ${Date.now()}`;
+    await page.getByTestId('officer-chat-input').fill(`Create loan for ${chatBorrowerName} $310000`);
+    await page.getByTestId('officer-chat-send').click();
+    await expect(page.getByTestId('officer-chat-message-assistant')).toHaveCount(4, { timeout: 20000 });
+
+    await expect(page.getByTestId('officer-chat-action-results')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-0')).toContainText('create_loan');
+    await expect(page.getByTestId('officer-chat-action-0')).toContainText('success');
+
+    const lastAssistantText = await page.getByTestId('officer-chat-message-assistant').last().innerText();
+    const uuidMatch = lastAssistantText.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    expect(uuidMatch).toBeTruthy();
+    const chatLoanId = uuidMatch?.[0] as string;
+
+    await page.getByTestId('officer-chat-input').fill(`Move loan ${chatLoanId} to phase ${firstPhaseName as string}`);
+    await page.getByTestId('officer-chat-send').click();
+    await expect(page.getByTestId('officer-chat-message-assistant')).toHaveCount(5, { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-0')).toContainText('move_loan_phase');
+    await expect(page.getByTestId('officer-chat-action-0')).toContainText('success');
+
+    await page.getByRole('link', { name: 'Pipeline', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Loans' })).toBeVisible();
+    await expect(page.getByTestId(`pipeline-group-${firstPhaseId as string}`)).toContainText(chatBorrowerName, { timeout: 20000 });
   });
 
   test('Borrower route renders after login', async ({ page }) => {
