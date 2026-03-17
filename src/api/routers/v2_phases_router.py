@@ -181,6 +181,7 @@ def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db
     request_counter.labels(endpoint="/api/phases/actions").inc()
     _ensure_seeded(db)
     actions = _validate_phase_actions(req.actions)
+    results: list[dict[str, Any]] = []
 
     for a in actions:
         if isinstance(a, AddPhaseAction):
@@ -193,6 +194,8 @@ def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db
             )
             db.add(phase)
             db.commit()
+            db.refresh(phase)
+            results.append({"type": a.type, "phaseId": phase.id, "name": phase.name, "isActive": True, "sortOrder": phase.sort_order})
             continue
 
         if isinstance(a, SetPhaseActiveAction):
@@ -209,6 +212,7 @@ def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db
             phase.is_active = a.isActive
             db.add(phase)
             db.commit()
+            results.append({"type": a.type, "phaseId": phase.id, "isActive": phase.is_active})
             continue
 
         if isinstance(a, ReorderPhasesAction):
@@ -225,10 +229,11 @@ def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db
                 phases_by_id[pid].sort_order = idx
                 db.add(phases_by_id[pid])
             db.commit()
+            results.append({"type": a.type, "phaseIds": a.phaseIds})
             continue
 
         request_errors_total.labels(endpoint="/api/phases/actions").inc()
         raise HTTPException(status_code=400, detail="Unsupported action")
 
     log_audit(event="v2_phase_actions", endpoint="/api/phases/actions", status="success", meta={"count": len(actions)})
-    return {"ok": True}
+    return {"ok": True, "results": results}

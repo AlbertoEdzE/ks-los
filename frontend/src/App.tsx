@@ -875,8 +875,17 @@ function App() {
       return out;
     }, [phases]);
 
+    const activePhaseIds = React.useMemo(() => {
+      const ids = new Set<string>();
+      for (const p of phases) {
+        if (p.isActive !== false) ids.add(p.id);
+      }
+      return ids;
+    }, [phases]);
+
     const orderedPhaseIds = React.useMemo(() => {
       return [...phases]
+        .filter((p) => p.isActive !== false)
         .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
         .map((p) => p.id);
     }, [phases]);
@@ -886,7 +895,7 @@ function App() {
       for (const pid of orderedPhaseIds) groups[pid] = [];
       for (const l of loans) {
         const pid = l.currentPhaseId || '';
-        if (pid && phasesById[pid]) {
+        if (pid && activePhaseIds.has(pid)) {
           if (!groups[pid]) groups[pid] = [];
           groups[pid].push(l);
         } else {
@@ -894,7 +903,7 @@ function App() {
         }
       }
       return groups;
-    }, [loans, orderedPhaseIds, phasesById]);
+    }, [loans, orderedPhaseIds, activePhaseIds]);
 
     const checklistItems = React.useMemo(() => {
       const raw = selected?.documentChecklist as unknown;

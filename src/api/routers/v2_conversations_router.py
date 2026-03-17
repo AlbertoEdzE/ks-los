@@ -740,6 +740,114 @@ def _apply_officer_directives(db: Session, conversation: Conversation, content: 
             except Exception as e:
                 action_results.append({"type": "move_loan_phase", "status": "error", "loanId": move_loan_id, "error": str(e)})
 
+    add_phase_match = re.search(r"(?i)\badd\s+phase\s+(.+)$", text)
+    if add_phase_match:
+        raw = add_phase_match.group(1).strip()
+        phase_name = raw
+        phase_description: Optional[str] = None
+        if " - " in raw:
+            left, right = raw.split(" - ", 1)
+            phase_name = left.strip()
+            phase_description = right.strip() or None
+        if phase_name:
+            try:
+                from src.api.routers.v2_phases_router import PhaseActionsRequest, execute_phase_actions as _execute_phase_actions
+
+                resp = _execute_phase_actions(
+                    PhaseActionsRequest(
+                        actions=[
+                            {
+                                "type": "add_phase",
+                                "name": phase_name,
+                                "description": phase_description,
+                            }
+                        ]
+                    ),
+                    db,
+                )
+                new_phase_id: Optional[str] = None
+                if isinstance(resp, dict):
+                    results = resp.get("results")
+                    if isinstance(results, list) and results:
+                        first = results[0] if isinstance(results[0], dict) else None
+                        if first:
+                            new_phase_id = first.get("phaseId") if isinstance(first.get("phaseId"), str) else None
+                action_results.append(
+                    {"type": "add_phase", "status": "success", "phaseId": new_phase_id, "phaseName": phase_name}
+                )
+            except Exception as e:
+                action_results.append({"type": "add_phase", "status": "error", "phaseName": phase_name, "error": str(e)})
+
+    toggle_phase_match = re.search(r"(?i)\b(activate|deactivate)\s+phase\s+(.+)$", text)
+    if toggle_phase_match:
+        verb = toggle_phase_match.group(1).strip().lower()
+        target_name = toggle_phase_match.group(2).strip()
+        if target_name:
+            phases = db.execute(select(LoanPhase)).scalars().all()
+            desired = next((p for p in phases if p.name.strip().lower() == target_name.strip().lower()), None)
+            if not desired:
+                action_results.append(
+                    {"type": "set_phase_active", "status": "error", "phaseName": target_name, "error": f"Phase not found: {target_name}"}
+                )
+            else:
+                is_active = verb == "activate"
+                try:
+                    from src.api.routers.v2_phases_router import PhaseActionsRequest, execute_phase_actions as _execute_phase_actions
+
+                    _execute_phase_actions(
+                        PhaseActionsRequest(actions=[{"type": "set_phase_active", "phaseId": desired.id, "isActive": is_active}]),
+                        db,
+                    )
+                    action_results.append(
+                        {
+                            "type": "set_phase_active",
+                            "status": "success",
+                            "phaseId": desired.id,
+                            "phaseName": desired.name,
+                            "isActive": is_active,
+                        }
+                    )
+                except Exception as e:
+                    action_results.append({"type": "set_phase_active", "status": "error", "phaseId": desired.id, "phaseName": desired.name, "error": str(e)})
+
+    reorder_match = re.search(r"(?i)\breorder\s+phases\s*(?:to:|:)?\s+(.+)$", text)
+    if reorder_match:
+        raw = reorder_match.group(1).strip()
+        if raw:
+            pieces = [p.strip() for p in re.split(r"\s*(?:>|,|\n)\s*", raw) if p.strip()]
+            phases = db.execute(select(LoanPhase)).scalars().all()
+            phases_by_name = {p.name.strip().lower(): p for p in phases}
+            all_ids = [p.id for p in phases]
+            selected_ids: list[str] = []
+            unknown: list[str] = []
+            for name in pieces:
+                desired = phases_by_name.get(name.strip().lower())
+                if not desired:
+                    unknown.append(name)
+                else:
+                    selected_ids.append(desired.id)
+
+            if unknown:
+                action_results.append({"type": "reorder_phases", "status": "error", "error": f"Unknown phases: {', '.join(unknown)}"})
+            elif len(selected_ids) != len(all_ids):
+                action_results.append(
+                    {
+                        "type": "reorder_phases",
+                        "status": "error",
+                        "error": f"Reorder requires all phases ({len(all_ids)}). Got {len(selected_ids)}.",
+                    }
+                )
+            elif set(selected_ids) != set(all_ids):
+                action_results.append({"type": "reorder_phases", "status": "error", "error": "Reorder phase list must match existing phases exactly."})
+            else:
+                try:
+                    from src.api.routers.v2_phases_router import PhaseActionsRequest, execute_phase_actions as _execute_phase_actions
+
+                    _execute_phase_actions(PhaseActionsRequest(actions=[{"type": "reorder_phases", "phaseIds": selected_ids}]), db)
+                    action_results.append({"type": "reorder_phases", "status": "success", "phaseIds": selected_ids})
+                except Exception as e:
+                    action_results.append({"type": "reorder_phases", "status": "error", "error": str(e)})
+
     if updates:
         db.add(conversation)
         db.commit()
@@ -958,6 +1066,15 @@ def send_message(
                 elif a.get("status") == "success" and a.get("type") == "move_loan_phase" and a.get("loanId"):
                     phase_name = a.get("phaseName") or a.get("currentPhaseId") or "—"
                     lines.append(f"Moved loan {a.get('loanId')} to phase {phase_name}.")
+                elif a.get("status") == "success" and a.get("type") == "add_phase":
+                    phase_name = a.get("phaseName") or "—"
+                    lines.append(f"Added phase: {phase_name}.")
+                elif a.get("status") == "success" and a.get("type") == "set_phase_active":
+                    phase_name = a.get("phaseName") or a.get("phaseId") or "—"
+                    is_active = bool(a.get("isActive"))
+                    lines.append(f"{'Activated' if is_active else 'Deactivated'} phase: {phase_name}.")
+                elif a.get("status") == "success" and a.get("type") == "reorder_phases":
+                    lines.append("Reordered phases.")
                 elif a.get("status") == "success" and a.get("type") == "update_lead":
                     fields = a.get("fields") if isinstance(a.get("fields"), list) else []
                     if fields:
@@ -965,6 +1082,8 @@ def send_message(
                 elif a.get("status") == "error":
                     err = a.get("error") or "Unknown error"
                     lines.append(f"Action failed: {a.get('type')}. {err}")
+            if not lines:
+                lines.append("Actions completed.")
         elif conversation_patch:
             lines.append(f"Updated lead fields: {', '.join(sorted(conversation_patch.keys()))}.")
         elif created_loan_id:

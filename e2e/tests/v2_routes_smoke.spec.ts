@@ -81,46 +81,132 @@ test.describe('V2 Route Skeleton', () => {
     await page.getByRole('link', { name: 'Officer Chat' }).click();
     await expect(page.getByTestId('heading-officer-chat')).toBeVisible();
 
+    const assistantMsgs = page.getByTestId('officer-chat-message-assistant');
+
     await expect(page.getByTestId('officer-chat-leads')).toBeVisible();
     await page.getByTestId(`officer-chat-lead-${conversationId as string}`).click();
-    await expect(page.getByTestId('officer-chat-message-assistant')).toHaveCount(1, { timeout: 20000 });
+    await expect(assistantMsgs).toHaveCount(1, { timeout: 20000 });
 
     await page.getByTestId('officer-chat-input').fill('Assign officer to officer-99');
+    const beforeAssign = await assistantMsgs.count();
     await page.getByTestId('officer-chat-send').click();
-    await expect(page.getByTestId('officer-chat-message-assistant')).toHaveCount(2, { timeout: 20000 });
+    await expect(assistantMsgs).toHaveCount(beforeAssign + 1, { timeout: 20000 });
 
     const leadRow = page.getByTestId(`officer-chat-lead-${conversationId as string}`);
     await expect(leadRow).toContainText('Officer: officer-99', { timeout: 20000 });
 
     await page.getByTestId('officer-chat-input').fill('Set status to reviewing');
+    const beforeStatus = await assistantMsgs.count();
     await page.getByTestId('officer-chat-send').click();
-    await expect(page.getByTestId('officer-chat-message-assistant')).toHaveCount(3, { timeout: 20000 });
+    await expect(assistantMsgs).toHaveCount(beforeStatus + 1, { timeout: 20000 });
     await expect(leadRow).toContainText('reviewing', { timeout: 20000 });
 
     const chatBorrowerName = `E2E Chat Loan ${Date.now()}`;
     await page.getByTestId('officer-chat-input').fill(`Create loan for ${chatBorrowerName} $310000`);
+    const beforeCreateLoan = await assistantMsgs.count();
     await page.getByTestId('officer-chat-send').click();
-    await expect(page.getByTestId('officer-chat-message-assistant')).toHaveCount(4, { timeout: 20000 });
+    await expect(assistantMsgs).toHaveCount(beforeCreateLoan + 1, { timeout: 20000 });
 
     await expect(page.getByTestId('officer-chat-action-results')).toBeVisible({ timeout: 20000 });
-    await expect(page.getByTestId('officer-chat-action-0')).toContainText('create_loan');
-    await expect(page.getByTestId('officer-chat-action-0')).toContainText('success');
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('create_loan', { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('success', { timeout: 20000 });
 
-    const lastAssistantText = await page.getByTestId('officer-chat-message-assistant').last().innerText();
+    const lastAssistantText = await assistantMsgs.last().innerText();
     const uuidMatch = lastAssistantText.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
     expect(uuidMatch).toBeTruthy();
     const chatLoanId = uuidMatch?.[0] as string;
 
     await page.getByTestId('officer-chat-input').fill(`Move loan ${chatLoanId} to phase ${firstPhaseName as string}`);
+    const beforeMoveLoan = await assistantMsgs.count();
     await page.getByTestId('officer-chat-send').click();
-    await expect(page.getByTestId('officer-chat-message-assistant')).toHaveCount(5, { timeout: 20000 });
+    await expect(assistantMsgs).toHaveCount(beforeMoveLoan + 1, { timeout: 20000 });
     await expect(page.getByTestId('officer-chat-action-results')).toBeVisible({ timeout: 20000 });
-    await expect(page.getByTestId('officer-chat-action-0')).toContainText('move_loan_phase');
-    await expect(page.getByTestId('officer-chat-action-0')).toContainText('success');
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('move_loan_phase', { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('success', { timeout: 20000 });
 
     await page.getByRole('link', { name: 'Pipeline', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Loans' })).toBeVisible();
     await expect(page.getByTestId(`pipeline-group-${firstPhaseId as string}`)).toContainText(chatBorrowerName, { timeout: 20000 });
+
+    await page.getByRole('link', { name: 'Officer Chat' }).click();
+    await expect(page.getByTestId('heading-officer-chat')).toBeVisible();
+
+    const newPhaseName = `E2E QA Phase ${Date.now()}`;
+    await page.getByTestId('officer-chat-input').fill(`Add phase ${newPhaseName}`);
+    const beforeAddPhase = await assistantMsgs.count();
+    await page.getByTestId('officer-chat-send').click();
+    await expect(assistantMsgs).toHaveCount(beforeAddPhase + 1, { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('add_phase', { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('success', { timeout: 20000 });
+
+    const phasesAfterAddResponse = await page.request.get('http://localhost:8000/api/phases');
+    const phasesAfterAdd = (await phasesAfterAddResponse.json()) as Array<{ id?: string; name?: string; isActive?: boolean }>;
+    const newPhase = phasesAfterAdd.find((p) => (p.name || '').toLowerCase() === newPhaseName.toLowerCase());
+    expect(newPhase?.id).toBeTruthy();
+    const newPhaseId = newPhase?.id as string;
+
+    await page.getByRole('link', { name: 'Pipeline', exact: true }).click();
+    await expect(page.getByTestId(`pipeline-group-${newPhaseId}`)).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId(`pipeline-group-${newPhaseId}`)).toContainText(newPhaseName);
+
+    await page.getByRole('link', { name: 'Officer Chat' }).click();
+    await page.getByTestId('officer-chat-input').fill(`Deactivate phase ${newPhaseName}`);
+    const beforeDeactivate = await assistantMsgs.count();
+    await page.getByTestId('officer-chat-send').click();
+    await expect(assistantMsgs).toHaveCount(beforeDeactivate + 1, { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('set_phase_active', { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('success', { timeout: 20000 });
+
+    await page.getByRole('link', { name: 'Pipeline', exact: true }).click();
+    await expect(page.getByTestId(`pipeline-group-${newPhaseId}`)).toHaveCount(0);
+
+    await page.getByRole('link', { name: 'Officer Chat' }).click();
+    await page.getByTestId('officer-chat-input').fill(`Activate phase ${newPhaseName}`);
+    const beforeActivate = await assistantMsgs.count();
+    await page.getByTestId('officer-chat-send').click();
+    await expect(assistantMsgs).toHaveCount(beforeActivate + 1, { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('set_phase_active', { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('success', { timeout: 20000 });
+
+    const phasesBeforeReorderResponse = await page.request.get('http://localhost:8000/api/phases');
+    const phasesBeforeReorder = (await phasesBeforeReorderResponse.json()) as Array<{ id?: string; name?: string; isActive?: boolean }>;
+    const originalNames = phasesBeforeReorder.map((p) => p.name).filter(Boolean) as string[];
+    expect(originalNames.length).toBeGreaterThan(1);
+    const reversedNames = [...originalNames].reverse();
+
+    await page.getByTestId('officer-chat-input').fill(`Reorder phases to: ${reversedNames.join(' > ')}`);
+    const beforeReorder = await assistantMsgs.count();
+    await page.getByTestId('officer-chat-send').click();
+    await expect(assistantMsgs).toHaveCount(beforeReorder + 1, { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('reorder_phases', { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('success', { timeout: 20000 });
+
+    const phasesAfterReorderResponse = await page.request.get('http://localhost:8000/api/phases');
+    const phasesAfterReorder = (await phasesAfterReorderResponse.json()) as Array<{ id?: string; name?: string; isActive?: boolean }>;
+    const firstAfterReorder = phasesAfterReorder.find((p) => p.isActive !== false);
+    expect(firstAfterReorder?.id).toBeTruthy();
+    const firstAfterReorderId = firstAfterReorder?.id as string;
+
+    await page.getByRole('link', { name: 'Pipeline', exact: true }).click();
+    const groupBlocks = page.locator('[data-testid^="pipeline-group-"]');
+    await expect(groupBlocks.nth(0)).toHaveAttribute('data-testid', 'pipeline-group-unassigned');
+    await expect(groupBlocks.nth(1)).toHaveAttribute('data-testid', `pipeline-group-${firstAfterReorderId}`);
+
+    await page.getByRole('link', { name: 'Officer Chat' }).click();
+    await page.getByTestId('officer-chat-input').fill(`Reorder phases to: ${originalNames.join(' > ')}`);
+    const beforeReorderBack = await assistantMsgs.count();
+    await page.getByTestId('officer-chat-send').click();
+    await expect(assistantMsgs).toHaveCount(beforeReorderBack + 1, { timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('officer-chat-action-results')).toContainText('reorder_phases', { timeout: 20000 });
+
+    await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
+      headers: { 'x-officer-role': 'loan-officer-access' },
+    });
   });
 
   test('Borrower route renders after login', async ({ page }) => {
