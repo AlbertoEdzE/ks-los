@@ -8,13 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.api.routers.v2_auth import OFFICER_HEADER, OFFICER_TOKEN, require_officer_role
+from src.api.routers.v2_auth import OFFICER_HEADER, is_officer_request, require_officer_role, require_viewer_role
 from src.shared.audit import log_audit
 from src.shared.db import Conversation, Loan, LoanPhase, Message, LoanProductCatalog, get_db
 from src.shared.metrics import request_counter, request_errors_total
 
 
-router = APIRouter(prefix="/api/conversations", tags=["v2_conversations"])
+router = APIRouter(prefix="/api/conversations", tags=["v2_conversations"], dependencies=[Depends(require_viewer_role)])
 
 
 class CreateConversationRequest(BaseModel):
@@ -896,11 +896,12 @@ def _apply_officer_directives(db: Session, conversation: Conversation, content: 
 def create_conversation(
     req: CreateConversationRequest,
     db: Session = Depends(get_db),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     x_officer_role: str | None = Header(default=None, alias=OFFICER_HEADER),
 ):
     request_counter.labels(endpoint="/api/conversations").inc()
     wants_officer = (req.chatRole or "").lower() == "officer"
-    if wants_officer and x_officer_role != OFFICER_TOKEN:
+    if wants_officer and not is_officer_request(x_api_key, x_officer_role):
         request_errors_total.labels(endpoint="/api/conversations").inc()
         log_audit(
             event="v2_conversation_create",
@@ -959,12 +960,21 @@ def list_conversations(_: bool = Depends(require_officer_role), db: Session = De
     return [_serialize_conversation(c) for c in rows]
 
 @router.get("/{conversation_id}")
-def get_conversation(conversation_id: str, db: Session = Depends(get_db)):
+def get_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    x_officer_role: str | None = Header(default=None, alias=OFFICER_HEADER),
+):
     request_counter.labels(endpoint="/api/conversations/{conversation_id}").inc()
     conv = db.get(Conversation, conversation_id)
     if not conv:
         request_errors_total.labels(endpoint="/api/conversations/{conversation_id}").inc()
         raise HTTPException(status_code=404, detail="Conversation not found")
+    actor_is_officer = is_officer_request(x_api_key, x_officer_role)
+    if conv.chat_role == "officer" and not actor_is_officer:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}").inc()
+        raise HTTPException(status_code=403, detail="Officer access required")
     return _serialize_conversation(conv)
 
 
@@ -1009,8 +1019,21 @@ def patch_conversation(
 
 
 @router.get("/{conversation_id}/messages")
-def list_messages(conversation_id: str, db: Session = Depends(get_db)):
+def list_messages(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    x_officer_role: str | None = Header(default=None, alias=OFFICER_HEADER),
+):
     request_counter.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
+    conv = db.get(Conversation, conversation_id)
+    if not conv:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    actor_is_officer = is_officer_request(x_api_key, x_officer_role)
+    if conv.chat_role == "officer" and not actor_is_officer:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
+        raise HTTPException(status_code=403, detail="Officer access required")
     rows = (
         db.execute(select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc()))
         .scalars()
@@ -1024,6 +1047,7 @@ def send_message(
     conversation_id: str,
     req: SendMessageRequest,
     db: Session = Depends(get_db),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     x_officer_role: str | None = Header(default=None, alias=OFFICER_HEADER),
 ):
     request_counter.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
@@ -1041,11 +1065,10 @@ def send_message(
     if not req.content or not req.content.strip():
         raise HTTPException(status_code=400, detail="Content is required")
 
-    if x_officer_role is not None and x_officer_role != OFFICER_TOKEN:
+    actor_is_officer = is_officer_request(x_api_key, x_officer_role)
+    if conv.chat_role == "officer" and not actor_is_officer:
         request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
         raise HTTPException(status_code=403, detail="Officer access required")
-
-    actor_is_officer = x_officer_role == OFFICER_TOKEN
     user_msg = Message(
         id=str(uuid.uuid4()),
         conversation_id=conversation_id,

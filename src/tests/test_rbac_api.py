@@ -36,3 +36,66 @@ def test_explain_allows_viewer_key():
     }
     r = client.post("/explain/inference", json={"profile": profile}, headers={"X-API-Key": "viewkey"})
     assert r.status_code == 200
+
+
+def test_wp_v2_018_borrower_conversation_requires_viewer_key_when_enforced():
+    client = TestClient(app)
+    r = client.post("/api/conversations", json={"chatRole": "borrower"})
+    assert r.status_code == 401
+    r2 = client.post("/api/conversations", json={"chatRole": "borrower"}, headers={"X-API-Key": "viewkey"})
+    assert r2.status_code == 200
+
+
+def test_wp_v2_018_officer_conversation_requires_operator_key_when_enforced():
+    client = TestClient(app)
+    r = client.post("/api/conversations", json={"chatRole": "officer"}, headers={"X-API-Key": "viewkey"})
+    assert r.status_code == 403
+    r2 = client.post("/api/conversations", json={"chatRole": "officer"}, headers={"X-API-Key": "opkey"})
+    assert r2.status_code == 200
+
+
+def test_wp_v2_018_officer_list_conversations_blocks_without_operator_key():
+    client = TestClient(app)
+    r = client.get("/api/conversations")
+    assert r.status_code == 401
+    r2 = client.get("/api/conversations", headers={"X-API-Key": "viewkey"})
+    assert r2.status_code == 403
+    r3 = client.get("/api/conversations", headers={"X-API-Key": "opkey"})
+    assert r3.status_code == 200
+    r4 = client.get("/api/conversations", headers={"x-officer-role": "loan-officer-access"})
+    assert r4.status_code == 401
+
+
+def test_wp_v2_018_officer_conversation_access_is_gated_on_get_and_messages():
+    client = TestClient(app)
+    created = client.post("/api/conversations", json={"chatRole": "officer"}, headers={"X-API-Key": "opkey"})
+    assert created.status_code == 200
+    conversation_id = created.json()["conversation"]["id"]
+
+    get_viewer = client.get(f"/api/conversations/{conversation_id}", headers={"X-API-Key": "viewkey"})
+    assert get_viewer.status_code == 403
+    get_operator = client.get(f"/api/conversations/{conversation_id}", headers={"X-API-Key": "opkey"})
+    assert get_operator.status_code == 200
+
+    msgs_viewer = client.get(f"/api/conversations/{conversation_id}/messages", headers={"X-API-Key": "viewkey"})
+    assert msgs_viewer.status_code == 403
+    msgs_operator = client.get(f"/api/conversations/{conversation_id}/messages", headers={"X-API-Key": "opkey"})
+    assert msgs_operator.status_code == 200
+
+
+def test_wp_v2_018_phases_requires_viewer_key_when_enforced():
+    client = TestClient(app)
+    r = client.get("/api/phases")
+    assert r.status_code == 401
+    r2 = client.get("/api/phases", headers={"X-API-Key": "viewkey"})
+    assert r2.status_code == 200
+
+
+def test_wp_v2_018_loans_requires_operator_key_when_enforced():
+    client = TestClient(app)
+    r = client.get("/api/loans")
+    assert r.status_code == 401
+    r2 = client.get("/api/loans", headers={"X-API-Key": "viewkey"})
+    assert r2.status_code == 403
+    r3 = client.get("/api/loans", headers={"X-API-Key": "opkey"})
+    assert r3.status_code == 200

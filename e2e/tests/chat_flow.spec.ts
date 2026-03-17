@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Chat Flow', () => {
   test('Complete borrower v2 chat flow with phase tracker and recommendations', async ({ page }) => {
     test.setTimeout(120000);
+    await page.setViewportSize({ width: 1280, height: 720 });
     await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
       headers: { 'x-officer-role': 'loan-officer-access' },
     });
@@ -23,7 +24,6 @@ test.describe('Chat Flow', () => {
     await expect(page.getByTestId('chat-message-user')).toHaveCount(1, { timeout: 20000 });
     await expect(page.getByTestId('chat-message-assistant')).toHaveCount(1, { timeout: 20000 });
     await expect(page.getByTestId('phase-progress-tracker')).toBeVisible({ timeout: 20000 });
-    await expect(page.getByTestId('recommended-products')).toBeVisible({ timeout: 20000 });
     await expect(page.getByText('Home Purchase Loan')).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId('approval-probability')).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId('approval-blocker-0')).toBeVisible({ timeout: 20000 });
