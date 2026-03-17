@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from src.api.routers.v2_auth import require_officer_role, require_viewer_role
 from src.shared.audit import log_audit
 from src.shared.db import Conversation, Loan, LoanPhase, get_db
-from src.shared.metrics import request_counter, request_errors_total
+from src.shared.metrics import request_counter, request_errors_total, v2_phase_actions_total
 
 
 router = APIRouter(prefix="/api/phases", tags=["v2_phases"], dependencies=[Depends(require_viewer_role)])
@@ -458,6 +458,7 @@ def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db
             db.commit()
             db.refresh(phase)
             results.append({"type": a.type, "phaseId": phase.id, "name": phase.name, "isActive": True, "sortOrder": phase.sort_order})
+            v2_phase_actions_total.labels(action="add_phase", status="success").inc()
             continue
 
         if isinstance(a, SetPhaseActiveAction):
@@ -470,11 +471,13 @@ def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db
                     status="not_found",
                     meta={"phaseId": a.phaseId},
                 )
+                v2_phase_actions_total.labels(action="set_phase_active", status="not_found").inc()
                 raise HTTPException(status_code=404, detail="Phase not found")
             phase.is_active = a.isActive
             db.add(phase)
             db.commit()
             results.append({"type": a.type, "phaseId": phase.id, "isActive": phase.is_active})
+            v2_phase_actions_total.labels(action="set_phase_active", status="success").inc()
             continue
 
         if isinstance(a, ReorderPhasesAction):
@@ -482,9 +485,23 @@ def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db
             phases_by_id = {p.id: p for p in rows}
             if len(a.phaseIds) != len(phases_by_id):
                 request_errors_total.labels(endpoint="/api/phases/actions").inc()
+                log_audit(
+                    event="v2_phase_actions",
+                    endpoint="/api/phases/actions",
+                    status="invalid",
+                    meta={"error": "phaseIds must include all phases"},
+                )
+                v2_phase_actions_total.labels(action="reorder_phases", status="invalid").inc()
                 raise HTTPException(status_code=400, detail="phaseIds must include all phases")
             if set(a.phaseIds) != set(phases_by_id.keys()):
                 request_errors_total.labels(endpoint="/api/phases/actions").inc()
+                log_audit(
+                    event="v2_phase_actions",
+                    endpoint="/api/phases/actions",
+                    status="invalid",
+                    meta={"error": "phaseIds must match existing phases"},
+                )
+                v2_phase_actions_total.labels(action="reorder_phases", status="invalid").inc()
                 raise HTTPException(status_code=400, detail="phaseIds must match existing phases")
 
             for idx, pid in enumerate(a.phaseIds, start=1):
@@ -492,9 +509,17 @@ def execute_phase_actions(req: PhaseActionsRequest, db: Session = Depends(get_db
                 db.add(phases_by_id[pid])
             db.commit()
             results.append({"type": a.type, "phaseIds": a.phaseIds})
+            v2_phase_actions_total.labels(action="reorder_phases", status="success").inc()
             continue
 
         request_errors_total.labels(endpoint="/api/phases/actions").inc()
+        log_audit(
+            event="v2_phase_actions",
+            endpoint="/api/phases/actions",
+            status="invalid",
+            meta={"error": "Unsupported action"},
+        )
+        v2_phase_actions_total.labels(action="unknown", status="invalid").inc()
         raise HTTPException(status_code=400, detail="Unsupported action")
 
     log_audit(event="v2_phase_actions", endpoint="/api/phases/actions", status="success", meta={"count": len(actions)})

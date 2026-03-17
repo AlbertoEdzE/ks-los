@@ -279,7 +279,8 @@ This document aligns with the v2 work packages in: [02_work_packages.md](file://
 - **Implemented (baseline):** WP-V2-013 .. WP-V2-014 (officer lifecycle chat action semantics)
 - **Implemented (incremental):** WP-V2-015 .. WP-V2-017 (probability navigator, checklist baseline, underwriting memo)
 - **Implemented (Phase 5 incremental):** WP-V2-018 (RBAC auth boundary + authorization tests)
-- **Planned (Phase 5 hardening):** WP-V2-019 .. WP-V2-020 (observability completeness, deterministic regression hardening)
+- **Implemented (Phase 5 incremental):** WP-V2-019 (audit coverage + v2 funnel metrics + evidence tests)
+- **Planned (Phase 5 hardening):** WP-V2-020 (deterministic regression hardening)
 
 ---
 

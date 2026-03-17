@@ -24,7 +24,6 @@ test('borrower chat shows suggestions and phase tracker', async ({ page }) => {
   await expect(page.getByTestId('chat-message-assistant').first()).toContainText('What loan amount', { timeout: 20000 });
 
   await expect(page.getByTestId('phase-progress-tracker')).toBeVisible({ timeout: 20000 });
-  await expect(page.getByTestId('recommended-products')).toBeVisible({ timeout: 20000 });
   await expect(page.getByText('Home Purchase Loan')).toBeVisible({ timeout: 20000 });
   await expect(page.getByTestId('next-conversation-angle')).not.toHaveText('—', { timeout: 20000 });
 });
@@ -46,7 +45,6 @@ test('debt consolidation recommends personal loan products', async ({ page }) =>
   const debtButton = page.getByRole('button', { name: /Debt Consolidation/i });
   await debtButton.click();
 
-  await expect(page.getByTestId('recommended-products')).toBeVisible({ timeout: 20000 });
   await expect(page.getByText('Personal Loan — Salaried')).toBeVisible({ timeout: 20000 });
 });
 

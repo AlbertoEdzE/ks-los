@@ -1,9 +1,33 @@
 from fastapi import APIRouter
 from typing import Dict, Any
 import os
-from src.shared.metrics import training_runs_total, drift_runs_total, risk_inference_total
+from src.shared.metrics import (
+    drift_runs_total,
+    risk_inference_total,
+    training_runs_total,
+    v2_catalog_product_writes_total,
+    v2_conversation_updates_total,
+    v2_conversations_created_total,
+    v2_loan_document_updates_total,
+    v2_loans_created_total,
+    v2_loans_updated_total,
+    v2_messages_sent_total,
+    v2_phase_actions_total,
+    v2_underwriting_memo_total,
+)
 
 router = APIRouter(prefix="/observability", tags=["observability"])
+
+def _sum_counter(counter) -> float:
+    try:
+        total = 0.0
+        for metric in counter.collect():
+            for sample in metric.samples:
+                if sample.name == counter._name:
+                    total += float(sample.value)
+        return total
+    except Exception:
+        return 0.0
 
 @router.get("/summary")
 def summary() -> Dict[str, Any]:
@@ -12,5 +36,14 @@ def summary() -> Dict[str, Any]:
         "drift_runs": drift_runs_total._value.get(),
         "risk_inferences": risk_inference_total._value.get(),
         "mlflow_url": os.getenv("MLFLOW_URL", "http://localhost:5000"),
-        "drift_report_endpoint": "/training/drift/report"
+        "drift_report_endpoint": "/training/drift/report",
+        "v2_conversations_created": _sum_counter(v2_conversations_created_total),
+        "v2_conversation_updates": _sum_counter(v2_conversation_updates_total),
+        "v2_messages_sent": _sum_counter(v2_messages_sent_total),
+        "v2_loans_created": _sum_counter(v2_loans_created_total),
+        "v2_loans_updated": _sum_counter(v2_loans_updated_total),
+        "v2_loan_document_updates": _sum_counter(v2_loan_document_updates_total),
+        "v2_underwriting_memos": _sum_counter(v2_underwriting_memo_total),
+        "v2_phase_actions": _sum_counter(v2_phase_actions_total),
+        "v2_catalog_product_writes": _sum_counter(v2_catalog_product_writes_total),
     }

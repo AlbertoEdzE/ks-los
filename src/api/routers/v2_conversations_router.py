@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session
 from src.api.routers.v2_auth import OFFICER_HEADER, is_officer_request, require_officer_role, require_viewer_role
 from src.shared.audit import log_audit
 from src.shared.db import Conversation, Loan, LoanPhase, Message, LoanProductCatalog, get_db
-from src.shared.metrics import request_counter, request_errors_total
+from src.shared.metrics import (
+    request_counter,
+    request_errors_total,
+    v2_conversations_created_total,
+    v2_conversation_updates_total,
+    v2_messages_sent_total,
+)
 
 
 router = APIRouter(prefix="/api/conversations", tags=["v2_conversations"], dependencies=[Depends(require_viewer_role)])
@@ -950,6 +956,7 @@ def create_conversation(
         status="success",
         meta={"conversationId": conversation.id, "chatRole": chat_role},
     )
+    v2_conversations_created_total.labels(chat_role=chat_role).inc()
     return {"conversation": _serialize_conversation(conversation), "greeting": greeting}
 
 
@@ -1015,6 +1022,15 @@ def patch_conversation(
         status="success",
         meta={"conversationId": conversation_id},
     )
+    for field in sorted(req.model_fields_set):
+        if field == "status":
+            v2_conversation_updates_total.labels(field="status").inc()
+        elif field == "borrowerName":
+            v2_conversation_updates_total.labels(field="borrower_name").inc()
+        elif field == "assignedOfficer":
+            v2_conversation_updates_total.labels(field="assigned_officer").inc()
+        elif field == "currentPhaseId":
+            v2_conversation_updates_total.labels(field="current_phase_id").inc()
     return _serialize_conversation(conv)
 
 
@@ -1060,14 +1076,30 @@ def send_message(
             status="not_found",
             meta={"conversationId": conversation_id},
         )
+        v2_messages_sent_total.labels(chat_role="unknown", actor_role="unknown", status="not_found").inc()
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     if not req.content or not req.content.strip():
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
+        log_audit(
+            event="v2_message_send",
+            endpoint="/api/conversations/{conversation_id}/messages",
+            status="invalid",
+            meta={"conversationId": conversation_id, "error": "Content is required"},
+        )
+        v2_messages_sent_total.labels(chat_role=conv.chat_role, actor_role="unknown", status="invalid").inc()
         raise HTTPException(status_code=400, detail="Content is required")
 
     actor_is_officer = is_officer_request(x_api_key, x_officer_role)
     if conv.chat_role == "officer" and not actor_is_officer:
         request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
+        log_audit(
+            event="v2_message_send",
+            endpoint="/api/conversations/{conversation_id}/messages",
+            status="forbidden",
+            meta={"conversationId": conversation_id, "chatRole": conv.chat_role},
+        )
+        v2_messages_sent_total.labels(chat_role=conv.chat_role, actor_role="borrower", status="forbidden").inc()
         raise HTTPException(status_code=403, detail="Officer access required")
     user_msg = Message(
         id=str(uuid.uuid4()),
@@ -1179,6 +1211,7 @@ def send_message(
         status="success",
         meta={"conversationId": conversation_id, "chatRole": conv.chat_role, "actorRole": "officer" if actor_is_officer else "borrower"},
     )
+    v2_messages_sent_total.labels(chat_role=conv.chat_role, actor_role="officer" if actor_is_officer else "borrower", status="success").inc()
     return {
         "message": _serialize_message(assistant_msg),
         "intentAnalysis": analysis,

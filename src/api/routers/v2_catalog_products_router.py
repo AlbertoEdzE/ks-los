@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from src.api.routers.v2_auth import require_officer_role
 from src.shared.audit import log_audit
 from src.shared.db import LoanProductCatalog, get_db
-from src.shared.metrics import request_counter, request_errors_total
+from src.shared.metrics import request_counter, request_errors_total, v2_catalog_product_writes_total
 
 
 router = APIRouter(
@@ -252,6 +252,7 @@ def create_catalog_product(req: CreateCatalogProductRequest, db: Session = Depen
             status="success",
             meta={"productId": product.id, "code": product.code, "statusValue": product.status},
         )
+        v2_catalog_product_writes_total.labels(op="create", status="success").inc()
         return _serialize_product(product)
     except Exception as e:
         db.rollback()
@@ -262,6 +263,7 @@ def create_catalog_product(req: CreateCatalogProductRequest, db: Session = Depen
             status="error",
             meta={"error": str(e)},
         )
+        v2_catalog_product_writes_total.labels(op="create", status="error").inc()
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -277,6 +279,7 @@ def patch_catalog_product(product_id: str, req: PatchCatalogProductRequest, db: 
             status="not_found",
             meta={"productId": product_id},
         )
+        v2_catalog_product_writes_total.labels(op="patch", status="not_found").inc()
         raise HTTPException(status_code=404, detail="Product not found")
 
     if req.name is not None:
@@ -340,6 +343,7 @@ def patch_catalog_product(product_id: str, req: PatchCatalogProductRequest, db: 
             status="success",
             meta={"productId": product_id, "code": product.code, "statusValue": product.status},
         )
+        v2_catalog_product_writes_total.labels(op="patch", status="success").inc()
         return _serialize_product(product)
     except Exception as e:
         db.rollback()
@@ -350,4 +354,5 @@ def patch_catalog_product(product_id: str, req: PatchCatalogProductRequest, db: 
             status="error",
             meta={"productId": product_id, "error": str(e)},
         )
+        v2_catalog_product_writes_total.labels(op="patch", status="error").inc()
         raise HTTPException(status_code=400, detail=str(e))

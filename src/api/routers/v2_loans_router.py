@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session
 from src.api.routers.v2_auth import require_officer_role
 from src.shared.audit import log_audit
 from src.shared.db import Loan, LoanProductCatalog, get_db
-from src.shared.metrics import request_counter, request_errors_total
+from src.shared.metrics import (
+    request_counter,
+    request_errors_total,
+    v2_loan_document_updates_total,
+    v2_loans_created_total,
+    v2_loans_updated_total,
+    v2_underwriting_memo_total,
+)
 
 
 router = APIRouter(prefix="/api/loans", tags=["v2_loans"], dependencies=[Depends(require_officer_role)])
@@ -543,13 +550,19 @@ def create_loan(req: CreateLoanRequest, db: Session = Depends(get_db)):
         status="success",
         meta={"loanId": loan.id, "catalogProductCode": loan.catalog_product_code},
     )
+    v2_loans_created_total.labels(source="endpoint").inc()
     return _serialize_loan(loan)
 
 
 @router.post("/actions")
 def execute_loan_actions(req: LoanActionsRequest, db: Session = Depends(get_db)):
     request_counter.labels(endpoint="/api/loans/actions").inc()
-    actions = _validate_loan_actions(req.actions)
+    try:
+        actions = _validate_loan_actions(req.actions)
+    except ValueError as e:
+        request_errors_total.labels(endpoint="/api/loans/actions").inc()
+        log_audit(event="v2_loan_actions", endpoint="/api/loans/actions", status="invalid", meta={"error": str(e)})
+        raise HTTPException(status_code=400, detail="Invalid actions payload")
     results: list[dict[str, Any]] = []
 
     for a in actions:
@@ -571,21 +584,34 @@ def execute_loan_actions(req: LoanActionsRequest, db: Session = Depends(get_db))
             db.commit()
             db.refresh(loan)
             results.append({"type": a.type, "loanId": loan.id})
+            v2_loans_created_total.labels(source="actions").inc()
             continue
 
         if isinstance(a, UpdateLoanAction):
             loan = db.get(Loan, a.loanId)
             if not loan:
                 request_errors_total.labels(endpoint="/api/loans/actions").inc()
+                log_audit(event="v2_loan_actions", endpoint="/api/loans/actions", status="not_found", meta={"loanId": a.loanId})
                 raise HTTPException(status_code=404, detail="Loan not found")
+            changed_fields = set(a.patch.model_fields_set)
             _apply_patch(loan, a.patch, db)
             db.add(loan)
             db.commit()
             db.refresh(loan)
             results.append({"type": a.type, "loanId": loan.id})
+            for field in sorted(changed_fields):
+                if field == "status":
+                    v2_loans_updated_total.labels(field="status").inc()
+                elif field == "currentPhaseId":
+                    v2_loans_updated_total.labels(field="current_phase_id").inc()
+                elif field == "catalogProductCode":
+                    v2_loans_updated_total.labels(field="catalog_product_code").inc()
+                else:
+                    v2_loans_updated_total.labels(field="other").inc()
             continue
 
         request_errors_total.labels(endpoint="/api/loans/actions").inc()
+        log_audit(event="v2_loan_actions", endpoint="/api/loans/actions", status="invalid", meta={"actionType": getattr(a, "type", None)})
         raise HTTPException(status_code=400, detail="Unsupported action")
 
     log_audit(event="v2_loan_actions", endpoint="/api/loans/actions", status="success", meta={"count": len(results)})
@@ -597,6 +623,7 @@ def execute_loan_actions(req: LoanActionsRequest, db: Session = Depends(get_db))
 @router.patch("/{loan_id}")
 def patch_loan(loan_id: str, req: PatchLoanRequest, db: Session = Depends(get_db)):
     request_counter.labels(endpoint="/api/loans/{loan_id}").inc()
+    changed_fields = set(req.model_fields_set)
     loan = db.get(Loan, loan_id)
     if not loan:
         request_errors_total.labels(endpoint="/api/loans/{loan_id}").inc()
@@ -608,6 +635,15 @@ def patch_loan(loan_id: str, req: PatchLoanRequest, db: Session = Depends(get_db
     db.commit()
     db.refresh(loan)
     log_audit(event="v2_loan_patch", endpoint="/api/loans/{loan_id}", status="success", meta={"loanId": loan_id})
+    for field in sorted(changed_fields):
+        if field == "status":
+            v2_loans_updated_total.labels(field="status").inc()
+        elif field == "currentPhaseId":
+            v2_loans_updated_total.labels(field="current_phase_id").inc()
+        elif field == "catalogProductCode":
+            v2_loans_updated_total.labels(field="catalog_product_code").inc()
+        else:
+            v2_loans_updated_total.labels(field="other").inc()
     return _serialize_loan(loan)
 
 
@@ -616,22 +652,44 @@ def patch_loan_document(loan_id: str, req: PatchLoanDocumentRequest, db: Session
     request_counter.labels(endpoint="/api/loans/{loan_id}/documents").inc()
     if req.status not in _DOC_STATUSES:
         request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents").inc()
+        v2_loan_document_updates_total.labels(status="invalid").inc()
+        log_audit(
+            event="v2_loan_document_patch",
+            endpoint="/api/loans/{loan_id}/documents",
+            status="invalid",
+            meta={"loanId": loan_id, "error": "Invalid document status", "statusValue": req.status},
+        )
         raise HTTPException(status_code=400, detail="Invalid document status")
 
     loan = db.get(Loan, loan_id)
     if not loan:
         request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents").inc()
+        v2_loan_document_updates_total.labels(status="not_found").inc()
         log_audit(event="v2_loan_document_patch", endpoint="/api/loans/{loan_id}/documents", status="not_found", meta={"loanId": loan_id})
         raise HTTPException(status_code=404, detail="Loan not found")
 
     checklist = loan.document_checklist
     if not isinstance(checklist, dict) or not isinstance(checklist.get("items"), list):
         request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents").inc()
+        v2_loan_document_updates_total.labels(status="invalid").inc()
+        log_audit(
+            event="v2_loan_document_patch",
+            endpoint="/api/loans/{loan_id}/documents",
+            status="invalid",
+            meta={"loanId": loan_id, "error": "Loan has no document checklist"},
+        )
         raise HTTPException(status_code=400, detail="Loan has no document checklist")
 
     target = req.name.strip()
     if not target:
         request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents").inc()
+        v2_loan_document_updates_total.labels(status="invalid").inc()
+        log_audit(
+            event="v2_loan_document_patch",
+            endpoint="/api/loans/{loan_id}/documents",
+            status="invalid",
+            meta={"loanId": loan_id, "error": "Document name is required"},
+        )
         raise HTTPException(status_code=400, detail="Document name is required")
 
     updated = False
@@ -648,6 +706,13 @@ def patch_loan_document(loan_id: str, req: PatchLoanDocumentRequest, db: Session
 
     if not updated:
         request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents").inc()
+        v2_loan_document_updates_total.labels(status="invalid").inc()
+        log_audit(
+            event="v2_loan_document_patch",
+            endpoint="/api/loans/{loan_id}/documents",
+            status="invalid",
+            meta={"loanId": loan_id, "error": "Document not found in checklist", "document": target},
+        )
         raise HTTPException(status_code=400, detail="Document not found in checklist")
 
     loan.document_checklist = {**checklist, "items": updated_items, "asOf": now}
@@ -660,6 +725,7 @@ def patch_loan_document(loan_id: str, req: PatchLoanDocumentRequest, db: Session
         status="success",
         meta={"loanId": loan_id, "document": target, "statusValue": req.status},
     )
+    v2_loan_document_updates_total.labels(status=req.status).inc()
     return _serialize_loan(loan)
 
 
@@ -683,6 +749,7 @@ def generate_underwriting_memo(loan_id: str, db: Session = Depends(get_db)):
     if not loan:
         request_errors_total.labels(endpoint="/api/loans/{loan_id}/underwriting-memo").inc()
         log_audit(event="v2_underwriting_memo_generate", endpoint="/api/loans/{loan_id}/underwriting-memo", status="not_found", meta={"loanId": loan_id})
+        v2_underwriting_memo_total.labels(status="not_found").inc()
         raise HTTPException(status_code=404, detail="Loan not found")
 
     product = _get_product_by_code(db, loan.catalog_product_code) if loan.catalog_product_code else None
@@ -691,6 +758,7 @@ def generate_underwriting_memo(loan_id: str, db: Session = Depends(get_db)):
     except Exception:
         request_errors_total.labels(endpoint="/api/loans/{loan_id}/underwriting-memo").inc()
         log_audit(event="v2_underwriting_memo_generate", endpoint="/api/loans/{loan_id}/underwriting-memo", status="error", meta={"loanId": loan_id})
+        v2_underwriting_memo_total.labels(status="error").inc()
         raise HTTPException(status_code=500, detail="Failed to generate memo")
 
     loan.underwriting_memo = memo.model_dump()
@@ -703,4 +771,5 @@ def generate_underwriting_memo(loan_id: str, db: Session = Depends(get_db)):
         status="success",
         meta={"loanId": loan.id, "method": memo.method},
     )
+    v2_underwriting_memo_total.labels(status="success").inc()
     return _serialize_loan(loan)
