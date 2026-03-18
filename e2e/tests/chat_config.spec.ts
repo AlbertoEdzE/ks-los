@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test('borrower chat shows suggestions and phase tracker', async ({ page }) => {
   await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
-    headers: { 'x-officer-role': 'loan-officer-access' },
+    headers: { authorization: 'Bearer loan-officer-access' },
   });
   await page.addInitScript(() => {
     window.localStorage.removeItem('v2_borrower_conversation_id');
@@ -24,13 +24,16 @@ test('borrower chat shows suggestions and phase tracker', async ({ page }) => {
   await expect(page.getByTestId('chat-message-assistant').first()).toContainText('What loan amount', { timeout: 20000 });
 
   await expect(page.getByTestId('phase-progress-tracker')).toBeVisible({ timeout: 20000 });
+  const recommendationsCard = page.getByTestId('card-recommendations');
+  await recommendationsCard.scrollIntoViewIfNeeded();
+  await expect(recommendationsCard).toBeVisible({ timeout: 20000 });
   await expect(page.getByText('Home Purchase Loan')).toBeVisible({ timeout: 20000 });
   await expect(page.getByTestId('next-conversation-angle')).not.toHaveText('—', { timeout: 20000 });
 });
 
 test('debt consolidation recommends personal loan products', async ({ page }) => {
   await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
-    headers: { 'x-officer-role': 'loan-officer-access' },
+    headers: { authorization: 'Bearer loan-officer-access' },
   });
   await page.addInitScript(() => {
     window.localStorage.removeItem('v2_borrower_conversation_id');
@@ -45,12 +48,15 @@ test('debt consolidation recommends personal loan products', async ({ page }) =>
   const debtButton = page.getByRole('button', { name: /Debt Consolidation/i });
   await debtButton.click();
 
+  const recommendationsCard = page.getByTestId('card-recommendations');
+  await recommendationsCard.scrollIntoViewIfNeeded();
+  await expect(recommendationsCard).toBeVisible({ timeout: 20000 });
   await expect(page.getByText('Personal Loan — Salaried')).toBeVisible({ timeout: 20000 });
 });
 
 test('phase tracker navigates to phase detail view', async ({ page }) => {
   await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
-    headers: { 'x-officer-role': 'loan-officer-access' },
+    headers: { authorization: 'Bearer loan-officer-access' },
   });
   await page.addInitScript(() => {
     window.localStorage.removeItem('v2_borrower_conversation_id');
@@ -75,7 +81,7 @@ test('phase tracker navigates to phase detail view', async ({ page }) => {
 
 test('borrower chat hides officer-only notes from the thread', async ({ page }) => {
   await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
-    headers: { 'x-officer-role': 'loan-officer-access' },
+    headers: { authorization: 'Bearer loan-officer-access' },
   });
 
   const createdConversation = await page.request.post('http://localhost:8000/api/conversations', {
@@ -87,7 +93,7 @@ test('borrower chat hides officer-only notes from the thread', async ({ page }) 
   expect(conversationId).toBeTruthy();
 
   await page.request.post(`http://localhost:8000/api/conversations/${conversationId as string}/messages`, {
-    headers: { 'content-type': 'application/json', 'x-officer-role': 'loan-officer-access' },
+    headers: { 'content-type': 'application/json', authorization: 'Bearer loan-officer-access' },
     data: { content: 'OFFICER_INTERNAL_NOTE_DO_NOT_SHOW' },
   });
 

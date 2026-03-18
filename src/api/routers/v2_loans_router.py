@@ -512,7 +512,7 @@ def _serialize_loan(l: Loan) -> dict[str, Any]:
 @router.get("")
 def list_loans(db: Session = Depends(get_db)):
     request_counter.labels(endpoint="/api/loans").inc()
-    rows = db.execute(select(Loan).order_by(Loan.updated_at.desc(), Loan.created_at.desc())).scalars().all()
+    rows = db.execute(select(Loan).order_by(Loan.updated_at.desc(), Loan.created_at.desc(), Loan.id.asc())).scalars().all()
     return [_serialize_loan(l) for l in rows]
 
 @router.get("/{loan_id}")

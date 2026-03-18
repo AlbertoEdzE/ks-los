@@ -206,7 +206,13 @@ class PatchCatalogProductRequest(BaseModel):
 def list_catalog_products(db: Session = Depends(get_db)):
     request_counter.labels(endpoint="/api/catalog-products").inc()
     _ensure_seeded(db)
-    rows = db.execute(select(LoanProductCatalog).order_by(LoanProductCatalog.created_at.desc())).scalars().all()
+    rows = (
+        db.execute(
+            select(LoanProductCatalog).order_by(LoanProductCatalog.created_at.desc(), LoanProductCatalog.code.asc(), LoanProductCatalog.id.asc())
+        )
+        .scalars()
+        .all()
+    )
     return [_serialize_product(p) for p in rows]
 
 

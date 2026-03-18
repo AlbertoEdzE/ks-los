@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
+const ADMIN_HEADERS = { Authorization: 'Bearer admin-access' };
+
 const MetricCard: React.FC<{ label: string; value: string | number | React.ReactNode }> = ({ label, value }) => (
   <div style={{ padding: '16px', backgroundColor: '#f7fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
     <div style={{ fontSize: '0.875rem', color: '#718096', marginBottom: '4px', fontWeight: '500' }}>{label}</div>
@@ -52,7 +54,7 @@ export const SimulatorPanel: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch('http://localhost:8000/observability/summary');
+        const r = await fetch('http://localhost:8000/observability/summary', { headers: ADMIN_HEADERS });
         if (r.ok) {
           const data = (await r.json()) as Record<string, unknown>;
           setSummary(data);

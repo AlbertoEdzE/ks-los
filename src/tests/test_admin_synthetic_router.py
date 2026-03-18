@@ -3,20 +3,21 @@ from fastapi.testclient import TestClient
 from src.main import app
 
 client = TestClient(app)
+ADMIN_HEADERS = {"Authorization": "Bearer admin-access"}
 
 def test_generation_and_status_and_validate():
-    r = client.post("/admin/synthetic/generate", json={"count": 10, "territory": "ECCU"})
+    r = client.post("/admin/synthetic/generate", headers=ADMIN_HEADERS, json={"count": 10, "territory": "ECCU"})
     assert r.status_code == 200
     # Poll status until completed
     for _ in range(200):
-        s = client.get("/admin/synthetic/status")
+        s = client.get("/admin/synthetic/status", headers=ADMIN_HEADERS)
         assert s.status_code == 200
         data = s.json()
         assert "progress" in data
         if data["status"] in ("completed", "error"):
             break
     assert data["status"] == "completed"
-    v = client.post("/admin/synthetic/validate")
+    v = client.post("/admin/synthetic/validate", headers=ADMIN_HEADERS)
     assert v.status_code == 200
     summary = v.json()
     assert summary["total"] == 10

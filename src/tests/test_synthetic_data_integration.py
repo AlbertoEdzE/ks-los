@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from src.main import app
 
 client = TestClient(app)
+ADMIN_HEADERS = {"Authorization": "Bearer admin-access"}
 
 def test_reproduce_network_error_scenario():
     """
@@ -18,7 +19,7 @@ def test_reproduce_network_error_scenario():
     }
     
     # 1. Start generation
-    response = client.post("/admin/synthetic/generate", json=payload)
+    response = client.post("/admin/synthetic/generate", headers=ADMIN_HEADERS, json=payload)
     assert response.status_code == 200, f"Failed to start generation: {response.text}"
     data = response.json()
     assert data["accepted"] is True
@@ -28,7 +29,7 @@ def test_reproduce_network_error_scenario():
     completed = False
     
     for _ in range(max_retries):
-        status_resp = client.get("/admin/synthetic/status")
+        status_resp = client.get("/admin/synthetic/status", headers=ADMIN_HEADERS)
         assert status_resp.status_code == 200
         status_data = status_resp.json()
         
@@ -43,7 +44,7 @@ def test_reproduce_network_error_scenario():
     assert completed, "Generation did not complete within timeout"
     
     # 3. Validate output
-    validate_resp = client.post("/admin/synthetic/validate")
+    validate_resp = client.post("/admin/synthetic/validate", headers=ADMIN_HEADERS)
     assert validate_resp.status_code == 200
     validate_data = validate_resp.json()
     # Check for expected validation keys

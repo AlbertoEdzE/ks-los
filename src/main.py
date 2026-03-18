@@ -53,6 +53,9 @@ app = FastAPI(
 )
 
 # CORS Middleware (Allow all for development, restrict for production)
+env = os.getenv("ENV", "local").strip().lower()
+is_prod = env in {"prod", "production"}
+origins_env = os.getenv("CORS_ALLOW_ORIGINS")
 origins = [
     "http://localhost:5173",
     "http://localhost:5174",
@@ -73,11 +76,23 @@ origins = [
     "http://127.0.0.1:5180",
     "http://127.0.0.1:3000",
 ]
+if origins_env:
+    origins = [o.strip() for o in origins_env.split(",") if o.strip()]
+
+if is_prod:
+    if not origins_env:
+        raise RuntimeError("CORS_ALLOW_ORIGINS must be set in production")
+    if any("localhost" in o or "127.0.0.1" in o for o in origins):
+        raise RuntimeError("CORS_ALLOW_ORIGINS must not include localhost in production")
+    if os.getenv("ENFORCE_RBAC", "0") != "1":
+        raise RuntimeError("ENFORCE_RBAC must be enabled in production")
+    if not os.getenv("API_KEYS", "").strip():
+        raise RuntimeError("API_KEYS must be set in production")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins, # In production, restrict to frontend domain
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1):\d+$",
+    allow_origin_regex=None if origins_env or is_prod else r"^https?://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -135,17 +150,21 @@ async def unhandled_exception_handler(_: Request, __: Exception):
 async def correlation_middleware(request: Request, call_next):
     cid = request.headers.get("X-Correlation-ID")
     correlation_id = set_correlation_id(cid)
-    endpoint = request.url.path
-    request_counter.labels(endpoint=endpoint).inc()
+    raw_endpoint = request.url.path
     import time
     start = time.monotonic()
     tracer = trace.get_tracer("api")
     try:
-        with tracer.start_as_current_span(f"http_request:{endpoint}"):
+        with tracer.start_as_current_span(f"http_request:{raw_endpoint}"):
             response = await call_next(request)
     except Exception:
-        request_errors_total.labels(endpoint=endpoint).inc()
         raise
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    endpoint = route_path if isinstance(route_path, str) and route_path else request.url.path
+    request_counter.labels(endpoint=endpoint).inc()
+    if response.status_code >= 400:
+        request_errors_total.labels(endpoint=endpoint).inc()
     duration = time.monotonic() - start
     request_latency_seconds.labels(endpoint=endpoint).observe(duration)
     response.headers["X-Correlation-ID"] = correlation_id
@@ -158,6 +177,16 @@ async def correlation_middleware(request: Request, call_next):
         span_id = format(ctx.span_id, "016x")
         flags = "01" if ctx.trace_flags & 0x01 else "00"
         response.headers["traceparent"] = f"{version}-{trace_id}-{span_id}-{flags}"
+    if "X-Content-Type-Options" not in response.headers:
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    if "X-Frame-Options" not in response.headers:
+        response.headers["X-Frame-Options"] = "DENY"
+    if "Referrer-Policy" not in response.headers:
+        response.headers["Referrer-Policy"] = "no-referrer"
+    if "Permissions-Policy" not in response.headers:
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    if os.getenv("ENABLE_HSTS", "0") == "1":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 @app.get("/health")
 async def health_check():

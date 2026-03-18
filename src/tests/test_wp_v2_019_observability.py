@@ -19,7 +19,7 @@ reset_db_for_tests()
 from src.main import app
 
 client = TestClient(app)
-OFFICER_HEADERS = {"x-officer-role": "loan-officer-access"}
+OFFICER_HEADERS = {"Authorization": "Bearer loan-officer-access"}
 
 
 def _count_audit(event: str, status: str | None = None) -> int:
@@ -105,7 +105,7 @@ def test_wp_v2_019_audit_and_metrics_evidence_for_v2_writes():
 
 
 def test_wp_v2_019_observability_summary_exposes_v2_rollups():
-    r = client.get("/observability/summary")
+    r = client.get("/observability/summary", headers=OFFICER_HEADERS)
     assert r.status_code == 200
     data = r.json()
     assert "v2_conversations_created" in data

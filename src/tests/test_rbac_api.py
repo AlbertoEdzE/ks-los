@@ -62,7 +62,7 @@ def test_wp_v2_018_officer_list_conversations_blocks_without_operator_key():
     assert r2.status_code == 403
     r3 = client.get("/api/conversations", headers={"X-API-Key": "opkey"})
     assert r3.status_code == 200
-    r4 = client.get("/api/conversations", headers={"x-officer-role": "loan-officer-access"})
+    r4 = client.get("/api/conversations", headers={"Authorization": "Bearer loan-officer-access"})
     assert r4.status_code == 401
 
 

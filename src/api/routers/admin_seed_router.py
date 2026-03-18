@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from src.agents.data_synthesizer.scdg import SCDG
-from src.api.routers.v2_auth import require_officer_role
+from src.api.routers.v2_auth import require_admin_role, require_officer_role
 from src.shared.audit import log_audit
 from src.shared.db import LoanPhase, LoanProductCatalog, get_db
 
@@ -71,7 +71,11 @@ def _seed_names(count: int = 500) -> int:
     return len(r.lrange(DEMO_NAMES_KEY, 0, -1))
 
 @router.post("/demo-names")
-async def seed_demo_names(reset: bool = Query(False), count: int = Query(500)) -> Dict[str, Any]:
+async def seed_demo_names(
+    reset: bool = Query(False),
+    count: int = Query(500),
+    _: bool = Depends(require_admin_role),
+) -> Dict[str, Any]:
     try:
         if reset:
             r.delete(DEMO_NAMES_KEY)

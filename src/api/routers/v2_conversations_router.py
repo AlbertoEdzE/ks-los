@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.api.routers.v2_auth import OFFICER_HEADER, is_officer_request, require_officer_role, require_viewer_role
+from src.api.routers.v2_auth import is_officer_request, require_officer_role, require_viewer_role
 from src.shared.audit import log_audit
 from src.shared.db import Conversation, Loan, LoanPhase, Message, LoanProductCatalog, get_db
 from src.shared.metrics import (
@@ -154,7 +154,7 @@ def _recommend_products(db: Session, intent: dict) -> list[dict[str, Any]]:
     if category is not None:
         stmt = stmt.where(LoanProductCatalog.category == category)
 
-    rows = db.execute(stmt.order_by(LoanProductCatalog.created_at.asc())).scalars().all()
+    rows = db.execute(stmt.order_by(LoanProductCatalog.code.asc(), LoanProductCatalog.id.asc())).scalars().all()
     items: list[dict[str, Any]] = []
     for p in rows[:2]:
         tenure = None
@@ -519,7 +519,7 @@ def _desired_phase_index(intent: dict) -> int:
 
 def apply_phase_guardrails(db: Session, conversation: Conversation) -> dict[str, Any] | None:
     phases = (
-        db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc()))
+        db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc(), LoanPhase.id.asc()))
         .scalars()
         .all()
     )
@@ -623,7 +623,7 @@ def _maybe_pick_catalog_code(db: Session, loan_type: str) -> Optional[str]:
             select(LoanProductCatalog)
             .where(LoanProductCatalog.status == "active")
             .where(LoanProductCatalog.category == category)
-            .order_by(LoanProductCatalog.created_at.asc())
+            .order_by(LoanProductCatalog.code.asc(), LoanProductCatalog.id.asc())
         )
         .scalars()
         .first()
@@ -743,7 +743,7 @@ def _apply_officer_directives(db: Session, conversation: Conversation, content: 
 
     if phase_target:
         phases = (
-            db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc()))
+            db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc(), LoanPhase.id.asc()))
             .scalars()
             .all()
         )
@@ -757,7 +757,7 @@ def _apply_officer_directives(db: Session, conversation: Conversation, content: 
 
     if move_loan_id and move_loan_phase:
         phases = (
-            db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc()))
+            db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc(), LoanPhase.id.asc()))
             .scalars()
             .all()
         )
@@ -903,11 +903,11 @@ def create_conversation(
     req: CreateConversationRequest,
     db: Session = Depends(get_db),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
-    x_officer_role: str | None = Header(default=None, alias=OFFICER_HEADER),
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ):
     request_counter.labels(endpoint="/api/conversations").inc()
     wants_officer = (req.chatRole or "").lower() == "officer"
-    if wants_officer and not is_officer_request(x_api_key, x_officer_role):
+    if wants_officer and not is_officer_request(x_api_key, authorization):
         request_errors_total.labels(endpoint="/api/conversations").inc()
         log_audit(
             event="v2_conversation_create",
@@ -920,7 +920,7 @@ def create_conversation(
 
     _ensure_phases_seeded(db)
     phases = (
-        db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc()))
+        db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc(), LoanPhase.id.asc()))
         .scalars()
         .all()
     )
@@ -963,7 +963,7 @@ def create_conversation(
 @router.get("")
 def list_conversations(_: bool = Depends(require_officer_role), db: Session = Depends(get_db)):
     request_counter.labels(endpoint="/api/conversations").inc()
-    rows = db.execute(select(Conversation).order_by(Conversation.created_at.desc())).scalars().all()
+    rows = db.execute(select(Conversation).order_by(Conversation.created_at.desc(), Conversation.id.asc())).scalars().all()
     return [_serialize_conversation(c) for c in rows]
 
 @router.get("/{conversation_id}")
@@ -971,14 +971,14 @@ def get_conversation(
     conversation_id: str,
     db: Session = Depends(get_db),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
-    x_officer_role: str | None = Header(default=None, alias=OFFICER_HEADER),
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ):
     request_counter.labels(endpoint="/api/conversations/{conversation_id}").inc()
     conv = db.get(Conversation, conversation_id)
     if not conv:
         request_errors_total.labels(endpoint="/api/conversations/{conversation_id}").inc()
         raise HTTPException(status_code=404, detail="Conversation not found")
-    actor_is_officer = is_officer_request(x_api_key, x_officer_role)
+    actor_is_officer = is_officer_request(x_api_key, authorization)
     if conv.chat_role == "officer" and not actor_is_officer:
         request_errors_total.labels(endpoint="/api/conversations/{conversation_id}").inc()
         raise HTTPException(status_code=403, detail="Officer access required")
@@ -1039,19 +1039,19 @@ def list_messages(
     conversation_id: str,
     db: Session = Depends(get_db),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
-    x_officer_role: str | None = Header(default=None, alias=OFFICER_HEADER),
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ):
     request_counter.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
     conv = db.get(Conversation, conversation_id)
     if not conv:
         request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
         raise HTTPException(status_code=404, detail="Conversation not found")
-    actor_is_officer = is_officer_request(x_api_key, x_officer_role)
+    actor_is_officer = is_officer_request(x_api_key, authorization)
     if conv.chat_role == "officer" and not actor_is_officer:
         request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
         raise HTTPException(status_code=403, detail="Officer access required")
     rows = (
-        db.execute(select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc()))
+        db.execute(select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc(), Message.id.asc()))
         .scalars()
         .all()
     )
@@ -1064,7 +1064,7 @@ def send_message(
     req: SendMessageRequest,
     db: Session = Depends(get_db),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
-    x_officer_role: str | None = Header(default=None, alias=OFFICER_HEADER),
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ):
     request_counter.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
     conv = db.get(Conversation, conversation_id)
@@ -1090,7 +1090,7 @@ def send_message(
         v2_messages_sent_total.labels(chat_role=conv.chat_role, actor_role="unknown", status="invalid").inc()
         raise HTTPException(status_code=400, detail="Content is required")
 
-    actor_is_officer = is_officer_request(x_api_key, x_officer_role)
+    actor_is_officer = is_officer_request(x_api_key, authorization)
     if conv.chat_role == "officer" and not actor_is_officer:
         request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
         log_audit(

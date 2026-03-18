@@ -1,9 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from typing import Dict
 import redis
 from src.shared.audit import log_audit
+from src.api.routers.v2_auth import require_admin_role
 
-router = APIRouter(prefix="/admin/config", tags=["admin_config"])
+router = APIRouter(prefix="/admin/config", tags=["admin_config"], dependencies=[Depends(require_admin_role)])
 
 try:
     r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)

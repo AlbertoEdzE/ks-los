@@ -441,9 +441,9 @@ function App() {
           </div>
         ) : null}
 
-        <div className="flex-1 min-h-0 relative z-10">
-          <div className="h-full max-w-6xl mx-auto px-4 md:px-6 py-6">
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6 h-full min-h-0">
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide relative z-10">
+          <div className="min-h-full max-w-6xl mx-auto px-4 md:px-6 py-6">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6 min-h-full">
               <div className="min-h-0 rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-xl shadow-black/[0.04] dark:shadow-black/40 overflow-hidden flex">
                 <ChatInterface onConversationUpdated={setConversation} onPhasesUpdated={setPhases} resetSignal={resetSignal} />
               </div>
@@ -540,7 +540,7 @@ function App() {
                     </span>
                   </div>
 
-                  <div data-testid="recommended-products" className="mt-4 grid gap-3 overflow-y-auto min-h-0">
+                  <div data-testid="recommended-products" className="mt-4 grid gap-3">
                     {recommendedProducts.length === 0 ? (
                       <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
                         No recommendations yet. Send a message to get started.
@@ -617,7 +617,7 @@ function App() {
   type DocumentStatus = 'missing' | 'submitted' | 'verified' | 'rejected';
 
   const DashboardPage = () => {
-    const officerHeaders = React.useMemo<Record<string, string>>(() => ({ 'x-officer-role': 'loan-officer-access' }), []);
+    const officerHeaders = React.useMemo<Record<string, string>>(() => ({ Authorization: 'Bearer loan-officer-access' }), []);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [leads, setLeads] = useState<V2Conversation[]>([]);
@@ -923,7 +923,7 @@ function App() {
   };
 
   const PipelinePage = () => {
-    const officerHeaders = React.useMemo<Record<string, string>>(() => ({ 'x-officer-role': 'loan-officer-access' }), []);
+    const officerHeaders = React.useMemo<Record<string, string>>(() => ({ Authorization: 'Bearer loan-officer-access' }), []);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [phases, setPhases] = useState<
@@ -1385,7 +1385,7 @@ function App() {
       setError('');
       try {
         const res = await fetch('http://localhost:8000/api/catalog-products', {
-          headers: { 'x-officer-role': 'loan-officer-access' },
+          headers: { Authorization: 'Bearer loan-officer-access' },
         });
         if (!res.ok) {
           setError(`Failed to load: ${res.status}`);
@@ -1499,7 +1499,7 @@ function App() {
         };
         const res = await fetch('http://localhost:8000/api/catalog-products', {
           method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-officer-role': 'loan-officer-access' },
+          headers: { 'content-type': 'application/json', Authorization: 'Bearer loan-officer-access' },
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
@@ -1547,7 +1547,7 @@ function App() {
         };
         const res = await fetch(`http://localhost:8000/api/catalog-products/${editingId}`, {
           method: 'PATCH',
-          headers: { 'content-type': 'application/json', 'x-officer-role': 'loan-officer-access' },
+          headers: { 'content-type': 'application/json', Authorization: 'Bearer loan-officer-access' },
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
@@ -1833,7 +1833,7 @@ function App() {
     const [input, setInput] = useState('');
     const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
 
-    const officerHeaders = React.useMemo<Record<string, string>>(() => ({ 'x-officer-role': 'loan-officer-access' }), []);
+    const officerHeaders = React.useMemo<Record<string, string>>(() => ({ Authorization: 'Bearer loan-officer-access' }), []);
 
     const scrollToBottom = () => {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

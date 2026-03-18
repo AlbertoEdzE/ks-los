@@ -23,7 +23,7 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit
       - name: Run pip-audit
-        run: pip-audit || true
+        run: pip-audit -r requirements.txt
   npm-audit:
     runs-on: ubuntu-latest
     steps:
@@ -34,4 +34,7 @@ jobs:
       - name: npm audit
         working-directory: frontend
         run: |
-          if [ -f package.json ]; then npm install && npm audit || true; fi
+          if [ -f package.json ]; then
+            if [ -f package-lock.json ]; then npm ci; else npm install; fi
+            npm audit --audit-level=critical
+          fi

@@ -17,9 +17,13 @@ jobs:
           sleep 3
       - name: Run k6 summary
         uses: grafana/k6-action@v0.2.0
+        env:
+          KS_LOS_AUTH: Bearer loan-officer-access
         with:
           filename: perf/k6/summary.js
       - name: Run k6 training/drift
         uses: grafana/k6-action@v0.2.0
+        env:
+          KS_LOS_AUTH: Bearer loan-officer-access
         with:
           filename: perf/k6/training.js

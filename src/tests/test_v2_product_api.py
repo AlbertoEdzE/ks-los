@@ -1,6 +1,7 @@
 import os
 import tempfile
 import uuid
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -14,7 +15,7 @@ if os.path.exists(DB_PATH):
 os.environ["SQLITE_FALLBACK_URL"] = f"sqlite:///{DB_PATH}"
 os.environ["DATABASE_URL"] = "postgresql+psycopg://invalid:invalid@localhost:1/invalid"
 
-from src.shared.db import AuditEvent, Loan, get_engine, init_db, reset_db_for_tests
+from src.shared.db import AuditEvent, Conversation, Loan, LoanPhase, Message, get_engine, init_db, reset_db_for_tests
 
 reset_db_for_tests()
 
@@ -24,7 +25,7 @@ from src.main import app
 client = TestClient(app)
 
 
-OFFICER_HEADERS = {"x-officer-role": "loan-officer-access"}
+OFFICER_HEADERS = {"Authorization": "Bearer loan-officer-access"}
 
 def _db_session():
     init_db()
@@ -161,6 +162,86 @@ def test_v2_conversation_patch_and_messages_flow():
     assert isinstance(first.get("pros"), list)
     assert isinstance(first.get("cons"), list)
     assert isinstance(first.get("recommendation"), str)
+
+
+def test_wp_v2_020_messages_list_is_deterministic():
+    ts = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    conv_id = "conv-wp-v2-020-ordering"
+    with _db_session() as db:
+        db.add(Conversation(id=conv_id, status="active", chat_role="borrower"))
+        db.add_all(
+            [
+                Message(id="a", conversation_id=conv_id, role="user", content="first", created_at=ts),
+                Message(id="b", conversation_id=conv_id, role="user", content="second", created_at=ts),
+            ]
+        )
+        db.commit()
+
+    rows = client.get(f"/api/conversations/{conv_id}/messages").json()
+    ids = [m["id"] for m in rows if m["conversationId"] == conv_id]
+    assert ids[:2] == ["a", "b"]
+
+
+def test_wp_v2_020_phases_list_is_deterministic():
+    with _db_session() as db:
+        db.add_all(
+            [
+                LoanPhase(id="a", name="WP-V2-020 A", description=None, sort_order=999, is_active=True),
+                LoanPhase(id="b", name="WP-V2-020 B", description=None, sort_order=999, is_active=True),
+            ]
+        )
+        db.commit()
+
+    phases = client.get("/api/phases").json()
+    ids = [p["id"] for p in phases]
+    assert ids[-2:] == ["a", "b"]
+
+    active = client.get("/api/phases/active").json()
+    active_ids = [p["id"] for p in active]
+    assert active_ids[-2:] == ["a", "b"]
+
+
+def test_wp_v2_020_audit_events_are_inspectable_and_ordered():
+    ts = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    with _db_session() as db:
+        db.add_all(
+            [
+                AuditEvent(
+                    id="a",
+                    event="wp_v2_020",
+                    endpoint="/x",
+                    status="success",
+                    correlation_id="corr-1",
+                    meta={"k": "v"},
+                    created_at=ts,
+                ),
+                AuditEvent(
+                    id="b",
+                    event="wp_v2_020",
+                    endpoint="/x",
+                    status="success",
+                    correlation_id="corr-2",
+                    meta={"k": "v"},
+                    created_at=ts,
+                ),
+            ]
+        )
+        db.commit()
+
+    forbidden = client.get("/observability/audit-events")
+    assert forbidden.status_code == 403
+
+    res = client.get("/observability/audit-events?event=wp_v2_020", headers=OFFICER_HEADERS)
+    assert res.status_code == 200
+    payload = res.json()
+    assert isinstance(payload.get("items"), list)
+    ids = [e["id"] for e in payload["items"]]
+    assert ids[:2] == ["a", "b"]
+
+    res2 = client.get("/observability/audit-events?event=wp_v2_020&correlationId=corr-1", headers=OFFICER_HEADERS)
+    assert res2.status_code == 200
+    payload2 = res2.json()
+    assert [e["id"] for e in payload2["items"]] == ["a"]
 
 
 def test_v2_debt_consolidation_recommends_personal_loans():

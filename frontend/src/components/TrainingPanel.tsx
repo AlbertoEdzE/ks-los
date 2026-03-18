@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+
+const ADMIN_HEADERS = { Authorization: 'Bearer admin-access' };
 
 // --- Types ---
 interface TrainingPlan {
@@ -127,6 +129,22 @@ export const TrainingPanel: React.FC = () => {
   const [rollbackStatus, setRollbackStatus] = useState<'idle' | 'rolling_back' | 'rolled_back' | 'failed'>('idle');
   const [rollbackMessage, setRollbackMessage] = useState<string | null>(null);
 
+  const fetchCurrentMetrics = useCallback(async () => {
+    try {
+      const res = await fetch('http://localhost:8000/training/metrics', { headers: ADMIN_HEADERS });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status && data.status !== 'success' && !data.metrics) {
+           setCurrentMetrics(null);
+        } else {
+           setCurrentMetrics(data);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch metrics", e);
+    }
+  }, []);
+
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
@@ -137,31 +155,14 @@ export const TrainingPanel: React.FC = () => {
   // Fetch current metrics on mount
   useEffect(() => {
     fetchCurrentMetrics();
-  }, []);
-
-  const fetchCurrentMetrics = async () => {
-    try {
-      const res = await fetch('http://localhost:8000/training/metrics');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status && data.status !== 'success' && !data.metrics) {
-           // Handle no model loaded case gracefully
-           setCurrentMetrics(null);
-        } else {
-           setCurrentMetrics(data);
-        }
-      }
-    } catch (e) {
-      console.error("Failed to fetch metrics", e);
-    }
-  };
+  }, [fetchCurrentMetrics]);
 
   const generatePlan = async () => {
     setIsGeneratingPlan(true);
     try {
       const res = await fetch('http://localhost:8000/training/plan', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...ADMIN_HEADERS },
         body: JSON.stringify({ rationale, n_samples: nSamples, noise_level: noiseLevel })
       });
       if (res.ok) {
@@ -184,7 +185,7 @@ export const TrainingPanel: React.FC = () => {
     try {
       const res = await fetch('http://localhost:8000/training/execute', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...ADMIN_HEADERS },
         body: JSON.stringify(plan)
       });
       if (res.ok) {
@@ -204,7 +205,7 @@ export const TrainingPanel: React.FC = () => {
     if (pollInterval.current) clearInterval(pollInterval.current);
     pollInterval.current = setInterval(async () => {
       try {
-        const res = await fetch('http://localhost:8000/training/status');
+        const res = await fetch('http://localhost:8000/training/status', { headers: ADMIN_HEADERS });
         if (res.ok) {
           const data: TrainingStatus = await res.json();
           setStatus(data);
@@ -228,7 +229,7 @@ export const TrainingPanel: React.FC = () => {
       const samples = JSON.parse(`[${testInput}]`);
       const res = await fetch('http://localhost:8000/training/test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...ADMIN_HEADERS },
         body: JSON.stringify({ samples })
       });
       if (res.ok) {
@@ -243,7 +244,7 @@ export const TrainingPanel: React.FC = () => {
   const deployModel = async () => {
     setDeployStatus('deploying');
     try {
-      const res = await fetch('http://localhost:8000/model/reload', { method: 'POST' });
+      const res = await fetch('http://localhost:8000/model/reload', { method: 'POST', headers: ADMIN_HEADERS });
       if (res.ok) {
         setDeployStatus('deployed');
         alert('Model successfully deployed to production!');
@@ -261,7 +262,7 @@ export const TrainingPanel: React.FC = () => {
     try {
       const res = await fetch('http://localhost:8000/model/rollback', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...ADMIN_HEADERS },
       });
       const data = await res.json();
       if (res.ok) {

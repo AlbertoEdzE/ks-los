@@ -37,6 +37,7 @@ export const SyntheticDataControl: React.FC = () => {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
+  const adminAuthHeader = { Authorization: 'Bearer admin-access' };
 
   const TERRITORIES = [
     { code: 'AG', name: 'Antigua and Barbuda' },
@@ -74,6 +75,7 @@ export const SyntheticDataControl: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...adminAuthHeader,
         },
         body: JSON.stringify({ count, territory, archetype, seed })
       });
@@ -88,23 +90,53 @@ export const SyntheticDataControl: React.FC = () => {
       setMessage(msg);
       return;
     }
-    const es = new EventSource('http://localhost:8000/admin/synthetic/stream');
-    es.onmessage = (ev) => {
-      try {
-        const payload = JSON.parse(ev.data.replace(/'/g, '"'));
-        setProgress(payload.progress || 0);
-        setStatus(payload.status || 'running');
-        setMessage(payload.message || '');
-        if (payload.status === 'completed' || payload.status === 'error' || payload.status === 'idle') {
-          es.close();
-        }
-      } catch {
-        // ignore parse errors
+    try {
+      const streamRes = await fetch('http://localhost:8000/admin/synthetic/stream', { headers: adminAuthHeader });
+      if (!streamRes.ok || !streamRes.body) {
+        setMessage('Failed to stream progress');
+        return;
       }
-    };
-    es.onerror = () => {
-      es.close();
-    };
+
+      const reader = streamRes.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        while (true) {
+          const boundaryIndex = buffer.indexOf('\n\n');
+          if (boundaryIndex === -1) break;
+
+          const eventBlock = buffer.slice(0, boundaryIndex);
+          buffer = buffer.slice(boundaryIndex + 2);
+
+          const lines = eventBlock.split('\n');
+          for (const line of lines) {
+            if (!line.startsWith('data:')) continue;
+            const dataStr = line.slice('data:'.length).trim();
+            try {
+              const payload = JSON.parse(dataStr.replace(/'/g, '"'));
+              setProgress(payload.progress || 0);
+              setStatus(payload.status || 'running');
+              setMessage(payload.message || '');
+              if (payload.status === 'completed' || payload.status === 'error' || payload.status === 'idle') {
+                await reader.cancel();
+                return;
+              }
+            } catch {
+              continue;
+            }
+          }
+        }
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Stream failed';
+      setMessage(msg);
+    }
   };
 
   const validateOutput = async () => {
@@ -112,7 +144,8 @@ export const SyntheticDataControl: React.FC = () => {
       const res = await fetch('http://localhost:8000/admin/synthetic/validate', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...adminAuthHeader,
         }
       });
       const data = await res.json();

@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from src.main import app
 
 client = TestClient(app)
-OFFICER_HEADERS = {"x-officer-role": "loan-officer-access"}
+OFFICER_HEADERS = {"Authorization": "Bearer loan-officer-access"}
 
 def test_metrics_endpoint():
     r = client.get("/metrics")
@@ -11,7 +11,7 @@ def test_metrics_endpoint():
     assert "requests_total" in r.text
 
 def test_observability_summary():
-    r = client.get("/observability/summary")
+    r = client.get("/observability/summary", headers=OFFICER_HEADERS)
     assert r.status_code == 200
     data = r.json()
     assert "training_runs" in data

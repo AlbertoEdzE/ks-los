@@ -355,7 +355,7 @@ def _validate_phase_actions(raw: list[dict[str, Any]]) -> list[PhaseAction]:
 def list_phases(db: Session = Depends(get_db)):
     request_counter.labels(endpoint="/api/phases").inc()
     _ensure_seeded(db)
-    rows = db.execute(select(LoanPhase).order_by(LoanPhase.sort_order.asc())).scalars().all()
+    rows = db.execute(select(LoanPhase).order_by(LoanPhase.sort_order.asc(), LoanPhase.id.asc())).scalars().all()
     return [
         {
             "id": r.id,
@@ -378,7 +378,7 @@ def list_active_phases(db: Session = Depends(get_db)):
     _ensure_seeded(db)
     rows = (
         db.execute(
-            select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc())
+            select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc(), LoanPhase.id.asc())
         )
         .scalars()
         .all()

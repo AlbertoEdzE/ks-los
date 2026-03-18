@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('V2 Route Skeleton', () => {
   test('Officer routes render and navigate', async ({ page }) => {
     await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
-      headers: { 'x-officer-role': 'loan-officer-access' },
+      headers: { authorization: 'Bearer loan-officer-access' },
     });
 
     const createdConversation = await page.request.post('http://localhost:8000/api/conversations', {
@@ -23,7 +23,7 @@ test.describe('V2 Route Skeleton', () => {
 
     const borrowerName = `E2E Phase Group ${Date.now()}`;
     const createdLoan = await page.request.post('http://localhost:8000/api/loans', {
-      headers: { 'content-type': 'application/json', 'x-officer-role': 'loan-officer-access' },
+      headers: { 'content-type': 'application/json', authorization: 'Bearer loan-officer-access' },
       data: {
         borrowerName,
         loanType: 'home_loan',
@@ -38,7 +38,7 @@ test.describe('V2 Route Skeleton', () => {
     expect(loanId).toBeTruthy();
 
     await page.request.patch(`http://localhost:8000/api/loans/${loanId as string}`, {
-      headers: { 'content-type': 'application/json', 'x-officer-role': 'loan-officer-access' },
+      headers: { 'content-type': 'application/json', authorization: 'Bearer loan-officer-access' },
       data: { currentPhaseId: firstPhaseId },
     });
 
@@ -242,7 +242,7 @@ test.describe('V2 Route Skeleton', () => {
     await expect(page.getByTestId('officer-chat-action-results')).toContainText('reorder_phases', { timeout: 20000 });
 
     await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
-      headers: { 'x-officer-role': 'loan-officer-access' },
+      headers: { authorization: 'Bearer loan-officer-access' },
     });
   });
 

@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 
+const ADMIN_HEADERS = { Authorization: 'Bearer admin-access' };
+
 const SuggestionsToggle: React.FC = () => {
   const [enabled, setEnabled] = useState(true);
   
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch('http://localhost:8000/admin/config/suggestions_enabled');
+        const r = await fetch('http://localhost:8000/admin/config/suggestions_enabled', { headers: ADMIN_HEADERS });
         if (r.ok) {
           const data = await r.json();
           setEnabled(!!data.value);
@@ -19,7 +21,7 @@ const SuggestionsToggle: React.FC = () => {
 
   const toggle = async () => {
     try {
-      const r = await fetch(`http://localhost:8000/admin/config/suggestions_enabled?value=${(!enabled).toString()}`, { method: 'POST' });
+      const r = await fetch(`http://localhost:8000/admin/config/suggestions_enabled?value=${(!enabled).toString()}`, { method: 'POST', headers: ADMIN_HEADERS });
       if (r.ok) {
         const data = await r.json();
         setEnabled(!!data.value);

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -10,8 +10,9 @@ from src.ml.inference import CreditRiskModel
 from src.shared.types import ApplicantCreditProfile
 from src.shared.audit import log_audit
 from src.shared.metrics import approvals_total, declines_total, risk_inference_total, inference_latency_seconds
+from src.api.routers.v2_auth import require_admin_role
 
-router = APIRouter(prefix="/admin/synthetic", tags=["admin_synthetic"])
+router = APIRouter(prefix="/admin/synthetic", tags=["admin_synthetic"], dependencies=[Depends(require_admin_role)])
 
 class GenerateRequest(BaseModel):
     count: int

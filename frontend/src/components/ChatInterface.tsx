@@ -83,7 +83,9 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   };
 
   useEffect(scrollToBottom, [messages, loading, viewState]);

@@ -10,6 +10,15 @@ def test_health_check():
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}
 
+def test_security_headers_present_on_health():
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.headers.get("X-Content-Type-Options") == "nosniff"
+    assert response.headers.get("X-Frame-Options") == "DENY"
+    assert response.headers.get("Referrer-Policy") == "no-referrer"
+    assert response.headers.get("Permissions-Policy") is not None
+    assert response.headers.get("X-Correlation-ID") is not None
+
 @patch("src.api.routers.agent_router.agent_app")
 def test_chat_endpoint_success(mock_agent_app):
     """Test the chat endpoint with a successful response."""

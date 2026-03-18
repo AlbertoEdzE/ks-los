@@ -16,13 +16,15 @@ export default defineConfig({
     baseURL: env.BASE_URL || 'http://localhost:5174',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
+    viewport: { width: 1920, height: 1080 },
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1920, height: 1080 } } },
     {
       name: 'firefox',
       use: {
         ...devices['Desktop Firefox'],
+        viewport: { width: 1920, height: 1080 },
         launchOptions: {
           env: {
             MOZ_DISABLE_CONTENT_SANDBOX: '1',
@@ -32,6 +34,6 @@ export default defineConfig({
         },
       },
     },
-    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'], viewport: { width: 1920, height: 1080 } } },
   ],
 });
