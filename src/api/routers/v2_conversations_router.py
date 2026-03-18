@@ -1,5 +1,6 @@
 import uuid
 import re
+import os
 from typing import Any, Optional, Literal
 from datetime import datetime, timezone
 
@@ -8,7 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from langchain_core.messages import SystemMessage, HumanMessage
+
 from src.api.routers.v2_auth import is_officer_request, require_officer_role, require_viewer_role
+from src.config.llm import get_llm
 from src.shared.audit import log_audit
 from src.shared.db import Conversation, Loan, LoanPhase, Message, LoanProductCatalog, get_db
 from src.shared.metrics import (
@@ -240,6 +244,16 @@ def _extract_credit_score(text: str) -> Optional[str]:
         return None
     return m.group(1)
 
+def _mentions_unknown_credit_score(text: str) -> bool:
+    t = text.lower()
+    if "credit" not in t or "score" not in t:
+        return False
+    if any(k in t for k in ["don't know", "dont know", "do not know", "not sure", "no idea", "unknown"]):
+        return True
+    if re.search(r"\b(i\s+)?(do\s+)?not\s+have\s+(a\s+)?credit\s+score\b", t):
+        return True
+    return False
+
 
 def _infer_urgency(text: str) -> Optional[str]:
     t = text.lower()
@@ -327,7 +341,7 @@ def _next_angle(intent: dict) -> str:
     return "Validate documents, collateral, and eligibility constraints."
 
 
-def _build_borrower_assistant_reply(intent: dict) -> str:
+def _build_borrower_assistant_reply(intent: dict) -> tuple[str, str]:
     purpose = (intent.get("purpose") or "").strip()
     purpose_label = {
         "home": "a home loan",
@@ -362,17 +376,24 @@ def _build_borrower_assistant_reply(intent: dict) -> str:
         questions.append("What tenure would you be comfortable with (e.g., 36 months, 5 years)?")
 
     if not questions:
-        return "Thanks — I have enough to refine recommendations. Do you want the lowest EMI, lowest total interest, or fastest approval?"
+        return (
+            "Thanks — I have enough to refine recommendations. Do you want the lowest EMI, lowest total interest, or fastest approval?",
+            "heuristic_only",
+        )
 
     top = questions[:3]
     bullets = "\n".join([f"- {q}" for q in top])
-    return f"Got it — for {purpose_label}, I just need a few quick details:\n\n{bullets}"
+    llm_intro = _maybe_llm_intro(purpose_label, intent, top)
+    intro = llm_intro or f"Got it — for {purpose_label}, I just need a few quick details:"
+    return (f"{intro}\n\n{bullets}", "llm_intro" if llm_intro else "heuristic_only")
 
 
 def analyze_intent_message(content: str, previous_intent: Optional[dict]) -> dict[str, Any]:
     amount = _extract_amount(content)
     income = _extract_income(content)
     credit = _extract_credit_score(content)
+    if credit is None and _mentions_unknown_credit_score(content):
+        credit = "unknown"
     debts = _extract_existing_debts(content)
     tenure = _extract_tenure(content)
     intent = IntentSummary(
@@ -419,11 +440,15 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
-def _compute_approval_probability(intent: dict) -> dict[str, Any]:
+def _compute_approval_probability(intent: dict) -> dict[str, Any] | None:
     credit_score = _parse_amount_to_number(intent.get("creditHistory"))
     income = _parse_amount_to_number(intent.get("monthlyIncome"))
     debts = _parse_amount_to_number(intent.get("existingDebts"))
     loan_amount = _parse_amount_to_number(intent.get("loanAmount"))
+
+    usable_signals = sum(1 for v in [credit_score, income, loan_amount] if v is not None)
+    if usable_signals < 2:
+        return None
 
     prob = 0.55
     blockers: list[dict[str, Any]] = []
@@ -505,6 +530,47 @@ def _compute_approval_probability(intent: dict) -> dict[str, Any]:
         return validated.model_dump(mode="json")
     except ValidationError:
         return payload
+
+
+_BORROWER_LLM_SYSTEM_PROMPT = (
+    "You are LoanAssist AI, an assistant for loan prequalification.\n"
+    "Write 1 short sentence introducing the next questions.\n"
+    "Be concise and professional.\n"
+    "Do not include any questions or bullet points.\n"
+)
+
+
+def _maybe_llm_intro(purpose_label: str, intent: dict, questions: list[str]) -> Optional[str]:
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return None
+    if not questions:
+        return None
+    try:
+        llm = get_llm(temperature=0.3)
+        known_bits: list[str] = []
+        for k in ["purpose", "loanAmount", "monthlyIncome", "employmentType", "creditHistory", "preferredTenure", "existingDebts"]:
+            v = intent.get(k)
+            if v is None:
+                continue
+            s = str(v).strip()
+            if not s:
+                continue
+            known_bits.append(f"{k}={s}")
+        known = ", ".join(known_bits) if known_bits else "none"
+        response = llm.invoke(
+            [
+                SystemMessage(content=_BORROWER_LLM_SYSTEM_PROMPT),
+                HumanMessage(content=f"Loan type: {purpose_label}. Known: {known}."),
+            ]
+        )
+        text = (response.content or "").strip()
+        if not text:
+            return None
+        if "\n" in text:
+            text = text.split("\n")[0].strip()
+        return text
+    except Exception:
+        return None
 
 
 def _desired_phase_index(intent: dict) -> int:
@@ -1135,10 +1201,12 @@ def send_message(
         phase_action = None
 
     assistant_text = "Got it. I’ll ask a few quick questions to narrow down the best option for you."
+    assistant_engine = "default"
     loan_action: Optional[dict[str, Any]] = None
     conversation_patch: Optional[dict[str, Any]] = None
     action_results: Optional[list[dict[str, Any]]] = None
     if actor_is_officer:
+        assistant_engine = "officer_rules"
         applied = _apply_officer_directives(db, conv, req.content)
         conversation_patch = applied.get("conversationPatch")
         created_loan_id = applied.get("loanId")
@@ -1183,9 +1251,10 @@ def send_message(
             lines.append("Officer note recorded. You can: assign officer, set status, move phase, create loan, or move loan phase.")
         assistant_text = "\n".join(lines)
     elif conv.chat_role == "borrower":
-        assistant_text = _build_borrower_assistant_reply(analysis["intentSummary"])
+        assistant_text, assistant_engine = _build_borrower_assistant_reply(analysis["intentSummary"])
     assistant_metadata = {
         "actorRole": "officer_assistant" if actor_is_officer else None,
+        "assistantEngine": assistant_engine,
         "intentAnalysis": analysis,
         "loanRecommendations": conv.recommended_products if (conv.chat_role == "borrower" and not actor_is_officer) else None,
         "approvalProbability": approval_probability,

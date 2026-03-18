@@ -117,23 +117,33 @@ def test_v2_conversation_patch_and_messages_flow():
     assert isinstance(send_payload["intentAnalysis"]["fitScore"], int)
     assert isinstance(send_payload["intentAnalysis"]["nextConversationAngle"], str)
     assert "approvalProbability" in send_payload
-    assert isinstance(send_payload["approvalProbability"]["probability"], float)
-    assert 0.0 <= send_payload["approvalProbability"]["probability"] <= 1.0
-    assert send_payload["approvalProbability"]["band"] in {"low", "medium", "high"}
-    assert isinstance(send_payload["approvalProbability"]["topBlockers"], list)
-    assert isinstance(send_payload["approvalProbability"]["topActions"], list)
-    assert len(send_payload["approvalProbability"]["topBlockers"]) >= 1
-    assert len(send_payload["approvalProbability"]["topActions"]) >= 1
-    first_blocker = send_payload["approvalProbability"]["topBlockers"][0]
-    assert isinstance(first_blocker.get("title"), str)
-    assert first_blocker.get("severity") in {"low", "medium", "high"}
-    assert isinstance(first_blocker.get("detail"), str)
-    first_action = send_payload["approvalProbability"]["topActions"][0]
-    assert isinstance(first_action.get("title"), str)
-    assert first_action.get("impact") in {"low", "medium", "high"}
-    assert isinstance(first_action.get("detail"), str)
+    assert send_payload["approvalProbability"] is None
     assert isinstance(send_payload["loanRecommendations"], list)
     assert len(send_payload["loanRecommendations"]) >= 1
+
+    send2 = client.post(
+        f"/api/conversations/{conv_id}/messages",
+        json={"content": "loan amount: 350000 USD, my income is 10000 USD a month, im salaried"},
+    )
+    assert send2.status_code == 200
+    send2_payload = send2.json()
+    assert isinstance(send2_payload["approvalProbability"]["probability"], float)
+    assert 0.0 <= send2_payload["approvalProbability"]["probability"] <= 1.0
+    assert send2_payload["approvalProbability"]["band"] in {"low", "medium", "high"}
+    assert isinstance(send2_payload["approvalProbability"]["topBlockers"], list)
+    assert isinstance(send2_payload["approvalProbability"]["topActions"], list)
+    assert len(send2_payload["approvalProbability"]["topBlockers"]) >= 1
+    assert len(send2_payload["approvalProbability"]["topActions"]) >= 1
+    assert send2_payload["intentAnalysis"]["intentSummary"]["loanAmount"] is not None
+    assert send2_payload["intentAnalysis"]["intentSummary"]["monthlyIncome"] is not None
+
+    send3 = client.post(
+        f"/api/conversations/{conv_id}/messages",
+        json={"content": "no, i dont know my credit score"},
+    )
+    assert send3.status_code == 200
+    send3_payload = send3.json()
+    assert send3_payload["intentAnalysis"]["intentSummary"]["creditHistory"] == "unknown"
 
     msgs1 = client.get(f"/api/conversations/{conv_id}/messages")
     assert msgs1.status_code == 200
