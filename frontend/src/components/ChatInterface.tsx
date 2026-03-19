@@ -193,13 +193,21 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       });
 
       if (!res.ok) {
+        const raw = await res.text().catch(() => '');
+        let detail = raw;
+        try {
+          const parsed = JSON.parse(raw) as { detail?: unknown };
+          if (typeof parsed?.detail === 'string') detail = parsed.detail;
+        } catch {
+          // ignore
+        }
         setMessages((prev) => [
           ...prev,
           {
             id: `err-${Date.now()}`,
             conversationId: activeConversationId,
             role: 'assistant',
-            content: `Request failed (${res.status}). Please try again.`,
+            content: detail ? `Request failed (${res.status}): ${detail}` : `Request failed (${res.status}). Please try again.`,
             createdAt: null,
           },
         ]);
@@ -209,6 +217,17 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       const payload = (await res.json()) as { message?: V2Message };
       if (payload.message && payload.message.role && payload.message.content && !isOfficerOnlyMessage(payload.message as V2Message)) {
         setMessages((prev) => [...prev, payload.message as V2Message]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            conversationId: activeConversationId,
+            role: 'assistant',
+            content: 'No assistant response was returned. Please try again.',
+            createdAt: null,
+          },
+        ]);
       }
 
       const refreshed = await fetch(`http://localhost:8000/api/conversations/${activeConversationId}`);

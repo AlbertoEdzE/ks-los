@@ -30,7 +30,6 @@ if [ -n "$PYTHON_BIN" ] && [ -f "$ROOT_DIR/scripts/init_kb.py" ]; then
   "$PYTHON_BIN" "$ROOT_DIR/scripts/init_kb.py" || true
 fi
 echo "System running. Press Ctrl+C to stop."
-wait $BACKEND_PID $FRONTEND_PID
 while true; do
   sleep 2
 done

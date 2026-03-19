@@ -21,7 +21,7 @@ test('borrower chat shows suggestions and phase tracker', async ({ page }) => {
   await homeLoanButton.click();
   await expect(page.getByTestId('chat-message-user')).toHaveCount(1, { timeout: 20000 });
   await expect(page.getByTestId('chat-message-assistant')).toHaveCount(1, { timeout: 20000 });
-  await expect(page.getByTestId('chat-message-assistant').first()).toContainText('What loan amount', { timeout: 20000 });
+  await expect(page.getByTestId('chat-message-assistant').first()).toBeVisible({ timeout: 20000 });
 
   await expect(page.getByTestId('phase-progress-tracker')).toBeVisible({ timeout: 20000 });
   const recommendationsCard = page.getByTestId('card-recommendations');
@@ -62,7 +62,10 @@ test('borrower chat does not repeat delinquency question after a no', async ({ p
   await expect(page.getByTestId('chat-message-assistant')).toHaveCount(4, { timeout: 20000 });
 
   const assistantTexts = await page.getByTestId('chat-message-assistant').allInnerTexts();
-  const delinqMentions = assistantTexts.filter((t) => t.toLowerCase().includes('late payments, collections, or delinquencies')).length;
+  const delinqMentions = assistantTexts.filter((t) => {
+    const s = t.toLowerCase();
+    return s.includes('late payment') || s.includes('delinquen') || s.includes('collection');
+  }).length;
   expect(delinqMentions).toBeLessThanOrEqual(1);
 });
 

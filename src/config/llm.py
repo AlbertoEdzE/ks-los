@@ -3,10 +3,24 @@ from langchain_core.callbacks import CallbackManager, StreamingStdOutCallbackHan
 from langchain_core.messages import AIMessage
 import os
 import re
+import urllib.request
+import urllib.error
 
 # Default to Qwen 2.5 7B as per architecture
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+
+def is_ollama_available(timeout_s: float = 1.5) -> bool:
+    base = (OLLAMA_BASE_URL or "").rstrip("/")
+    if not base:
+        return False
+    try:
+        req = urllib.request.Request(f"{base}/api/version", method="GET")
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            return 200 <= int(getattr(resp, "status", 0) or 0) < 300
+    except (urllib.error.URLError, ValueError):
+        return False
 
 class _TestLLM:
     def __init__(self, tools=None, temperature: float = 0.7):
@@ -62,7 +76,7 @@ class _TestLLM:
         return AIMessage(content="Journey Coach (test mode).")
 
 
-def get_llm(temperature: float = 0.7):
+def get_llm(temperature: float = 0.7, model: str | None = None):
     """
     Returns a configured ChatOllama instance.
     """
@@ -70,7 +84,7 @@ def get_llm(temperature: float = 0.7):
         return _TestLLM(temperature=temperature)
     return ChatOllama(
         base_url=OLLAMA_BASE_URL,
-        model=MODEL_NAME,
+        model=(model or MODEL_NAME),
         temperature=temperature,
         callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
         keep_alive="5m"

@@ -6,6 +6,40 @@ COMPOSE_FILE="$ROOT_DIR/infrastructure/docker-compose.yml"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5174}"
 
+wait_for_http() {
+    local url="$1"
+    local name="$2"
+    local timeout_s="${3:-30}"
+    local start_ts
+    start_ts="$(date +%s)"
+
+    while true; do
+        if curl -fsS "$url" >/dev/null 2>&1; then
+            echo "[KS LOS] $name is ready: $url"
+            return 0
+        fi
+
+        local now_ts
+        now_ts="$(date +%s)"
+        if [ $((now_ts - start_ts)) -ge "$timeout_s" ]; then
+            echo "[KS LOS] Error: $name did not become ready within ${timeout_s}s: $url"
+            return 1
+        fi
+        sleep 1
+    done
+}
+
+tail_log() {
+    local file="$1"
+    local name="$2"
+    if [ -f "$file" ]; then
+        echo "[KS LOS] Last 80 lines of $name log ($file):"
+        tail -n 80 "$file" || true
+    else
+        echo "[KS LOS] $name log not found: $file"
+    fi
+}
+
 check_and_free_port() {
     local port=$1
     local service_name=$2
@@ -117,6 +151,12 @@ export MLFLOW_TRACKING_URI="http://localhost:5000"
   echo $! > "$ROOT_DIR/.pid_api"
 )
 
+if ! wait_for_http "http://localhost:$BACKEND_PORT/health" "Backend API" 45; then
+  tail_log "$ROOT_DIR/backend.log" "backend"
+  echo "[KS LOS] Tip: if you see import errors, activate venv and reinstall deps."
+  exit 1
+fi
+
 FRONT_DIR="$ROOT_DIR/frontend"
 if [ -f "$FRONT_DIR/package.json" ]; then
   echo "[KS LOS] Preparing frontend..."
@@ -147,8 +187,10 @@ if [ -f "$FRONT_DIR/package.json" ]; then
     echo $! > "$ROOT_DIR/.pid_frontend"
   )
 
-  # Wait a bit for Vite to spin up
-  sleep 5
+  if ! wait_for_http "http://localhost:$FRONTEND_PORT" "Frontend" 60; then
+    tail_log "$ROOT_DIR/frontend.log" "frontend"
+    exit 1
+  fi
   echo "[KS LOS] Opening frontend in default browser..."
   open "http://localhost:$FRONTEND_PORT"
 

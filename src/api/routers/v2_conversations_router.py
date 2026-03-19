@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from src.api.routers.v2_auth import is_officer_request, require_officer_role, require_viewer_role
 from src.config.llm import get_llm
@@ -442,11 +442,6 @@ def _build_borrower_assistant_reply(db: Session, conversation_id: str, intent: d
         recently_asked.update(_extract_question_lines(m.content or ""))
 
     unasked = [q for q in questions if q not in recently_asked]
-    candidates = unasked[:6]
-    llm_text = _maybe_llm_borrower_reply(purpose_label, intent, candidates, recently_asked)
-    if llm_text:
-        return (llm_text, "llm_guided")
-
     top = unasked[:3]
     if not top:
         return (
@@ -609,17 +604,80 @@ def _compute_approval_probability(intent: dict) -> dict[str, Any] | None:
         return payload
 
 
-_BORROWER_LLM_SYSTEM_PROMPT = (
-    "You are LoanAssist AI, an assistant for loan prequalification.\n"
-    "Choose the next questions without repeating anything asked recently.\n"
-    "You will be given a Candidate Questions list. Pick up to 2 questions by INDEX.\n"
-    "Do not pick indices whose questions appear in Recently Asked Questions.\n"
-    "Return ONLY a JSON object (no markdown, no extra text) with this schema:\n"
-    '{"intro":"<one short sentence>","pick":[0,1]}\n'
-    "Rules:\n"
-    "- intro: one sentence, concise.\n"
-    "- pick: array of 1-2 integers.\n"
-)
+def _build_borrower_system_prompt(phases: list[LoanPhase], current_phase_id: Optional[str]) -> str:
+    active_phases = [p for p in phases if bool(getattr(p, "is_active", False))]
+    active_phases.sort(key=lambda p: (int(getattr(p, "sort_order", 0) or 0), str(getattr(p, "id", ""))))
+    phase_lines: list[str] = []
+    for i, p in enumerate(active_phases):
+        is_current = str(getattr(p, "id", "")) == str(current_phase_id or "")
+        phase_lines.append(f'  {i + 1}. "{p.name}" (ID: {p.id}){" ← CURRENT" if is_current else ""}')
+    phase_list = "\n".join(phase_lines) if phase_lines else "  (No phases configured)"
+
+    return (
+        "You are LoanAssist — a premium, intelligent loan advisor for a modern financial institution. "
+        "You combine the warmth of a personal banker with the precision of a financial analyst.\n\n"
+        "PERSONALITY & TONE:\n"
+        "- Elegant, confident, and reassuring — like a private wealth advisor, not a call centre agent\n"
+        "- Concise and respectful of the borrower's time — never dump a checklist of questions\n"
+        "- Use refined language. Say \"Let's explore what works best for you\" not \"Please provide the following details\"\n"
+        "- Be conversational and human. Mirror the borrower's energy — if they're brief, be brief. If they're detailed, match that depth.\n\n"
+        "GREETING (first message only):\n"
+        "- Keep it short, warm, and premium. Two to three sentences maximum.\n"
+        "- Welcome them, briefly state you're here to find the right financing path, and invite them to share what's on their mind\n"
+        "- Do NOT list questions or bullet points in the greeting. Let the conversation flow naturally.\n\n"
+        "INTENT UNDERSTANDING & PROCESS INITIATION:\n"
+        "From the borrower's VERY FIRST message, you must:\n"
+        "1. Identify their core intent (home purchase, car loan, business expansion, education, medical, debt consolidation, personal needs, etc.)\n"
+        "2. Gauge urgency from their language (words like \"urgent\", \"immediately\", \"next month\", \"planning\" etc.)\n"
+        "3. Immediately acknowledge what you've understood and begin the relevant process\n"
+        "4. Ask only 1-2 targeted follow-up questions per message — the ones that matter most for THEIR specific situation\n"
+        "5. Never ask generic questions that don't apply to their case\n\n"
+        "PROGRESSIVE INFORMATION GATHERING:\n"
+        "- Gather details naturally across 2-4 exchanges, not all at once\n"
+        "- Prioritize questions by what matters most for THEIR specific loan type\n"
+        "- For home loans: property identified? → budget → down payment capacity → income\n"
+        "- For personal loans: amount needed → timeline → income → existing obligations\n"
+        "- For business loans: purpose → revenue → vintage → collateral\n"
+        "- For education: institution → course cost → co-applicant → future earning potential\n\n"
+        "RECOMMENDATIONS:\n"
+        "- Provide loan options as soon as you have enough context (don't wait for perfect information)\n"
+        "- Always frame options as trade-offs so the borrower can make an informed choice\n"
+        "- If you can make recommendations, include them in <loan_recommendations> tags as JSON array.\n\n"
+        "INTENT ANALYSIS (include after EVERY user message):\n"
+        "Include an <intent_analysis> block containing ONLY JSON, with null for unknown fields, and update progressively:\n"
+        "<intent_analysis>\n"
+        "{\n"
+        '  "purpose": null,\n'
+        '  "urgency": null,\n'
+        '  "affordability": null,\n'
+        '  "monthlyIncome": null,\n'
+        '  "existingDebts": null,\n'
+        '  "loanAmount": null,\n'
+        '  "preferredTenure": null,\n'
+        '  "collateralAvailable": null,\n'
+        '  "employmentType": null,\n'
+        '  "creditHistory": null,\n'
+        '  "recentDelinquencies12m": null,\n'
+        '  "seriousnessScore": null,\n'
+        '  "fitScore": null,\n'
+        '  "nextConversationAngle": null\n'
+        "}\n"
+        "</intent_analysis>\n\n"
+        "RULES:\n"
+        "- Never ask for government IDs, bank account numbers, or other sensitive identifiers\n"
+        "- Always be transparent that figures are estimates until formal processing\n"
+        "- Use the borrower's currency if evident; otherwise default to USD\n"
+        "- Keep responses concise — ideally under 150 words for conversational messages\n"
+        "- Never ask the same question twice if it has already been answered\n\n"
+        "LOAN JOURNEY PHASES:\n"
+        "The borrower's application progresses through these phases:\n"
+        f"{phase_list}\n\n"
+        "PHASE PROGRESSION:\n"
+        "Determine if the borrower should advance to the next phase. Include a <phase_update> tag when they have naturally progressed:\n"
+        "- Only advance one phase at a time\n"
+        "- Only include <phase_update> when there's a genuine progression signal\n"
+        '<phase_update>{"phaseId": "the_phase_id_to_advance_to"}</phase_update>\n'
+    )
 
 
 def _extract_question_lines(text: str) -> list[str]:
@@ -644,63 +702,198 @@ def _extract_first_json_object(text: str) -> Optional[str]:
         return None
     return m.group(0).strip()
 
+def _extract_tag_block(text: str, tag: str) -> tuple[Optional[str], str]:
+    if not text:
+        return (None, "")
+    pattern = re.compile(rf"(?is)<{re.escape(tag)}>\s*([\s\S]*?)\s*</{re.escape(tag)}>")
+    m = pattern.search(text)
+    if not m:
+        return (None, text.strip())
+    inner = (m.group(1) or "").strip()
+    cleaned = pattern.sub("", text).strip()
+    return (inner, cleaned)
 
-def _maybe_llm_borrower_reply(purpose_label: str, intent: dict, candidate_questions: list[str], recently_asked: set[str]) -> Optional[str]:
+
+def _normalize_purpose(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    v = str(value).strip().lower()
+    if not v:
+        return None
+    if any(k in v for k in ["home", "mortgage", "property", "house", "flat", "apartment"]):
+        return "home"
+    if any(k in v for k in ["car", "auto", "vehicle"]):
+        return "car"
+    if "education" in v or "tuition" in v or "school" in v:
+        return "education"
+    if "business" in v or "sme" in v:
+        return "business"
+    if "debt" in v or "consolid" in v:
+        return "debt_consolidation"
+    if "personal" in v:
+        return "personal"
+    return None
+
+
+def _normalize_employment(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    v = str(value).strip().lower()
+    if not v:
+        return None
+    if "salar" in v or "employ" in v or "payroll" in v:
+        return "salaried"
+    if "self" in v or "freel" in v or "contract" in v or "business" in v:
+        return "self-employed"
+    return str(value).strip()
+
+
+def _apply_llm_phase_update(db: Session, conversation: Conversation, desired_phase_id: str) -> bool:
+    phases = (
+        db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc(), LoanPhase.id.asc()))
+        .scalars()
+        .all()
+    )
+    if not phases:
+        return False
+    phase_ids = [p.id for p in phases]
+    if conversation.current_phase_id not in phase_ids:
+        conversation.current_phase_id = phases[0].id
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+        return False
+    current_index = phase_ids.index(conversation.current_phase_id)
+    next_index = min(len(phases) - 1, current_index + 1)
+    if phase_ids[next_index] != desired_phase_id:
+        return False
+    conversation.current_phase_id = desired_phase_id
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+    return True
+
+
+def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str, Any]:
     if os.getenv("PYTEST_CURRENT_TEST"):
-        return None
-    if not candidate_questions:
-        return None
-    try:
-        llm = get_llm(temperature=0.2)
-        known_bits: list[str] = []
-        for k in ["purpose", "loanAmount", "monthlyIncome", "employmentType", "creditHistory", "preferredTenure", "existingDebts"]:
-            v = intent.get(k)
-            if v is None:
-                continue
-            s = str(v).strip()
-            if not s:
-                continue
-            known_bits.append(f"{k}={s}")
-        known = ", ".join(known_bits) if known_bits else "none"
-        recent = "\n".join([f"- {q}" for q in sorted(recently_asked)]) if recently_asked else "- (none)"
-        candidates = "\n".join([f"{i}: {q}" for i, q in enumerate(candidate_questions)])
-        response = llm.invoke(
-            [
-                SystemMessage(content=_BORROWER_LLM_SYSTEM_PROMPT),
-                HumanMessage(
-                    content=(
-                        f"Loan type: {purpose_label}\n"
-                        f"Known fields: {known}\n\n"
-                        f"Recently Asked Questions:\n{recent}\n\n"
-                        f"Candidate Questions:\n{candidates}\n"
-                    )
-                ),
-            ]
+        raise RuntimeError("LLM disabled under pytest")
+    phases = (
+        db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc(), LoanPhase.id.asc()))
+        .scalars()
+        .all()
+    )
+    system_prompt = _build_borrower_system_prompt(phases, conversation.current_phase_id)
+    rows = (
+        db.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation.id)
+            .order_by(Message.created_at.asc(), Message.id.asc())
         )
-        raw = (response.content or "").strip()
-        json_text = _extract_first_json_object(raw) or raw
-        parsed = json.loads(json_text)
-        intro = str(parsed.get("intro") or "").strip()
-        pick = parsed.get("pick")
-        if not intro:
-            return None
-        if not isinstance(pick, list) or not (1 <= len(pick) <= 2):
-            return None
-        idxs: list[int] = []
-        for x in pick:
-            if isinstance(x, bool) or not isinstance(x, int):
-                return None
-            if x < 0 or x >= len(candidate_questions):
-                return None
-            idxs.append(x)
-        idxs = list(dict.fromkeys(idxs))
-        chosen_questions = [candidate_questions[i] for i in idxs]
-        if any(q in recently_asked for q in chosen_questions):
-            return None
-        bullets = "\n".join([f"- {q}" for q in chosen_questions])
-        return f"{intro}\n\n{bullets}"
-    except Exception:
-        return None
+        .scalars()
+        .all()
+    )
+    combined_user_text = "\n".join([m.content for m in rows if m.role == "user" and isinstance(m.content, str) and m.content.strip()])
+    history: list[Any] = [SystemMessage(content=system_prompt)]
+    for m in rows[-16:]:
+        if m.role == "user":
+            history.append(HumanMessage(content=m.content or ""))
+        elif m.role == "assistant":
+            history.append(AIMessage(content=m.content or ""))
+    llm_error: Optional[str] = None
+    models_to_try: list[str] = []
+    configured_model = str(os.getenv("OLLAMA_MODEL", "qwen2.5:7b")).strip()
+    if configured_model:
+        models_to_try.append(configured_model)
+    fallback_model = str(os.getenv("OLLAMA_FALLBACK_MODEL", "llama3")).strip()
+    if fallback_model and fallback_model not in models_to_try:
+        models_to_try.append(fallback_model)
+
+    raw: str = ""
+    for idx, model_name in enumerate(models_to_try):
+        try:
+            llm = get_llm(temperature=0.4, model=model_name)
+            response = llm.invoke(history)
+            raw = (response.content or "").strip()
+            if raw:
+                llm_error = None
+                break
+            llm_error = f"Empty response from model '{model_name}'."
+        except Exception as e:
+            llm_error = str(e) or e.__class__.__name__
+            if idx == 0:
+                msg = llm_error.lower()
+                model_missing = ("model" in msg and "not found" in msg) or ("no such model" in msg)
+                if model_missing:
+                    continue
+            break
+
+    if not raw:
+        raise RuntimeError(llm_error or "AI engine returned an empty response.")
+
+    intent_block, remaining = _extract_tag_block(raw, "intent_analysis")
+    _, remaining = _extract_tag_block(remaining, "loan_recommendations")
+    phase_block, remaining2 = _extract_tag_block(remaining, "phase_update")
+    assistant_text = remaining2.strip()
+    if not assistant_text:
+        assistant_text = remaining2.strip() or remaining.strip()
+    if not assistant_text:
+        raise RuntimeError("AI engine response contained no assistant text.")
+
+    intent_obj: dict[str, Any] = {}
+    if intent_block:
+        intent_json = _extract_first_json_object(intent_block) or intent_block
+        parsed = json.loads(intent_json)
+        if isinstance(parsed, dict):
+            intent_obj = parsed
+
+    grounded_loan_amount = _extract_amount(combined_user_text)
+    grounded_income = _extract_income(combined_user_text)
+    grounded_credit = _extract_credit_score(combined_user_text)
+    if grounded_credit is None and _mentions_unknown_credit_score(combined_user_text):
+        grounded_credit = "unknown"
+    grounded_employment = _infer_employment(combined_user_text)
+    grounded_debts = _extract_existing_debts(combined_user_text)
+    grounded_tenure = _extract_tenure(combined_user_text)
+    grounded_delinq = _extract_recent_delinquencies_12m(combined_user_text)
+
+    intent_summary = IntentSummary(
+        purpose=_normalize_purpose(intent_obj.get("purpose")),
+        urgency=intent_obj.get("urgency"),
+        affordability=intent_obj.get("affordability"),
+        monthlyIncome=grounded_income or intent_obj.get("monthlyIncome"),
+        existingDebts=grounded_debts or intent_obj.get("existingDebts"),
+        loanAmount=grounded_loan_amount or intent_obj.get("loanAmount"),
+        preferredTenure=grounded_tenure or intent_obj.get("preferredTenure"),
+        collateralAvailable=intent_obj.get("collateralAvailable"),
+        employmentType=_normalize_employment(grounded_employment or intent_obj.get("employmentType")),
+        creditHistory=grounded_credit,
+        recentDelinquencies12m=grounded_delinq or intent_obj.get("recentDelinquencies12m"),
+    )
+    merged = _merge_intent(conversation.intent_summary if isinstance(conversation.intent_summary, dict) else None, intent_summary)
+    seriousness = intent_obj.get("seriousnessScore")
+    fit = intent_obj.get("fitScore")
+    next_angle = intent_obj.get("nextConversationAngle")
+    if not isinstance(seriousness, int) or not isinstance(fit, int) or not isinstance(next_angle, str) or not next_angle.strip():
+        computed_seriousness, computed_fit = _compute_scores(merged)
+        seriousness = computed_seriousness
+        fit = computed_fit
+        next_angle = _next_angle(merged)
+
+    desired_phase_id = None
+    if phase_block:
+        phase_json = _extract_first_json_object(phase_block) or phase_block
+        parsed_phase = json.loads(phase_json)
+        if isinstance(parsed_phase, dict) and isinstance(parsed_phase.get("phaseId"), str):
+            desired_phase_id = parsed_phase.get("phaseId")
+
+    return {
+        "assistantText": assistant_text,
+        "intentSummary": merged,
+        "seriousnessScore": seriousness,
+        "fitScore": fit,
+        "nextConversationAngle": next_angle,
+        "desiredPhaseId": desired_phase_id,
+    }
 
 
 def _desired_phase_index(intent: dict) -> int:
@@ -1307,6 +1500,9 @@ def send_message(
     db.add(user_msg)
     db.commit()
 
+    assistant_text_override: Optional[str] = None
+    assistant_engine_override: Optional[str] = None
+
     if conv.chat_role == "borrower" and not actor_is_officer:
         last_assistant_text = (
             db.execute(
@@ -1318,7 +1514,46 @@ def send_message(
             .scalars()
             .first()
         )
-        analysis = analyze_intent_message(req.content, conv.intent_summary, last_assistant_text=last_assistant_text)
+        require_llm = str(os.getenv("BORROWER_CHAT_REQUIRE_LLM", "1")).strip().lower() not in {"0", "false", "no"}
+        llm_turn: Optional[dict[str, Any]] = None
+        llm_error_detail: Optional[str] = None
+        if not os.getenv("PYTEST_CURRENT_TEST"):
+            try:
+                llm_turn = _llm_borrower_chat_turn(db, conv)
+            except Exception as e:
+                llm_turn = None
+                llm_error_detail = str(e) or e.__class__.__name__
+        desired_phase_id: Optional[str] = None
+        if llm_turn:
+            analysis = {
+                "intentSummary": llm_turn["intentSummary"],
+                "seriousnessScore": llm_turn["seriousnessScore"],
+                "fitScore": llm_turn["fitScore"],
+                "nextConversationAngle": llm_turn["nextConversationAngle"],
+            }
+            assistant_text_override = llm_turn.get("assistantText")
+            assistant_engine_override = "borrower_chatgpt_llm"
+            desired_phase_id = llm_turn.get("desiredPhaseId")
+        elif require_llm and not os.getenv("PYTEST_CURRENT_TEST"):
+            request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
+            v2_messages_sent_total.labels(chat_role=conv.chat_role, actor_role="borrower", status="llm_unavailable").inc()
+            base_url = str(os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).strip()
+            model_name = str(os.getenv("OLLAMA_MODEL", "qwen2.5:7b")).strip()
+            detail_parts = [
+                "AI engine unavailable.",
+                f"OLLAMA_BASE_URL={base_url}",
+                f"OLLAMA_MODEL={model_name}",
+            ]
+            if llm_error_detail:
+                detail_parts.append(f"Reason: {llm_error_detail}")
+            detail_parts.append("Ensure Ollama is running and the configured model is pulled.")
+            raise HTTPException(
+                status_code=503,
+                detail=" ".join(detail_parts),
+            )
+        else:
+            analysis = analyze_intent_message(req.content, conv.intent_summary, last_assistant_text=last_assistant_text)
+
         conv.intent_summary = analysis["intentSummary"]
         conv.seriousness_score = analysis["seriousnessScore"]
         conv.fit_score = analysis["fitScore"]
@@ -1329,6 +1564,8 @@ def send_message(
         db.add(conv)
         db.commit()
         db.refresh(conv)
+        if desired_phase_id:
+            _apply_llm_phase_update(db, conv, desired_phase_id)
         phase_action = apply_phase_guardrails(db, conv)
     else:
         analysis = {
@@ -1391,7 +1628,11 @@ def send_message(
             lines.append("Officer note recorded. You can: assign officer, set status, move phase, create loan, or move loan phase.")
         assistant_text = "\n".join(lines)
     elif conv.chat_role == "borrower":
-        assistant_text, assistant_engine = _build_borrower_assistant_reply(db, conversation_id, analysis["intentSummary"])
+        if isinstance(assistant_text_override, str) and assistant_text_override.strip():
+            assistant_text = assistant_text_override.strip()
+            assistant_engine = str(assistant_engine_override or "borrower_chatgpt_llm")
+        else:
+            assistant_text, assistant_engine = _build_borrower_assistant_reply(db, conversation_id, analysis["intentSummary"])
     assistant_metadata = {
         "actorRole": "officer_assistant" if actor_is_officer else None,
         "assistantEngine": assistant_engine,
