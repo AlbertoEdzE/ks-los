@@ -1,6 +1,7 @@
 import uuid
 import re
 import os
+import json
 from typing import Any, Optional, Literal
 from datetime import datetime, timezone
 
@@ -55,6 +56,7 @@ class IntentSummary(BaseModel):
     collateralAvailable: Optional[str] = None
     employmentType: Optional[str] = None
     creditHistory: Optional[str] = None
+    recentDelinquencies12m: Optional[str] = None
 
 
 class ApprovalProbabilityInputs(BaseModel):
@@ -202,8 +204,22 @@ def _recommend_products(db: Session, intent: dict) -> list[dict[str, Any]]:
 
 def _extract_amount(text: str) -> Optional[str]:
     t = text.lower()
+    m = re.search(r"\b(loan\s*amount|amount\s*needed|amount)\b\s*(is|=|:)?\s*(\$|usd\s*)?\s*([\d,]+)", t)
+    if m:
+        return m.group(4).replace(",", "")
     m = re.search(r"(\$|usd\s*)?\s*(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\s*(k|m|million|thousand)?", t)
     if not m:
+        return None
+    start = max(0, m.start())
+    end = min(len(t), m.end())
+    token = t[start:end]
+    before = t[max(0, start - 18) : start]
+    after = t[end : min(len(t), end + 18)]
+    context = f"{before} {after}"
+    has_currency = ("$" in token) or ("usd" in token)
+    has_loan_context = any(k in context for k in ["loan", "borrow", "mortgage", "home"])
+    has_income_context = any(k in context for k in ["income", "salary", "/month", "per month", "monthly"])
+    if has_income_context and not has_loan_context and not has_currency:
         return None
     raw = m.group(2).replace(",", "").replace(" ", "")
     unit = (m.group(3) or "").strip()
@@ -224,10 +240,31 @@ def _extract_income(text: str) -> Optional[str]:
 
 def _extract_existing_debts(text: str) -> Optional[str]:
     t = text.lower()
+    if re.search(r"\b(no|none|zero)\s+(debt|debts|outstanding|dues)\b", t):
+        return "0"
     m = re.search(r"\b(debt|debts|outstanding|owe|balance)\b[\w\s]*?(\$|₹|usd\s*)?\s*([\d,]+)", t)
     if not m:
         return None
     return m.group(3).replace(",", "")
+
+
+def _is_yes(text: str) -> bool:
+    t = text.strip().lower()
+    return t in {"yes", "y", "yeah", "yep", "correct", "true"}
+
+
+def _is_no(text: str) -> bool:
+    t = text.strip().lower()
+    return t in {"no", "n", "nope", "nah", "false"}
+
+
+def _extract_recent_delinquencies_12m(text: str) -> Optional[str]:
+    t = text.lower()
+    if re.search(r"\b(no|none|never)\b[\w\s]{0,25}\b(late\s+payments?|collections?|delinquenc(?:y|ies))\b", t):
+        return "no"
+    if re.search(r"\b(yes|some|few)\b[\w\s]{0,25}\b(late\s+payments?|collections?|delinquenc(?:y|ies))\b", t):
+        return "yes"
+    return None
 
 
 def _extract_tenure(text: str) -> Optional[str]:
@@ -378,7 +415,8 @@ def _build_borrower_assistant_reply(db: Session, conversation_id: str, intent: d
     if not credit_norm:
         questions.append("Do you know your credit score (or a rough range)?")
     elif credit_norm in {"unknown", "not_known", "not known", "n/a", "na"}:
-        questions.append("Have you had any late payments, collections, or delinquencies in the last 12 months?")
+        if not intent.get("recentDelinquencies12m"):
+            questions.append("Have you had any late payments, collections, or delinquencies in the last 12 months?")
 
     if not intent.get("preferredTenure"):
         questions.append("What tenure would you be comfortable with (e.g., 36 months, 5 years)?")
@@ -403,17 +441,23 @@ def _build_borrower_assistant_reply(db: Session, conversation_id: str, intent: d
     for m in assistant_rows:
         recently_asked.update(_extract_question_lines(m.content or ""))
 
-    candidates = questions[:4]
+    unasked = [q for q in questions if q not in recently_asked]
+    candidates = unasked[:6]
     llm_text = _maybe_llm_borrower_reply(purpose_label, intent, candidates, recently_asked)
     if llm_text:
         return (llm_text, "llm_guided")
 
-    top = questions[:3]
+    top = unasked[:3]
+    if not top:
+        return (
+            "Thanks — I have enough to refine recommendations. Do you want the lowest EMI, lowest total interest, or fastest approval?",
+            "heuristic_only",
+        )
     bullets = "\n".join([f"- {q}" for q in top])
     return (f"Got it — for {purpose_label}, I just need a few quick details:\n\n{bullets}", "heuristic_only")
 
 
-def analyze_intent_message(content: str, previous_intent: Optional[dict]) -> dict[str, Any]:
+def analyze_intent_message(content: str, previous_intent: Optional[dict], last_assistant_text: Optional[str] = None) -> dict[str, Any]:
     amount = _extract_amount(content)
     income = _extract_income(content)
     credit = _extract_credit_score(content)
@@ -421,6 +465,13 @@ def analyze_intent_message(content: str, previous_intent: Optional[dict]) -> dic
         credit = "unknown"
     debts = _extract_existing_debts(content)
     tenure = _extract_tenure(content)
+    delinq = _extract_recent_delinquencies_12m(content)
+    if delinq is None and last_assistant_text:
+        if "late payments" in last_assistant_text.lower() and ("delinquenc" in last_assistant_text.lower() or "collections" in last_assistant_text.lower()):
+            if _is_yes(content):
+                delinq = "yes"
+            elif _is_no(content):
+                delinq = "no"
     intent = IntentSummary(
         purpose=_infer_purpose(content),
         urgency=_infer_urgency(content),
@@ -430,6 +481,7 @@ def analyze_intent_message(content: str, previous_intent: Optional[dict]) -> dic
         creditHistory=credit,
         existingDebts=debts,
         preferredTenure=tenure,
+        recentDelinquencies12m=delinq,
     )
     merged = _merge_intent(previous_intent, intent)
     seriousness, fit = _compute_scores(merged)
@@ -559,15 +611,14 @@ def _compute_approval_probability(intent: dict) -> dict[str, Any] | None:
 
 _BORROWER_LLM_SYSTEM_PROMPT = (
     "You are LoanAssist AI, an assistant for loan prequalification.\n"
-    "You must drive the conversation forward without repeating questions.\n"
-    "Only ask questions from the provided Candidate Questions list.\n"
-    "Do not re-ask anything listed under Recently Asked Questions.\n"
-    "Ask at most 2 questions per turn.\n"
-    "Return plain text only in this format:\n"
-    "1) One short intro sentence.\n"
-    "2) Blank line.\n"
-    "3) Bullet list with each question prefixed by '- ' using the exact candidate question text.\n"
-    "Do not add extra sections, numbering, or additional questions.\n"
+    "Choose the next questions without repeating anything asked recently.\n"
+    "You will be given a Candidate Questions list. Pick up to 2 questions by INDEX.\n"
+    "Do not pick indices whose questions appear in Recently Asked Questions.\n"
+    "Return ONLY a JSON object (no markdown, no extra text) with this schema:\n"
+    '{"intro":"<one short sentence>","pick":[0,1]}\n'
+    "Rules:\n"
+    "- intro: one sentence, concise.\n"
+    "- pick: array of 1-2 integers.\n"
 )
 
 
@@ -583,6 +634,15 @@ def _extract_question_lines(text: str) -> list[str]:
         if q:
             lines.append(q)
     return lines
+
+
+def _extract_first_json_object(text: str) -> Optional[str]:
+    if not text:
+        return None
+    m = re.search(r"\{[\s\S]*\}", text)
+    if not m:
+        return None
+    return m.group(0).strip()
 
 
 def _maybe_llm_borrower_reply(purpose_label: str, intent: dict, candidate_questions: list[str], recently_asked: set[str]) -> Optional[str]:
@@ -603,7 +663,7 @@ def _maybe_llm_borrower_reply(purpose_label: str, intent: dict, candidate_questi
             known_bits.append(f"{k}={s}")
         known = ", ".join(known_bits) if known_bits else "none"
         recent = "\n".join([f"- {q}" for q in sorted(recently_asked)]) if recently_asked else "- (none)"
-        candidates = "\n".join([f"- {q}" for q in candidate_questions])
+        candidates = "\n".join([f"{i}: {q}" for i, q in enumerate(candidate_questions)])
         response = llm.invoke(
             [
                 SystemMessage(content=_BORROWER_LLM_SYSTEM_PROMPT),
@@ -617,18 +677,28 @@ def _maybe_llm_borrower_reply(purpose_label: str, intent: dict, candidate_questi
                 ),
             ]
         )
-        text = (response.content or "").strip()
-        if not text:
+        raw = (response.content or "").strip()
+        json_text = _extract_first_json_object(raw) or raw
+        parsed = json.loads(json_text)
+        intro = str(parsed.get("intro") or "").strip()
+        pick = parsed.get("pick")
+        if not intro:
             return None
-        chosen = _extract_question_lines(text)
-        if not chosen:
+        if not isinstance(pick, list) or not (1 <= len(pick) <= 2):
             return None
-        chosen_set = set(chosen)
-        if any(q in recently_asked for q in chosen_set):
+        idxs: list[int] = []
+        for x in pick:
+            if isinstance(x, bool) or not isinstance(x, int):
+                return None
+            if x < 0 or x >= len(candidate_questions):
+                return None
+            idxs.append(x)
+        idxs = list(dict.fromkeys(idxs))
+        chosen_questions = [candidate_questions[i] for i in idxs]
+        if any(q in recently_asked for q in chosen_questions):
             return None
-        if any(q not in set(candidate_questions) for q in chosen_set):
-            return None
-        return text
+        bullets = "\n".join([f"- {q}" for q in chosen_questions])
+        return f"{intro}\n\n{bullets}"
     except Exception:
         return None
 
@@ -1238,7 +1308,17 @@ def send_message(
     db.commit()
 
     if conv.chat_role == "borrower" and not actor_is_officer:
-        analysis = analyze_intent_message(req.content, conv.intent_summary)
+        last_assistant_text = (
+            db.execute(
+                select(Message.content)
+                .where(Message.conversation_id == conversation_id, Message.role == "assistant")
+                .order_by(Message.created_at.desc(), Message.id.desc())
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+        analysis = analyze_intent_message(req.content, conv.intent_summary, last_assistant_text=last_assistant_text)
         conv.intent_summary = analysis["intentSummary"]
         conv.seriousness_score = analysis["seriousnessScore"]
         conv.fit_score = analysis["fitScore"]

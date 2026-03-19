@@ -174,6 +174,25 @@ def test_v2_conversation_patch_and_messages_flow():
     assert isinstance(first.get("recommendation"), str)
 
 
+def test_v2_income_message_does_not_set_loan_amount():
+    create = client.post("/api/conversations", json={})
+    conv_id = create.json()["conversation"]["id"]
+
+    send1 = client.post(f"/api/conversations/{conv_id}/messages", json={"content": "I want a home loan to buy a house."})
+    assert send1.status_code == 200
+
+    send2 = client.post(
+        f"/api/conversations/{conv_id}/messages",
+        json={"content": "income: 10000 usd/month, salaried, i dont know my credit score"},
+    )
+    assert send2.status_code == 200
+    payload = send2.json()
+    intent = payload["intentAnalysis"]["intentSummary"]
+    assert intent["monthlyIncome"] is not None
+    assert intent.get("loanAmount") is None
+    assert intent.get("creditHistory") == "unknown"
+
+
 def test_wp_v2_020_messages_list_is_deterministic():
     ts = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     conv_id = "conv-wp-v2-020-ordering"
