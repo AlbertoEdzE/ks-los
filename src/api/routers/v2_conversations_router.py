@@ -136,7 +136,11 @@ def _merge_intent(prev: Optional[dict], new: IntentSummary) -> dict:
     allowed = set(IntentSummary.model_fields.keys())
     base: dict = {k: v for k, v in (prev or {}).items() if k in allowed}
     for k, v in new.model_dump(exclude_none=True).items():
-        if base.get(k) in (None, "", []):
+        existing = base.get(k)
+        if existing in (None, "", []):
+            base[k] = v
+            continue
+        if isinstance(existing, str) and existing.strip().lower() in {"unknown", "not_known", "not known", "n/a", "na"}:
             base[k] = v
     return base
 
@@ -341,7 +345,7 @@ def _next_angle(intent: dict) -> str:
     return "Validate documents, collateral, and eligibility constraints."
 
 
-def _build_borrower_assistant_reply(intent: dict) -> tuple[str, str]:
+def _build_borrower_assistant_reply(db: Session, conversation_id: str, intent: dict) -> tuple[str, str]:
     purpose = (intent.get("purpose") or "").strip()
     purpose_label = {
         "home": "a home loan",
@@ -369,8 +373,12 @@ def _build_borrower_assistant_reply(intent: dict) -> tuple[str, str]:
     if not intent.get("employmentType"):
         questions.append("Are you salaried or self-employed?")
 
-    if not intent.get("creditHistory"):
+    credit = intent.get("creditHistory")
+    credit_norm = str(credit).strip().lower() if credit is not None else ""
+    if not credit_norm:
         questions.append("Do you know your credit score (or a rough range)?")
+    elif credit_norm in {"unknown", "not_known", "not known", "n/a", "na"}:
+        questions.append("Have you had any late payments, collections, or delinquencies in the last 12 months?")
 
     if not intent.get("preferredTenure"):
         questions.append("What tenure would you be comfortable with (e.g., 36 months, 5 years)?")
@@ -381,11 +389,28 @@ def _build_borrower_assistant_reply(intent: dict) -> tuple[str, str]:
             "heuristic_only",
         )
 
+    assistant_rows = (
+        db.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id, Message.role == "assistant")
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(8)
+        )
+        .scalars()
+        .all()
+    )
+    recently_asked: set[str] = set()
+    for m in assistant_rows:
+        recently_asked.update(_extract_question_lines(m.content or ""))
+
+    candidates = questions[:4]
+    llm_text = _maybe_llm_borrower_reply(purpose_label, intent, candidates, recently_asked)
+    if llm_text:
+        return (llm_text, "llm_guided")
+
     top = questions[:3]
     bullets = "\n".join([f"- {q}" for q in top])
-    llm_intro = _maybe_llm_intro(purpose_label, intent, top)
-    intro = llm_intro or f"Got it — for {purpose_label}, I just need a few quick details:"
-    return (f"{intro}\n\n{bullets}", "llm_intro" if llm_intro else "heuristic_only")
+    return (f"Got it — for {purpose_label}, I just need a few quick details:\n\n{bullets}", "heuristic_only")
 
 
 def analyze_intent_message(content: str, previous_intent: Optional[dict]) -> dict[str, Any]:
@@ -534,19 +559,39 @@ def _compute_approval_probability(intent: dict) -> dict[str, Any] | None:
 
 _BORROWER_LLM_SYSTEM_PROMPT = (
     "You are LoanAssist AI, an assistant for loan prequalification.\n"
-    "Write 1 short sentence introducing the next questions.\n"
-    "Be concise and professional.\n"
-    "Do not include any questions or bullet points.\n"
+    "You must drive the conversation forward without repeating questions.\n"
+    "Only ask questions from the provided Candidate Questions list.\n"
+    "Do not re-ask anything listed under Recently Asked Questions.\n"
+    "Ask at most 2 questions per turn.\n"
+    "Return plain text only in this format:\n"
+    "1) One short intro sentence.\n"
+    "2) Blank line.\n"
+    "3) Bullet list with each question prefixed by '- ' using the exact candidate question text.\n"
+    "Do not add extra sections, numbering, or additional questions.\n"
 )
 
 
-def _maybe_llm_intro(purpose_label: str, intent: dict, questions: list[str]) -> Optional[str]:
+def _extract_question_lines(text: str) -> list[str]:
+    if not text:
+        return []
+    lines = []
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s.startswith("-"):
+            continue
+        q = s.lstrip("-").strip()
+        if q:
+            lines.append(q)
+    return lines
+
+
+def _maybe_llm_borrower_reply(purpose_label: str, intent: dict, candidate_questions: list[str], recently_asked: set[str]) -> Optional[str]:
     if os.getenv("PYTEST_CURRENT_TEST"):
         return None
-    if not questions:
+    if not candidate_questions:
         return None
     try:
-        llm = get_llm(temperature=0.3)
+        llm = get_llm(temperature=0.2)
         known_bits: list[str] = []
         for k in ["purpose", "loanAmount", "monthlyIncome", "employmentType", "creditHistory", "preferredTenure", "existingDebts"]:
             v = intent.get(k)
@@ -557,17 +602,32 @@ def _maybe_llm_intro(purpose_label: str, intent: dict, questions: list[str]) -> 
                 continue
             known_bits.append(f"{k}={s}")
         known = ", ".join(known_bits) if known_bits else "none"
+        recent = "\n".join([f"- {q}" for q in sorted(recently_asked)]) if recently_asked else "- (none)"
+        candidates = "\n".join([f"- {q}" for q in candidate_questions])
         response = llm.invoke(
             [
                 SystemMessage(content=_BORROWER_LLM_SYSTEM_PROMPT),
-                HumanMessage(content=f"Loan type: {purpose_label}. Known: {known}."),
+                HumanMessage(
+                    content=(
+                        f"Loan type: {purpose_label}\n"
+                        f"Known fields: {known}\n\n"
+                        f"Recently Asked Questions:\n{recent}\n\n"
+                        f"Candidate Questions:\n{candidates}\n"
+                    )
+                ),
             ]
         )
         text = (response.content or "").strip()
         if not text:
             return None
-        if "\n" in text:
-            text = text.split("\n")[0].strip()
+        chosen = _extract_question_lines(text)
+        if not chosen:
+            return None
+        chosen_set = set(chosen)
+        if any(q in recently_asked for q in chosen_set):
+            return None
+        if any(q not in set(candidate_questions) for q in chosen_set):
+            return None
         return text
     except Exception:
         return None
@@ -1251,7 +1311,7 @@ def send_message(
             lines.append("Officer note recorded. You can: assign officer, set status, move phase, create loan, or move loan phase.")
         assistant_text = "\n".join(lines)
     elif conv.chat_role == "borrower":
-        assistant_text, assistant_engine = _build_borrower_assistant_reply(analysis["intentSummary"])
+        assistant_text, assistant_engine = _build_borrower_assistant_reply(db, conversation_id, analysis["intentSummary"])
     assistant_metadata = {
         "actorRole": "officer_assistant" if actor_is_officer else None,
         "assistantEngine": assistant_engine,
