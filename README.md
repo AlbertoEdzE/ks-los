@@ -118,3 +118,74 @@ pytest --cov=src src/tests/
 
 ## License
 Private / Proprietary
+
+## Implementation Checklist
+- [x] Borrower journey UX aligned to the premium design (welcome + quick prompts)
+- [x] Documents upload flow wired to real backend (no UI-only placeholders)
+- [x] OCR/PDF text extraction enabled for uploaded documents (server-side)
+- [x] Documents saved and tracked in database (status, metadata, timestamps)
+- [x] Required documents reduced to 2 (ID/Passport + Job Letter) for borrower flow
+- [x] Progressive borrower flow (UI does not jump ahead before user can reply)
+- [x] Loan creation gated by required borrower inputs to avoid premature steps
+- [x] STP “Run Checks” made safe for multiple clicks (idempotent processing)
+- [x] Offer/acceptance/disbursement cards wired via backend + chat metadata
+- [x] Automated regression coverage via Playwright E2E and backend/frontend tests
+- [ ] Production-grade authentication (real users, reset flows, MFA/SSO options)
+- [ ] Centralized secrets + environment management across dev/stage/prod
+- [ ] Formal database migrations and schema versioning
+- [ ] Cloud object storage for documents (S3/GCS/Azure) + encryption + retention
+- [ ] Document validation intelligence (classification, expiry, mismatch, fraud signals)
+- [ ] Configurable underwriting/STP policy packs and exception routing
+- [ ] Compliance-grade audit logging (document access, decisions, user actions)
+- [ ] Operational monitoring with alerts on funnel drop-off and failure rates
+- [ ] Security hardening (rate limits, upload scanning, OWASP review, WAF readiness)
+- [ ] Deployment packaging for production (TLS, reverse proxy, rolling updates)
+
+## AI System Diagram
+```text
+                ┌──────────────────────────────┐
+                │ Frontend (Borrower/Officer)  │
+                │ React UI                     │
+                └───────────────┬──────────────┘
+                                │ HTTP
+                                v
+┌──────────────────────────────────────────────────────────┐
+│ FastAPI Backend (KS-LOS)                                 │
+│                                                          │
+│  A) Borrower Journey (v2)                                │
+│   - Builds prompt + chat history                         │
+│   - Calls local LLM (Ollama)                             │
+│   - Grounds fields (amount/tenure/debts)                 │
+│   - Writes messages + intent summary                     │
+│                                                          │
+│  B) Agentic Graph (LangGraph)                            │
+│   journey_coach → (tool?) → profile_parser → risk_engine │
+│   → advisory                                             │
+│   - Tool calling (GenerateProfileTool)                   │
+│   - RAG policy lookup + ML model scoring                 │
+│                                                          │
+│  C) Documents & STP                                      │
+│   - Upload files → OCR/PDF extraction                    │
+│   - Store metadata/status + run checks (idempotent)      │
+└───────────────┬───────────────────────┬──────────────────┘
+                │                       │
+                │ SQL (operational DB)  │ Vector SQL (RAG)
+                v                       v
+     ┌───────────────────────┐   ┌─────────────────────────┐
+     │ Postgres (or SQLite)  │   │ Postgres + PGVector      │
+     │ Conversations/Messages │   │ Policy embeddings store  │
+     │ Loans/Documents        │   └─────────────────────────┘
+     └───────────┬───────────┘
+                 │ files on disk
+                 v
+        ┌─────────────────────┐
+        │ File Storage         │
+        │ data/uploads/...     │
+        └─────────────────────┘
+
+(Optional, for model ops)
+     ┌─────────────────────┐
+     │ MLflow Tracking      │
+     │ training + inference │
+     └─────────────────────┘
+```

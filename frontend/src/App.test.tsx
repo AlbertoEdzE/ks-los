@@ -21,7 +21,7 @@ describe('App', () => {
           <App />
         </MemoryRouter>
       );
-      expect(screen.getByText('Login')).toBeInTheDocument();
+      expect(screen.getByText('Welcome to LoanAssist')).toBeInTheDocument();
     } catch (error) {
       console.error('App render failed:', error);
       throw error;
@@ -81,9 +81,9 @@ describe('App', () => {
       </MemoryRouter>
     );
 
-    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'admin' } });
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'admin123' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Login' }));
+    fireEvent.change(await screen.findByLabelText('Username'), { target: { value: 'officer' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Password123!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
 
     await screen.findByTestId('text-leads-title');
     await waitFor(() => {
@@ -162,9 +162,9 @@ describe('App', () => {
       </MemoryRouter>
     );
 
-    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'admin' } });
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'admin123' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Login' }));
+    fireEvent.change(await screen.findByLabelText('Username'), { target: { value: 'officer' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Password123!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
 
     await screen.findByRole('heading', { name: 'Loans' });
     await screen.findByTestId(`loan-row-${loanId}`);

@@ -11,87 +11,211 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 type LoginPageProps = {
+  mode: 'select' | 'borrower-login' | 'officer-login' | 'borrower-register' | 'officer-register' | 'borrower-forgot' | 'officer-forgot';
   username: string;
   password: string;
   loginError: string;
   onSubmit: (e: React.FormEvent) => void;
   onUsernameChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
+  onModeChange: (mode: LoginPageProps['mode']) => void;
+  onClearError: () => void;
 };
 
-function LoginPage({ username, password, loginError, onSubmit, onUsernameChange, onPasswordChange }: LoginPageProps) {
+function LoginPage({ mode, username, password, loginError, onSubmit, onUsernameChange, onPasswordChange, onModeChange, onClearError }: LoginPageProps) {
   return (
-    <div
-      className="app-container"
-      style={{
-        height: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#f5f5f5',
-      }}
-    >
-      <div
-        style={{
-          padding: '40px',
-          backgroundColor: 'white',
-          borderRadius: '8px',
-          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-          width: '100%',
-          maxWidth: '400px',
-        }}
-      >
-        <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div>
-            <label htmlFor="login-username" style={{ display: 'block', marginBottom: '8px', color: '#666' }}>
-              Username
-            </label>
-            <input
-              id="login-username"
-              type="text"
-              value={username}
-              onChange={(e) => onUsernameChange(e.target.value)}
-              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }}
-              placeholder="Enter username"
-              autoComplete="username"
-            />
-          </div>
-          <div>
-            <label htmlFor="login-password" style={{ display: 'block', marginBottom: '8px', color: '#666' }}>
-              Password
-            </label>
-            <input
-              id="login-password"
-              type="password"
-              value={password}
-              onChange={(e) => onPasswordChange(e.target.value)}
-              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }}
-              placeholder="Enter password"
-              autoComplete="current-password"
-            />
-          </div>
+    <div className="min-h-screen flex flex-col bg-[#f8f9fc] dark:bg-[#0d0d10] relative overflow-hidden">
+      <div className="absolute top-[-200px] left-1/4 w-[600px] h-[600px] bg-[#0078D4]/[0.06] dark:bg-[#0078D4]/[0.04] rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-[-150px] right-1/4 w-[500px] h-[500px] bg-indigo-200/30 dark:bg-[#0078D4]/[0.03] rounded-full blur-[100px] pointer-events-none" />
 
-          {loginError ? <div style={{ color: 'red', fontSize: '14px' }}>{loginError}</div> : null}
-          <button
-            type="submit"
-            style={{
-              padding: '12px',
-              backgroundColor: '#0056b3',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '16px',
-              fontWeight: 'bold',
-            }}
-          >
-            Login
-          </button>
-          <div style={{ textAlign: 'center', fontSize: '12px', color: '#999', marginTop: '10px' }}>
-            User: demo / demo123. Admin: admin / admin123.
+      <header className="relative z-10 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-white dark:bg-white/[0.07] flex items-center justify-center shadow-sm border border-gray-200/60 dark:border-white/[0.08]">
+            <span className="text-sm font-black tracking-tight text-[#1B2A4A] dark:text-white">KS</span>
           </div>
-        </form>
+          <div>
+            <h1 className="font-bold text-lg tracking-tight text-[#1B2A4A] dark:text-white">LoanAssist AI</h1>
+            <p className="text-xs text-[#1B2A4A]/45 dark:text-white/45">by KSquare</p>
+          </div>
+        </div>
+      </header>
+
+      <div className="flex-1 flex items-center justify-center relative z-10 px-4">
+        {mode === 'select' ? (
+          <div className="w-full max-w-4xl">
+            <div className="text-center mb-12">
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#D6E4F0] dark:bg-[#0078D4]/[0.12] border border-[#0078D4]/15 dark:border-[#0078D4]/20 mb-6">
+                <span className="text-xs font-medium text-[#0078D4] dark:text-[#4da3e8]">AI-Powered Loan Origination</span>
+              </div>
+              <h2 className="text-3xl md:text-4xl font-bold text-[#1B2A4A] dark:text-white mb-3 tracking-tight">Welcome to LoanAssist</h2>
+              <p className="text-[#1B2A4A]/55 dark:text-white/55 text-base max-w-lg mx-auto">
+                Choose how you'd like to continue. Whether you're applying for a loan or managing applications, we've got you covered.
+              </p>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+              <button
+                type="button"
+                data-testid="select-borrower"
+                onClick={() => {
+                  onClearError();
+                  onUsernameChange('');
+                  onPasswordChange('');
+                  onModeChange('borrower-login');
+                }}
+                className="group relative overflow-hidden rounded-3xl bg-white/80 dark:bg-white/[0.06] backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] p-8 text-left shadow-xl shadow-black/[0.04] dark:shadow-black/40 hover:shadow-2xl hover:scale-[1.02] transition-all duration-500"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-[#D6E4F0] dark:from-[#0078D4]/[0.06] to-transparent rounded-bl-full" />
+                <div className="relative">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#0078D4] to-[#005EA6] flex items-center justify-center mb-5 shadow-lg shadow-[#0078D4]/25">
+                    <span className="text-white font-black text-xl">B</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-[#1B2A4A] dark:text-white mb-2">Loan Applicant</h3>
+                  <p className="text-sm text-[#1B2A4A]/60 dark:text-white/55 mb-5 leading-relaxed">
+                    Apply for loans, track your application status, and get AI-powered guidance throughout the process.
+                  </p>
+                  <div className="mt-6 flex items-center gap-2 text-[#0078D4] font-medium text-sm">
+                    Continue as Applicant <span className="translate-y-[1px]">→</span>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                data-testid="select-officer"
+                onClick={() => {
+                  onClearError();
+                  onUsernameChange('');
+                  onPasswordChange('');
+                  onModeChange('officer-login');
+                }}
+                className="group relative overflow-hidden rounded-3xl bg-white/80 dark:bg-white/[0.06] backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] p-8 text-left shadow-xl shadow-black/[0.04] dark:shadow-black/40 hover:shadow-2xl hover:scale-[1.02] transition-all duration-500"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-[#D6E4F0] dark:from-[#1B2A4A]/10 to-transparent rounded-bl-full" />
+                <div className="relative">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#1B2A4A] to-[#1e1e22] flex items-center justify-center mb-5 shadow-lg shadow-[#1B2A4A]/25">
+                    <span className="text-white font-black text-xl">O</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-[#1B2A4A] dark:text-white mb-2">Loan Officer</h3>
+                  <p className="text-sm text-[#1B2A4A]/60 dark:text-white/55 mb-5 leading-relaxed">
+                    Manage loan applications, get AI-powered analysis, and streamline your origination workflow.
+                  </p>
+                  <div className="mt-6 flex items-center gap-2 text-[#1B2A4A] dark:text-[#4da3e8] font-medium text-sm">
+                    Continue as Officer <span className="translate-y-[1px]">→</span>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="w-full max-w-md">
+            <button
+              type="button"
+              onClick={() => {
+                onClearError();
+                onModeChange('select');
+              }}
+              className="mb-6 text-sm text-[#1B2A4A]/50 dark:text-white/55 hover:text-[#0078D4] flex items-center gap-1 transition-colors"
+              data-testid="button-back"
+            >
+              <span className="translate-y-[1px]">←</span> Back
+            </button>
+
+            <div className="rounded-3xl bg-white/80 dark:bg-white/[0.06] backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] p-8 shadow-2xl shadow-black/[0.06] dark:shadow-black/40">
+              <div className="text-center mb-8">
+                <div
+                  className={`w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg ${
+                    mode.startsWith('borrower')
+                      ? 'bg-gradient-to-br from-[#0078D4] to-[#005EA6] shadow-[#0078D4]/25'
+                      : 'bg-gradient-to-br from-[#1B2A4A] to-[#1e1e22] shadow-[#1B2A4A]/25'
+                  }`}
+                >
+                  <span className="text-white font-black text-xl">{mode.startsWith('borrower') ? 'B' : 'O'}</span>
+                </div>
+                <h2 className="text-xl font-bold text-[#1B2A4A] dark:text-white">Welcome Back</h2>
+                <p className="text-sm text-[#1B2A4A]/50 dark:text-white/55 mt-1">
+                  {mode.startsWith('borrower') ? 'Loan Applicant Portal' : 'Loan Officer Portal'}
+                </p>
+              </div>
+
+              <form onSubmit={onSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="login-username" className="text-sm font-medium text-[#1B2A4A]/70 dark:text-white/70">
+                    Username
+                  </label>
+                  <input
+                    id="login-username"
+                    type="text"
+                    value={username}
+                    onChange={(e) => onUsernameChange(e.target.value)}
+                    placeholder="Enter username"
+                    autoComplete="username"
+                    className="w-full px-4 py-3 rounded-2xl border border-gray-200/60 dark:border-white/[0.10] bg-white/70 dark:bg-white/[0.03] text-[#1B2A4A] dark:text-white placeholder:text-[#1B2A4A]/35 dark:placeholder:text-white/35 outline-none focus:ring-2 focus:ring-[#0078D4]/30"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="login-password" className="text-sm font-medium text-[#1B2A4A]/70 dark:text-white/70">
+                    Password
+                  </label>
+                  <input
+                    id="login-password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => onPasswordChange(e.target.value)}
+                    placeholder="Enter password"
+                    autoComplete="current-password"
+                    className="w-full px-4 py-3 rounded-2xl border border-gray-200/60 dark:border-white/[0.10] bg-white/70 dark:bg-white/[0.03] text-[#1B2A4A] dark:text-white placeholder:text-[#1B2A4A]/35 dark:placeholder:text-white/35 outline-none focus:ring-2 focus:ring-[#0078D4]/30"
+                  />
+                </div>
+
+                {loginError ? <div style={{ color: '#b91c1c', fontSize: '13px', fontWeight: 600 }}>{loginError}</div> : null}
+
+                <button
+                  type="submit"
+                  className="w-full rounded-2xl bg-gradient-to-r from-[#0078D4] to-[#005EA6] px-4 py-3 text-sm font-extrabold text-white shadow-lg shadow-[#0078D4]/20"
+                >
+                  Sign In
+                </button>
+
+                <div className="pt-2 text-center text-[11px] text-[#1B2A4A]/35 dark:text-white/35">
+                  {mode.startsWith('borrower') ? (
+                    <>
+                      Forgot password?{' '}
+                      <button type="button" className="text-[#0078D4] font-semibold" onClick={() => onModeChange('borrower-forgot')}>
+                        Reset
+                      </button>
+                      <div className="mt-2">
+                        Don&apos;t have an account?{' '}
+                        <button type="button" className="text-[#0078D4] font-semibold" onClick={() => onModeChange('borrower-register')}>
+                          Create one
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      Forgot password?{' '}
+                      <button type="button" className="text-[#0078D4] font-semibold" onClick={() => onModeChange('officer-forgot')}>
+                        Reset
+                      </button>
+                      <div className="mt-2">
+                        Don&apos;t have an account?{' '}
+                        <button type="button" className="text-[#0078D4] font-semibold" onClick={() => onModeChange('officer-register')}>
+                          Create one
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
+
+      <footer className="relative z-10 text-center py-4">
+        <p className="text-xs text-[#1B2A4A]/30 dark:text-white/55">Powered by KSquare Technologies</p>
+      </footer>
     </div>
   );
 }
@@ -99,6 +223,7 @@ function LoginPage({ username, password, loginError, onSubmit, onUsernameChange,
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [role, setRole] = useState<'user' | 'admin'>('user');
+  const [authMode, setAuthMode] = useState<LoginPageProps['mode']>('select');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -168,6 +293,26 @@ function App() {
     return state?.from?.pathname || null;
   }, [location.state]);
 
+  React.useEffect(() => {
+    if (location.pathname !== '/login') return;
+    const params = new URLSearchParams(location.search);
+    const raw = (params.get('mode') || '').trim();
+    const allowed: LoginPageProps['mode'][] = [
+      'select',
+      'borrower-login',
+      'officer-login',
+      'borrower-register',
+      'officer-register',
+      'borrower-forgot',
+      'officer-forgot',
+    ];
+    if (allowed.includes(raw as LoginPageProps['mode'])) {
+      setAuthMode(raw as LoginPageProps['mode']);
+    } else if (authMode !== 'select') {
+      setAuthMode('select');
+    }
+  }, [authMode, location.pathname, location.search]);
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     const resolvePostLoginPath = (newRole: 'admin' | 'user') => {
@@ -196,24 +341,51 @@ function App() {
       return fromPath;
     };
 
-    if (username === 'admin' && password === 'admin123') {
+    const normalizedUsername = username.trim();
+    const normalizedPassword = password;
+
+    if (authMode.endsWith('register') || authMode.endsWith('forgot')) {
+      setLoginError('This workflow is not implemented yet in this build.');
+      return;
+    }
+
+    if (authMode.startsWith('officer')) {
+      const validOfficer =
+        (normalizedUsername === 'officer' && normalizedPassword === 'Password123!') ||
+        (normalizedUsername === 'admin' && normalizedPassword === 'admin123');
+      if (!validOfficer) {
+        setLoginError('Invalid credentials.');
+        return;
+      }
       setRole('admin');
       setIsLoggedIn(true);
       setLoginError('');
       navigate(resolvePostLoginPath('admin'), { replace: true });
-    } else if (username === 'demo' && password === 'demo123') {
+      return;
+    }
+
+    if (authMode.startsWith('borrower')) {
+      const validBorrower =
+        (normalizedUsername === 'borrower' && normalizedPassword === 'Password123!') ||
+        (normalizedUsername === 'demo' && normalizedPassword === 'demo123');
+      if (!validBorrower) {
+        setLoginError('Invalid credentials.');
+        return;
+      }
       setRole('user');
       setIsLoggedIn(true);
       setLoginError('');
       navigate(resolvePostLoginPath('user'), { replace: true });
-    } else {
-      setLoginError('Invalid credentials. Try demo/demo123 or admin/admin123');
+      return;
     }
+
+    setLoginError('Choose Loan Applicant or Loan Officer to continue.');
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
     setRole('user');
+    setAuthMode('select');
     setUsername('');
     setPassword('');
     setLoginError('');
@@ -950,6 +1122,29 @@ function App() {
     const [selectedId, setSelectedId] = useState<string>('');
     const selected = React.useMemo(() => loans.find((l) => l.id === selectedId) || null, [loans, selectedId]);
     const [memoBusy, setMemoBusy] = useState(false);
+    const [docUploadBusy, setDocUploadBusy] = useState<Record<string, boolean>>({});
+    const [docUploadError, setDocUploadError] = useState<Record<string, string>>({});
+    const [signatureBusy, setSignatureBusy] = useState(false);
+    const sigCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
+    const [sigDrawing, setSigDrawing] = useState(false);
+    const [sigHasInk, setSigHasInk] = useState(false);
+    type V2LoanDocument = {
+      id: string;
+      loanId: string;
+      category?: string | null;
+      documentType?: string | null;
+      status?: string | null;
+      reviewNote?: string | null;
+      originalName?: string | null;
+      fileName?: string | null;
+      uploadedAt?: string | null;
+      reviewedAt?: string | null;
+    };
+    const [v2Docs, setV2Docs] = useState<V2LoanDocument[]>([]);
+    const [v2DocsLoading, setV2DocsLoading] = useState(false);
+    const [v2DocsError, setV2DocsError] = useState('');
+    const [v2ReviewBusy, setV2ReviewBusy] = useState<Record<string, boolean>>({});
+    const [v2ReviewNoteDraft, setV2ReviewNoteDraft] = useState<Record<string, string>>({});
 
     const refreshPhases = React.useCallback(async () => {
       try {
@@ -986,6 +1181,70 @@ function App() {
       void refreshPhases();
       void refresh();
     }, [refresh, refreshPhases]);
+
+    const refreshV2Docs = React.useCallback(
+      async (loanId: string) => {
+        setV2DocsError('');
+        setV2DocsLoading(true);
+        try {
+          const res = await fetch(`http://localhost:8000/api/documents/loan/${loanId}`, { headers: officerHeaders });
+          if (!res.ok) {
+            const t = await res.text();
+            setV2DocsError(t || `Failed to load documents (${res.status})`);
+            setV2Docs([]);
+            return;
+          }
+          setV2Docs((await res.json()) as V2LoanDocument[]);
+        } catch (e: unknown) {
+          setV2DocsError(e instanceof Error ? e.message : 'Failed to load documents');
+          setV2Docs([]);
+        } finally {
+          setV2DocsLoading(false);
+        }
+      },
+      [officerHeaders],
+    );
+
+    React.useEffect(() => {
+      if (!selected?.id) {
+        setV2Docs([]);
+        return;
+      }
+      void refreshV2Docs(selected.id);
+    }, [selected?.id, refreshV2Docs]);
+
+    const reviewV2Doc = async (docId: string, status: string) => {
+      setV2ReviewBusy((prev) => ({ ...prev, [docId]: true }));
+      try {
+        const res = await fetch(`http://localhost:8000/api/documents/${docId}/review`, {
+          method: 'PATCH',
+          headers: { ...officerHeaders, 'content-type': 'application/json' },
+          body: JSON.stringify({ status, reviewNote: v2ReviewNoteDraft[docId] || '' }),
+        });
+        if (!res.ok) return;
+        const updated = (await res.json()) as V2LoanDocument;
+        setV2Docs((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+      } finally {
+        setV2ReviewBusy((prev) => ({ ...prev, [docId]: false }));
+      }
+    };
+
+    const downloadV2Doc = async (docId: string, filename: string) => {
+      try {
+        const res = await fetch(`http://localhost:8000/api/documents/${docId}/download`, { headers: officerHeaders });
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename || 'document';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch {
+      }
+    };
 
     const phasesById = React.useMemo(() => {
       const out: Record<string, (typeof phases)[number]> = {};
@@ -1034,7 +1293,12 @@ function App() {
         .map((item) => {
           const name = typeof item?.name === 'string' ? item.name : '';
           const status = typeof item?.status === 'string' ? item.status : 'missing';
-          return { name, status: status as DocumentStatus };
+          const uploadRaw = item?.upload;
+          const upload = uploadRaw && typeof uploadRaw === 'object' ? (uploadRaw as Record<string, unknown>) : null;
+          const uploadedFileName = typeof upload?.fileName === 'string' ? upload.fileName : '';
+          const uploadedAt = typeof upload?.uploadedAt === 'string' ? upload.uploadedAt : '';
+          const extractedPreview = typeof upload?.extractedPreview === 'string' ? upload.extractedPreview : '';
+          return { name, status: status as DocumentStatus, uploadedFileName, uploadedAt, extractedPreview };
         })
         .filter((x) => Boolean(x.name));
     }, [selected?.documentChecklist]);
@@ -1072,6 +1336,50 @@ function App() {
       if (!res.ok) return;
       const updated = (await res.json()) as (typeof loans)[number];
       setLoans((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+    };
+
+    const uploadDoc = async (docName: string, file: File) => {
+      if (!selected) return;
+      setDocUploadBusy((prev) => ({ ...prev, [docName]: true }));
+      setDocUploadError((prev) => ({ ...prev, [docName]: '' }));
+      try {
+        const fd = new FormData();
+        fd.append('name', docName);
+        fd.append('file', file);
+        const res = await fetch(`http://localhost:8000/api/loans/${selected.id}/documents/upload`, {
+          method: 'POST',
+          headers: officerHeaders,
+          body: fd,
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          setDocUploadError((prev) => ({ ...prev, [docName]: t || `Upload failed (${res.status})` }));
+          return;
+        }
+        const updated = (await res.json()) as (typeof loans)[number];
+        setLoans((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+      } finally {
+        setDocUploadBusy((prev) => ({ ...prev, [docName]: false }));
+      }
+    };
+
+    const uploadSignature = async (blob: Blob) => {
+      if (!selected) return;
+      setSignatureBusy(true);
+      try {
+        const fd = new FormData();
+        fd.append('file', new File([blob], 'signature.png', { type: 'image/png' }));
+        const res = await fetch(`http://localhost:8000/api/loans/${selected.id}/signature`, {
+          method: 'POST',
+          headers: officerHeaders,
+          body: fd,
+        });
+        if (!res.ok) return;
+        const updated = (await res.json()) as (typeof loans)[number];
+        setLoans((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+      } finally {
+        setSignatureBusy(false);
+      }
     };
 
     const generateMemo = async () => {
@@ -1228,10 +1536,10 @@ function App() {
                       <div style={{ color: '#6b7280' }}>No checklist available.</div>
                     ) : (
                       <div style={{ display: 'grid', gap: '10px' }}>
-                        {checklistItems.map((i) => (
+                        {checklistItems.map((i, idx) => (
                           <div
                             key={i.name}
-                            style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: '10px', alignItems: 'center' }}
+                            style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: '10px', alignItems: 'start' }}
                           >
                             <div style={{ fontWeight: 700, color: '#111827' }}>{i.name}</div>
                             <div style={{ display: 'grid', gap: '4px' }}>
@@ -1246,14 +1554,244 @@ function App() {
                                 <option value="verified">verified</option>
                                 <option value="rejected">rejected</option>
                               </select>
+                              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                <label htmlFor={`file-doc-${selected.id}-${idx}`}>
+                                  <button
+                                    type="button"
+                                    disabled={Boolean(docUploadBusy[i.name])}
+                                    style={{
+                                      border: '1px solid #e5e7eb',
+                                      borderRadius: '10px',
+                                      padding: '6px 10px',
+                                      backgroundColor: docUploadBusy[i.name] ? '#f3f4f6' : '#ffffff',
+                                      cursor: docUploadBusy[i.name] ? 'not-allowed' : 'pointer',
+                                      fontWeight: 800,
+                                    }}
+                                    data-testid={`button-doc-upload-${idx}`}
+                                  >
+                                    Upload
+                                  </button>
+                                </label>
+                                <input
+                                  id={`file-doc-${selected.id}-${idx}`}
+                                  type="file"
+                                  style={{ display: 'none' }}
+                                  onChange={(e) => {
+                                    const f = e.target.files?.[0];
+                                    e.target.value = '';
+                                    if (f) void uploadDoc(i.name, f);
+                                  }}
+                                  data-testid={`input-doc-upload-${idx}`}
+                                />
+                                {docUploadBusy[i.name] ? <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>Extracting…</div> : null}
+                              </div>
                               <div style={{ fontSize: '0.85rem', color: '#6b7280' }} data-testid={`doc-status-${i.name}`}>
                                 {i.status}
                               </div>
+                              {docUploadError[i.name] ? <div style={{ fontSize: '0.85rem', color: '#b91c1c' }}>{docUploadError[i.name]}</div> : null}
+                              {i.uploadedFileName ? (
+                                <div style={{ fontSize: '0.85rem', color: '#111827' }} data-testid={`doc-uploaded-file-${idx}`}>
+                                  File: {i.uploadedFileName}
+                                </div>
+                              ) : null}
+                              {i.uploadedAt ? (
+                                <div style={{ fontSize: '0.85rem', color: '#6b7280' }} data-testid={`doc-uploaded-at-${idx}`}>
+                                  Uploaded: {i.uploadedAt}
+                                </div>
+                              ) : null}
+                              {i.extractedPreview ? (
+                                <div
+                                  style={{
+                                    fontSize: '0.85rem',
+                                    color: '#111827',
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #e5e7eb',
+                                    borderRadius: '10px',
+                                    padding: '8px 10px',
+                                    whiteSpace: 'pre-wrap',
+                                    maxHeight: '160px',
+                                    overflowY: 'auto',
+                                  }}
+                                  data-testid={`doc-extracted-preview-${idx}`}
+                                >
+                                  {i.extractedPreview}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
                         ))}
                       </div>
                     )}
+                  </div>
+
+                  <div style={{ border: '1px solid #f3f4f6', borderRadius: '10px', padding: '12px', backgroundColor: '#fafafa' }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 900, color: '#111827', marginBottom: '10px' }} data-testid="text-v2-documents-title">
+                      Documents (UI2)
+                    </div>
+                    {v2DocsLoading ? <div style={{ color: '#6b7280' }}>Loading…</div> : null}
+                    {v2DocsError ? <div style={{ color: '#b91c1c', fontWeight: 700 }}>{v2DocsError}</div> : null}
+                    {!v2DocsLoading && !v2DocsError && v2Docs.length === 0 ? <div style={{ color: '#6b7280' }}>No uploaded documents.</div> : null}
+                    {v2Docs.length > 0 ? (
+                      <div style={{ display: 'grid', gap: '10px' }}>
+                        {v2Docs.map((d) => {
+                          const fileLabel = d.originalName || d.fileName || 'document';
+                          const status = d.status || 'uploaded';
+                          return (
+                            <div key={d.id} style={{ border: '1px solid #e5e7eb', borderRadius: '10px', padding: '10px', background: '#ffffff' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '10px' }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontWeight: 900, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {fileLabel}
+                                  </div>
+                                  <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '4px' }}>
+                                    {d.category || '—'} · {d.documentType || '—'} · status: {status}
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => void downloadV2Doc(d.id, fileLabel)}
+                                    style={{ border: 'none', background: 'transparent', padding: 0, color: '#2563eb', fontWeight: 800, cursor: 'pointer' }}
+                                    data-testid={`button-v2-doc-download-${d.id}`}
+                                  >
+                                    Download
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 120px', gap: '10px', marginTop: '10px', alignItems: 'center' }}>
+                                <select
+                                  value={status}
+                                  onChange={(e) => setV2Docs((prev) => prev.map((x) => (x.id === d.id ? { ...x, status: e.target.value } : x)))}
+                                  disabled={Boolean(v2ReviewBusy[d.id])}
+                                  style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb', backgroundColor: '#ffffff' }}
+                                  data-testid={`select-v2-doc-status-${d.id}`}
+                                >
+                                  <option value="uploaded">uploaded</option>
+                                  <option value="approved">approved</option>
+                                  <option value="rejected">rejected</option>
+                                  <option value="needs_reupload">needs_reupload</option>
+                                </select>
+                                <input
+                                  value={v2ReviewNoteDraft[d.id] ?? d.reviewNote ?? ''}
+                                  onChange={(e) => setV2ReviewNoteDraft((prev) => ({ ...prev, [d.id]: e.target.value }))}
+                                  placeholder="Review note (optional)"
+                                  style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                                  data-testid={`input-v2-doc-review-note-${d.id}`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => void reviewV2Doc(d.id, (v2Docs.find((x) => x.id === d.id)?.status as string) || status)}
+                                  disabled={Boolean(v2ReviewBusy[d.id])}
+                                  style={{
+                                    border: '1px solid #e5e7eb',
+                                    borderRadius: '10px',
+                                    padding: '8px 10px',
+                                    backgroundColor: v2ReviewBusy[d.id] ? '#f3f4f6' : '#ffffff',
+                                    cursor: v2ReviewBusy[d.id] ? 'not-allowed' : 'pointer',
+                                    fontWeight: 900,
+                                  }}
+                                  data-testid={`button-v2-doc-review-${d.id}`}
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div style={{ border: '1px solid #f3f4f6', borderRadius: '10px', padding: '12px', backgroundColor: '#fafafa' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 900, color: '#111827' }} data-testid="text-signature-title">
+                        Signature
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const c = sigCanvasRef.current;
+                            if (!c) return;
+                            const ctx = c.getContext('2d');
+                            if (!ctx) return;
+                            ctx.clearRect(0, 0, c.width, c.height);
+                            setSigHasInk(false);
+                          }}
+                          style={{
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '10px',
+                            padding: '8px 10px',
+                            backgroundColor: '#ffffff',
+                            cursor: 'pointer',
+                            fontWeight: 800,
+                          }}
+                          data-testid="button-signature-clear"
+                        >
+                          Clear
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!sigHasInk || signatureBusy}
+                          onClick={() => {
+                            const c = sigCanvasRef.current;
+                            if (!c) return;
+                            c.toBlob((blob) => {
+                              if (!blob) return;
+                              void uploadSignature(blob);
+                            }, 'image/png');
+                          }}
+                          style={{
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '10px',
+                            padding: '8px 10px',
+                            backgroundColor: !sigHasInk || signatureBusy ? '#f3f4f6' : '#ffffff',
+                            cursor: !sigHasInk || signatureBusy ? 'not-allowed' : 'pointer',
+                            fontWeight: 800,
+                          }}
+                          data-testid="button-signature-save"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: '10px' }}>
+                      <canvas
+                        ref={sigCanvasRef}
+                        width={520}
+                        height={160}
+                        style={{ width: '100%', height: '160px', backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '10px' }}
+                        onMouseDown={(e) => {
+                          const c = sigCanvasRef.current;
+                          if (!c) return;
+                          const rect = c.getBoundingClientRect();
+                          const ctx = c.getContext('2d');
+                          if (!ctx) return;
+                          ctx.lineWidth = 2;
+                          ctx.lineCap = 'round';
+                          ctx.strokeStyle = '#111827';
+                          ctx.beginPath();
+                          ctx.moveTo(((e.clientX - rect.left) / rect.width) * c.width, ((e.clientY - rect.top) / rect.height) * c.height);
+                          setSigDrawing(true);
+                          setSigHasInk(true);
+                        }}
+                        onMouseMove={(e) => {
+                          if (!sigDrawing) return;
+                          const c = sigCanvasRef.current;
+                          if (!c) return;
+                          const rect = c.getBoundingClientRect();
+                          const ctx = c.getContext('2d');
+                          if (!ctx) return;
+                          ctx.lineTo(((e.clientX - rect.left) / rect.width) * c.width, ((e.clientY - rect.top) / rect.height) * c.height);
+                          ctx.stroke();
+                        }}
+                        onMouseUp={() => setSigDrawing(false)}
+                        onMouseLeave={() => setSigDrawing(false)}
+                        data-testid="canvas-signature"
+                      />
+                    </div>
+                    {signatureBusy ? <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '8px' }}>Uploading…</div> : null}
                   </div>
 
                   <div style={{ border: '1px solid #f3f4f6', borderRadius: '10px', padding: '12px', backgroundColor: '#fafafa' }}>
@@ -2195,7 +2733,20 @@ function App() {
 
   const RequireAuth: React.FC<{ children: React.ReactElement }> = ({ children }) => {
     if (!isLoggedIn) {
-      return <Navigate to="/login" replace state={{ from: location }} />;
+      const path = location.pathname || '/';
+      const officerOnly =
+        path === '/dashboard' ||
+        path === '/pipeline' ||
+        path === '/loan-products' ||
+        path === '/officer-chat' ||
+        path === '/synthetic-data' ||
+        path === '/training' ||
+        path === '/metrics' ||
+        path === '/simulator' ||
+        path === '/configuration' ||
+        path.startsWith('/phases/');
+      const mode = officerOnly ? 'officer-login' : 'borrower-login';
+      return <Navigate to={`/login?mode=${encodeURIComponent(mode)}`} replace state={{ from: location }} />;
     }
     return children;
   };
@@ -2596,12 +3147,19 @@ function App() {
         path="/login"
         element={
           <LoginPage
+            mode={authMode}
             username={username}
             password={password}
             loginError={loginError}
             onSubmit={handleLogin}
             onUsernameChange={setUsername}
             onPasswordChange={setPassword}
+            onModeChange={(nextMode) => {
+              setAuthMode(nextMode);
+              const qs = nextMode === 'select' ? '' : `?mode=${encodeURIComponent(nextMode)}`;
+              navigate(`/login${qs}`, { replace: true });
+            }}
+            onClearError={() => setLoginError('')}
           />
         }
       />

@@ -5,7 +5,7 @@ import json
 from typing import Any, Optional, Literal
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,7 +15,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from src.api.routers.v2_auth import is_officer_request, require_officer_role, require_viewer_role
 from src.config.llm import get_llm
 from src.shared.audit import log_audit
-from src.shared.db import Conversation, Loan, LoanPhase, Message, LoanProductCatalog, get_db
+from src.shared.db import Conversation, Loan, LoanDocument, LoanPhase, Message, LoanProductCatalog, get_db
 from src.shared.metrics import (
     request_counter,
     request_errors_total,
@@ -145,61 +145,6 @@ def _merge_intent(prev: Optional[dict], new: IntentSummary) -> dict:
         if isinstance(existing, str) and existing.strip().lower() in {"unknown", "not_known", "not known", "n/a", "na"}:
             base[k] = v
     return base
-
-
-def _recommend_products(db: Session, intent: dict) -> list[dict[str, Any]]:
-    from src.api.routers.v2_catalog_products_router import _ensure_seeded as _ensure_products_seeded
-
-    _ensure_products_seeded(db)
-    purpose = (intent.get("purpose") or "").lower()
-    category = None
-    if purpose in {"home", "mortgage", "property"}:
-        category = "home_loan"
-    elif purpose in {"car", "auto", "vehicle"}:
-        category = "auto_loan"
-    elif purpose in {"personal", "education", "business", "debt_consolidation"}:
-        category = "personal_loan"
-
-    stmt = select(LoanProductCatalog).where(LoanProductCatalog.status == "active")
-    if category is not None:
-        stmt = stmt.where(LoanProductCatalog.category == category)
-
-    rows = db.execute(stmt.order_by(LoanProductCatalog.code.asc(), LoanProductCatalog.id.asc())).scalars().all()
-    items: list[dict[str, Any]] = []
-    for p in rows[:2]:
-        tenure = None
-        if p.min_tenure_months is not None and p.max_tenure_months is not None:
-            tenure = f"{p.min_tenure_months}-{p.max_tenure_months} months"
-        elif p.max_tenure_months is not None:
-            tenure = f"Up to {p.max_tenure_months} months"
-        elif p.min_tenure_months is not None:
-            tenure = f"From {p.min_tenure_months} months"
-        else:
-            tenure = "Flexible"
-
-        features = list(p.features or [])
-        eligibility = list(p.eligibility_criteria or [])
-        approval_speed = "Standard"
-        if p.category == "personal_loan":
-            approval_speed = "Fast"
-        if p.category == "auto_loan":
-            approval_speed = "Quick"
-
-        items.append(
-            {
-                "name": p.name,
-                "type": p.category,
-                "estimatedRate": p.base_interest_rate or "Varies",
-                "estimatedEmi": "TBD",
-                "tenure": tenure,
-                "totalInterest": "TBD",
-                "approvalSpeed": approval_speed,
-                "pros": features[:3],
-                "cons": eligibility[:3],
-                "recommendation": p.description or "Recommended based on your stated intent.",
-            }
-        )
-    return items
 
 
 def _extract_amount(text: str) -> Optional[str]:
@@ -382,112 +327,6 @@ def _next_angle(intent: dict) -> str:
     return "Validate documents, collateral, and eligibility constraints."
 
 
-def _build_borrower_assistant_reply(db: Session, conversation_id: str, intent: dict) -> tuple[str, str]:
-    purpose = (intent.get("purpose") or "").strip()
-    purpose_label = {
-        "home": "a home loan",
-        "car": "a car loan",
-        "personal": "a personal loan",
-        "business": "a business loan",
-        "education": "an education loan",
-        "debt_consolidation": "debt consolidation",
-    }.get(purpose, "a loan")
-
-    questions: list[str] = []
-
-    if not purpose:
-        questions.append("What’s the loan for (home, car, personal, business, or debt consolidation)?")
-
-    if purpose == "debt_consolidation" and not intent.get("existingDebts"):
-        questions.append("Roughly how much total outstanding debt do you want to consolidate, and what’s your current total monthly payment?")
-
-    if not intent.get("loanAmount") and purpose != "debt_consolidation":
-        questions.append("What loan amount are you considering (even an approximate range)?")
-
-    if not intent.get("monthlyIncome"):
-        questions.append("What’s your approximate monthly income?")
-
-    if not intent.get("employmentType"):
-        questions.append("Are you salaried or self-employed?")
-
-    credit = intent.get("creditHistory")
-    credit_norm = str(credit).strip().lower() if credit is not None else ""
-    if not credit_norm:
-        questions.append("Do you know your credit score (or a rough range)?")
-    elif credit_norm in {"unknown", "not_known", "not known", "n/a", "na"}:
-        if not intent.get("recentDelinquencies12m"):
-            questions.append("Have you had any late payments, collections, or delinquencies in the last 12 months?")
-
-    if not intent.get("preferredTenure"):
-        questions.append("What tenure would you be comfortable with (e.g., 36 months, 5 years)?")
-
-    if not questions:
-        return (
-            "Thanks — I have enough to refine recommendations. Do you want the lowest EMI, lowest total interest, or fastest approval?",
-            "heuristic_only",
-        )
-
-    assistant_rows = (
-        db.execute(
-            select(Message)
-            .where(Message.conversation_id == conversation_id, Message.role == "assistant")
-            .order_by(Message.created_at.desc(), Message.id.desc())
-            .limit(8)
-        )
-        .scalars()
-        .all()
-    )
-    recently_asked: set[str] = set()
-    for m in assistant_rows:
-        recently_asked.update(_extract_question_lines(m.content or ""))
-
-    unasked = [q for q in questions if q not in recently_asked]
-    top = unasked[:3]
-    if not top:
-        return (
-            "Thanks — I have enough to refine recommendations. Do you want the lowest EMI, lowest total interest, or fastest approval?",
-            "heuristic_only",
-        )
-    bullets = "\n".join([f"- {q}" for q in top])
-    return (f"Got it — for {purpose_label}, I just need a few quick details:\n\n{bullets}", "heuristic_only")
-
-
-def analyze_intent_message(content: str, previous_intent: Optional[dict], last_assistant_text: Optional[str] = None) -> dict[str, Any]:
-    amount = _extract_amount(content)
-    income = _extract_income(content)
-    credit = _extract_credit_score(content)
-    if credit is None and _mentions_unknown_credit_score(content):
-        credit = "unknown"
-    debts = _extract_existing_debts(content)
-    tenure = _extract_tenure(content)
-    delinq = _extract_recent_delinquencies_12m(content)
-    if delinq is None and last_assistant_text:
-        if "late payments" in last_assistant_text.lower() and ("delinquenc" in last_assistant_text.lower() or "collections" in last_assistant_text.lower()):
-            if _is_yes(content):
-                delinq = "yes"
-            elif _is_no(content):
-                delinq = "no"
-    intent = IntentSummary(
-        purpose=_infer_purpose(content),
-        urgency=_infer_urgency(content),
-        loanAmount=amount,
-        monthlyIncome=income,
-        employmentType=_infer_employment(content),
-        creditHistory=credit,
-        existingDebts=debts,
-        preferredTenure=tenure,
-        recentDelinquencies12m=delinq,
-    )
-    merged = _merge_intent(previous_intent, intent)
-    seriousness, fit = _compute_scores(merged)
-    return {
-        "intentSummary": merged,
-        "seriousnessScore": seriousness,
-        "fitScore": fit,
-        "nextConversationAngle": _next_angle(merged),
-    }
-
-
 def _parse_amount_to_number(v: Any) -> Optional[float]:
     if v is None:
         return None
@@ -522,7 +361,7 @@ def _compute_approval_probability(intent: dict) -> dict[str, Any] | None:
     if usable_signals < 2:
         return None
 
-    prob = 0.55
+    prob = 0.0
     blockers: list[dict[str, Any]] = []
     actions: list[dict[str, Any]] = []
 
@@ -604,7 +443,11 @@ def _compute_approval_probability(intent: dict) -> dict[str, Any] | None:
         return payload
 
 
-def _build_borrower_system_prompt(phases: list[LoanPhase], current_phase_id: Optional[str]) -> str:
+def _build_borrower_system_prompt(
+    phases: list[LoanPhase],
+    current_phase_id: Optional[str],
+    catalog_products: list[dict[str, Any]],
+) -> str:
     active_phases = [p for p in phases if bool(getattr(p, "is_active", False))]
     active_phases.sort(key=lambda p: (int(getattr(p, "sort_order", 0) or 0), str(getattr(p, "id", ""))))
     phase_lines: list[str] = []
@@ -613,6 +456,31 @@ def _build_borrower_system_prompt(phases: list[LoanPhase], current_phase_id: Opt
         phase_lines.append(f'  {i + 1}. "{p.name}" (ID: {p.id}){" ← CURRENT" if is_current else ""}')
     phase_list = "\n".join(phase_lines) if phase_lines else "  (No phases configured)"
 
+    current_phase = next((p for p in active_phases if str(getattr(p, "id", "")) == str(current_phase_id or "")), None)
+    current_phase_name = (getattr(current_phase, "name", "") or "").strip()
+    current_phase_docs: list[str] = []
+    if current_phase_name:
+        try:
+            from src.api.routers.v2_phases_router import _PHASE_KNOWLEDGE as _PHASE_KNOWLEDGE_V2
+
+            key = current_phase_name.lower()
+            knowledge = _PHASE_KNOWLEDGE_V2.get(key) if isinstance(_PHASE_KNOWLEDGE_V2, dict) else None
+            docs = knowledge.get("documents") if isinstance(knowledge, dict) else None
+            if isinstance(docs, list):
+                current_phase_docs = [str(d).strip() for d in docs if isinstance(d, str) and d.strip()]
+        except Exception:
+            current_phase_docs = []
+
+    phase_docs_block = ""
+    if current_phase_name:
+        phase_docs_block = f'CURRENT PHASE: "{current_phase_name}"\n'
+        if current_phase_docs:
+            phase_docs_block += "TYPICAL DOCUMENTS FOR THIS PHASE:\n"
+            phase_docs_block += "\n".join([f"- {d}" for d in current_phase_docs])
+            phase_docs_block += "\n"
+        phase_docs_block += "\n"
+
+    catalog_json = json.dumps(catalog_products[:24], ensure_ascii=False)
     return (
         "You are LoanAssist — a premium, intelligent loan advisor for a modern financial institution. "
         "You combine the warmth of a personal banker with the precision of a financial analyst.\n\n"
@@ -642,7 +510,11 @@ def _build_borrower_system_prompt(phases: list[LoanPhase], current_phase_id: Opt
         "RECOMMENDATIONS:\n"
         "- Provide loan options as soon as you have enough context (don't wait for perfect information)\n"
         "- Always frame options as trade-offs so the borrower can make an informed choice\n"
-        "- If you can make recommendations, include them in <loan_recommendations> tags as JSON array.\n\n"
+        "- If you can make recommendations, include them in <loan_recommendations> tags as a JSON array.\n"
+        "- When you are confident about a single best choice, include a <final_recommendation> tag with JSON.\n\n"
+        "AVAILABLE LOAN PRODUCTS CATALOG:\n"
+        "Use these as your primary options when recommending. If none fit, explain why and ask a single clarifying question.\n"
+        f"{catalog_json}\n\n"
         "INTENT ANALYSIS (include after EVERY user message):\n"
         "Include an <intent_analysis> block containing ONLY JSON, with null for unknown fields, and update progressively:\n"
         "<intent_analysis>\n"
@@ -664,34 +536,28 @@ def _build_borrower_system_prompt(phases: list[LoanPhase], current_phase_id: Opt
         "}\n"
         "</intent_analysis>\n\n"
         "RULES:\n"
-        "- Never ask for government IDs, bank account numbers, or other sensitive identifiers\n"
+        "- Never ask the borrower to TYPE government ID numbers, bank account numbers, or other sensitive identifiers\n"
+        "- If a sensitive document is needed, ask them to UPLOAD it (do not ask them to paste identifiers into chat)\n"
+        "- Request documents only when appropriate for the CURRENT phase; do not jump ahead (e.g., do not ask for title deeds during Application Submission)\n"
         "- Always be transparent that figures are estimates until formal processing\n"
         "- Use the borrower's currency if evident; otherwise default to USD\n"
         "- Keep responses concise — ideally under 150 words for conversational messages\n"
         "- Never ask the same question twice if it has already been answered\n\n"
+        "DOCUMENT HANDLING:\n"
+        "- When requesting documents, use the product's requiredDocuments names exactly as listed in the catalog.\n"
+        "- If you don't know the product yet, use the CURRENT phase typical documents list and request only the minimum set.\n"
+        "- Mention that documents can be uploaded securely using the upload panel in the chat.\n"
+        f"{phase_docs_block}"
         "LOAN JOURNEY PHASES:\n"
         "The borrower's application progresses through these phases:\n"
         f"{phase_list}\n\n"
         "PHASE PROGRESSION:\n"
-        "Determine if the borrower should advance to the next phase. Include a <phase_update> tag when they have naturally progressed:\n"
+        "PHASE PROGRESSION:\n"
         "- Only advance one phase at a time\n"
         "- Only include <phase_update> when there's a genuine progression signal\n"
         '<phase_update>{"phaseId": "the_phase_id_to_advance_to"}</phase_update>\n'
     )
 
-
-def _extract_question_lines(text: str) -> list[str]:
-    if not text:
-        return []
-    lines = []
-    for raw in text.splitlines():
-        s = raw.strip()
-        if not s.startswith("-"):
-            continue
-        q = s.lstrip("-").strip()
-        if q:
-            lines.append(q)
-    return lines
 
 
 def _extract_first_json_object(text: str) -> Optional[str]:
@@ -712,6 +578,16 @@ def _extract_tag_block(text: str, tag: str) -> tuple[Optional[str], str]:
     inner = (m.group(1) or "").strip()
     cleaned = pattern.sub("", text).strip()
     return (inner, cleaned)
+
+def _coerce_optional_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        v = value.strip()
+        return v if v else None
+    if isinstance(value, (int, float)):
+        return str(value)
+    return str(value).strip() or None
 
 
 def _normalize_purpose(value: Optional[str]) -> Optional[str]:
@@ -775,14 +651,100 @@ def _apply_llm_phase_update(db: Session, conversation: Conversation, desired_pha
 
 
 def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str, Any]:
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        raise RuntimeError("LLM disabled under pytest")
     phases = (
         db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc(), LoanPhase.id.asc()))
         .scalars()
         .all()
     )
-    system_prompt = _build_borrower_system_prompt(phases, conversation.current_phase_id)
+    from src.api.routers.v2_catalog_products_router import _ensure_seeded as _ensure_products_seeded
+
+    _ensure_products_seeded(db)
+    products = (
+        db.execute(
+            select(LoanProductCatalog)
+            .where(LoanProductCatalog.status == "active")
+            .order_by(LoanProductCatalog.category.asc(), LoanProductCatalog.code.asc(), LoanProductCatalog.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    catalog_products: list[dict[str, Any]] = []
+    for p in products:
+        catalog_products.append(
+            {
+                "code": p.code,
+                "name": p.name,
+                "category": p.category,
+                "description": p.description,
+                "minAmount": p.min_amount,
+                "maxAmount": p.max_amount,
+                "minTenureMonths": p.min_tenure_months,
+                "maxTenureMonths": p.max_tenure_months,
+                "baseInterestRate": p.base_interest_rate,
+                "maxInterestRate": p.max_interest_rate,
+                "processingFeePercent": p.processing_fee_percent,
+                "prepaymentPenalty": p.prepayment_penalty,
+                "minCreditScore": p.min_credit_score,
+                "maxLtv": p.max_ltv,
+                "minIncome": p.min_income,
+                "collateralRequired": p.collateral_required,
+                "insuranceRequired": p.insurance_required,
+                "requiredDocuments": p.required_documents,
+            }
+        )
+
+    system_prompt = _build_borrower_system_prompt(phases, conversation.current_phase_id, catalog_products)
+    active_loan = (
+        db.execute(
+            select(Loan)
+            .where(Loan.conversation_id == conversation.id)
+            .order_by(Loan.created_at.desc(), Loan.id.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+    if active_loan:
+        docs = (
+            db.execute(
+                select(LoanDocument)
+                .where(LoanDocument.loan_id == active_loan.id)
+                .order_by(LoanDocument.uploaded_at.desc(), LoanDocument.id.desc())
+            )
+            .scalars()
+            .all()
+        )
+        if docs:
+            lines: list[str] = []
+            for d in docs[:20]:
+                dt = (d.document_type or d.category or "document").strip() or "document"
+                status = (d.status or "").strip().lower() or "uploaded"
+                meta = d.meta if isinstance(d.meta, dict) else {}
+                extraction = meta.get("extraction") if isinstance(meta, dict) else None
+                extracted = extraction if isinstance(extraction, dict) else {}
+                ex_status = (extracted.get("status") or "").strip().lower() if isinstance(extracted.get("status"), str) else ""
+                fields = extracted.get("fields") if isinstance(extracted.get("fields"), dict) else {}
+                has_salary = bool(fields.get("salaryLines")) if isinstance(fields, dict) else False
+                has_amounts = bool(fields.get("amounts")) if isinstance(fields, dict) else False
+                signals = []
+                if has_salary:
+                    signals.append("salary_detected")
+                if has_amounts:
+                    signals.append("amounts_detected")
+                if ex_status == "ok":
+                    signals.append("text_extracted")
+                line = f"- {dt}: {status}"
+                if signals:
+                    line += f" ({', '.join(signals)})"
+                lines.append(line)
+
+            system_prompt += (
+                "\n\nUPLOADED DOCUMENTS (non-sensitive summary):\n"
+                + "\n".join(lines)
+                + "\n\nGUIDANCE:\n"
+                "- If a document above is already uploaded, do not ask for it again.\n"
+                "- Do not quote document contents verbatim. Only use high-level signals.\n"
+            )
     rows = (
         db.execute(
             select(Message)
@@ -831,7 +793,8 @@ def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str
         raise RuntimeError(llm_error or "AI engine returned an empty response.")
 
     intent_block, remaining = _extract_tag_block(raw, "intent_analysis")
-    _, remaining = _extract_tag_block(remaining, "loan_recommendations")
+    loan_recs_block, remaining = _extract_tag_block(remaining, "loan_recommendations")
+    final_block, remaining = _extract_tag_block(remaining, "final_recommendation")
     phase_block, remaining2 = _extract_tag_block(remaining, "phase_update")
     assistant_text = remaining2.strip()
     if not assistant_text:
@@ -846,6 +809,24 @@ def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str
         if isinstance(parsed, dict):
             intent_obj = parsed
 
+    loan_recommendations: Optional[list[dict[str, Any]]] = None
+    if loan_recs_block:
+        try:
+            parsed_recs = json.loads(loan_recs_block)
+            if isinstance(parsed_recs, list):
+                loan_recommendations = [r for r in parsed_recs if isinstance(r, dict)]
+        except Exception:
+            loan_recommendations = None
+
+    final_recommendation: Optional[dict[str, Any]] = None
+    if final_block:
+        try:
+            parsed_final = json.loads(_extract_first_json_object(final_block) or final_block)
+            if isinstance(parsed_final, dict):
+                final_recommendation = parsed_final
+        except Exception:
+            final_recommendation = None
+
     grounded_loan_amount = _extract_amount(combined_user_text)
     grounded_income = _extract_income(combined_user_text)
     grounded_credit = _extract_credit_score(combined_user_text)
@@ -858,16 +839,16 @@ def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str
 
     intent_summary = IntentSummary(
         purpose=_normalize_purpose(intent_obj.get("purpose")),
-        urgency=intent_obj.get("urgency"),
-        affordability=intent_obj.get("affordability"),
-        monthlyIncome=grounded_income or intent_obj.get("monthlyIncome"),
-        existingDebts=grounded_debts or intent_obj.get("existingDebts"),
-        loanAmount=grounded_loan_amount or intent_obj.get("loanAmount"),
-        preferredTenure=grounded_tenure or intent_obj.get("preferredTenure"),
-        collateralAvailable=intent_obj.get("collateralAvailable"),
+        urgency=_coerce_optional_str(intent_obj.get("urgency")),
+        affordability=_coerce_optional_str(intent_obj.get("affordability")),
+        monthlyIncome=_coerce_optional_str(grounded_income or intent_obj.get("monthlyIncome")),
+        existingDebts=_coerce_optional_str(grounded_debts or intent_obj.get("existingDebts")),
+        loanAmount=_coerce_optional_str(grounded_loan_amount or intent_obj.get("loanAmount")),
+        preferredTenure=_coerce_optional_str(grounded_tenure or intent_obj.get("preferredTenure")),
+        collateralAvailable=_coerce_optional_str(intent_obj.get("collateralAvailable")),
         employmentType=_normalize_employment(grounded_employment or intent_obj.get("employmentType")),
-        creditHistory=grounded_credit,
-        recentDelinquencies12m=grounded_delinq or intent_obj.get("recentDelinquencies12m"),
+        creditHistory=_coerce_optional_str(grounded_credit),
+        recentDelinquencies12m=_coerce_optional_str(grounded_delinq or intent_obj.get("recentDelinquencies12m")),
     )
     merged = _merge_intent(conversation.intent_summary if isinstance(conversation.intent_summary, dict) else None, intent_summary)
     seriousness = intent_obj.get("seriousnessScore")
@@ -893,6 +874,8 @@ def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str
         "fitScore": fit,
         "nextConversationAngle": next_angle,
         "desiredPhaseId": desired_phase_id,
+        "loanRecommendations": loan_recommendations,
+        "finalRecommendation": final_recommendation,
     }
 
 
@@ -1027,9 +1010,7 @@ def _create_loan_from_conversation(
     loan_type: str,
     loan_amount: Optional[str],
 ) -> Optional[str]:
-    name = (borrower_name or conversation.borrower_name or "").strip()
-    if not name:
-        return None
+    name = (borrower_name or conversation.borrower_name or "").strip() or "Borrower"
     amount = (loan_amount or "").strip()
     if not amount:
         return None
@@ -1502,6 +1483,7 @@ def send_message(
 
     assistant_text_override: Optional[str] = None
     assistant_engine_override: Optional[str] = None
+    final_recommendation_override: Optional[dict[str, Any]] = None
 
     if conv.chat_role == "borrower" and not actor_is_officer:
         last_assistant_text = (
@@ -1514,15 +1496,13 @@ def send_message(
             .scalars()
             .first()
         )
-        require_llm = str(os.getenv("BORROWER_CHAT_REQUIRE_LLM", "1")).strip().lower() not in {"0", "false", "no"}
         llm_turn: Optional[dict[str, Any]] = None
         llm_error_detail: Optional[str] = None
-        if not os.getenv("PYTEST_CURRENT_TEST"):
-            try:
-                llm_turn = _llm_borrower_chat_turn(db, conv)
-            except Exception as e:
-                llm_turn = None
-                llm_error_detail = str(e) or e.__class__.__name__
+        try:
+            llm_turn = _llm_borrower_chat_turn(db, conv)
+        except Exception as e:
+            llm_turn = None
+            llm_error_detail = str(e) or e.__class__.__name__
         desired_phase_id: Optional[str] = None
         if llm_turn:
             analysis = {
@@ -1534,7 +1514,8 @@ def send_message(
             assistant_text_override = llm_turn.get("assistantText")
             assistant_engine_override = "borrower_chatgpt_llm"
             desired_phase_id = llm_turn.get("desiredPhaseId")
-        elif require_llm and not os.getenv("PYTEST_CURRENT_TEST"):
+            final_recommendation_override = llm_turn.get("finalRecommendation") if isinstance(llm_turn.get("finalRecommendation"), dict) else None
+        else:
             request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
             v2_messages_sent_total.labels(chat_role=conv.chat_role, actor_role="borrower", status="llm_unavailable").inc()
             base_url = str(os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).strip()
@@ -1547,12 +1528,7 @@ def send_message(
             if llm_error_detail:
                 detail_parts.append(f"Reason: {llm_error_detail}")
             detail_parts.append("Ensure Ollama is running and the configured model is pulled.")
-            raise HTTPException(
-                status_code=503,
-                detail=" ".join(detail_parts),
-            )
-        else:
-            analysis = analyze_intent_message(req.content, conv.intent_summary, last_assistant_text=last_assistant_text)
+            raise HTTPException(status_code=503, detail=" ".join(detail_parts))
 
         conv.intent_summary = analysis["intentSummary"]
         conv.seriousness_score = analysis["seriousnessScore"]
@@ -1560,13 +1536,39 @@ def send_message(
         conv.next_conversation_angle = analysis["nextConversationAngle"]
         approval_probability = _compute_approval_probability(analysis["intentSummary"])
         conv.approval_probability = approval_probability
-        conv.recommended_products = _recommend_products(db, analysis["intentSummary"])
+        llm_recs = llm_turn.get("loanRecommendations") if isinstance(llm_turn, dict) else None
+        if isinstance(llm_recs, list):
+            conv.recommended_products = llm_recs
+        elif conv.recommended_products is None:
+            conv.recommended_products = []
         db.add(conv)
         db.commit()
         db.refresh(conv)
         if desired_phase_id:
             _apply_llm_phase_update(db, conv, desired_phase_id)
         phase_action = apply_phase_guardrails(db, conv)
+        try:
+            existing_loan_id = (
+                db.execute(select(Loan.id).where(Loan.conversation_id == conv.id).order_by(Loan.created_at.desc(), Loan.id.desc()).limit(1))
+                .scalars()
+                .first()
+            )
+            intent_now = analysis.get("intentSummary") if isinstance(analysis, dict) else None
+            intent_obj_now = intent_now if isinstance(intent_now, dict) else {}
+            if not existing_loan_id:
+                amount = _coerce_optional_str(intent_obj_now.get("loanAmount"))
+                tenure = _coerce_optional_str(intent_obj_now.get("preferredTenure"))
+                if amount and tenure:
+                    loan_type = _infer_loan_type("", intent_obj_now)
+                    _create_loan_from_conversation(db, conv, conv.borrower_name, loan_type, amount)
+            else:
+                loan = db.get(Loan, existing_loan_id)
+                if loan and loan.current_phase_id != conv.current_phase_id:
+                    loan.current_phase_id = conv.current_phase_id
+                    db.add(loan)
+                    db.commit()
+        except Exception:
+            pass
     else:
         analysis = {
             "intentSummary": conv.intent_summary,
@@ -1632,7 +1634,7 @@ def send_message(
             assistant_text = assistant_text_override.strip()
             assistant_engine = str(assistant_engine_override or "borrower_chatgpt_llm")
         else:
-            assistant_text, assistant_engine = _build_borrower_assistant_reply(db, conversation_id, analysis["intentSummary"])
+            raise HTTPException(status_code=503, detail="AI engine unavailable.")
     assistant_metadata = {
         "actorRole": "officer_assistant" if actor_is_officer else None,
         "assistantEngine": assistant_engine,
@@ -1643,6 +1645,7 @@ def send_message(
         "loanAction": loan_action,
         "conversationPatch": conversation_patch,
         "actionResults": action_results,
+        "finalRecommendation": final_recommendation_override if (conv.chat_role == "borrower" and not actor_is_officer) else None,
     }
     assistant_msg = Message(
         id=str(uuid.uuid4()),
@@ -1671,3 +1674,240 @@ def send_message(
         "loanAction": loan_action,
         "actionResults": action_results,
     }
+
+
+@router.get("/{conversation_id}/loan")
+def get_conversation_loan(conversation_id: str, db: Session = Depends(get_db)):
+    request_counter.labels(endpoint="/api/conversations/{conversation_id}/loan").inc()
+    conv = db.get(Conversation, conversation_id)
+    if not conv:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/loan").inc()
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    loan = (
+        db.execute(select(Loan).where(Loan.conversation_id == conversation_id).order_by(Loan.created_at.desc(), Loan.id.desc()).limit(1))
+        .scalars()
+        .first()
+    )
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found for conversation")
+    try:
+        from src.api.routers import v2_loans_router as loans_api
+
+        if loan.catalog_product_code:
+            product = loans_api._get_product_by_code(db, loan.catalog_product_code)
+            next_checklist = loans_api._merge_checklist(
+                loan.document_checklist,
+                loan.catalog_product_code,
+                product.required_documents if product else None,
+            )
+            if next_checklist != loan.document_checklist:
+                loan.document_checklist = next_checklist
+                db.add(loan)
+                db.commit()
+                db.refresh(loan)
+
+        return loans_api._serialize_loan(loan)
+    except Exception:
+        return {
+            "id": loan.id,
+            "borrowerName": loan.borrower_name,
+            "loanType": loan.loan_type,
+            "loanAmount": loan.loan_amount,
+            "catalogProductCode": loan.catalog_product_code,
+            "documentChecklist": loan.document_checklist,
+            "currentPhaseId": loan.current_phase_id,
+            "status": loan.status,
+            "conversationId": loan.conversation_id,
+        }
+
+
+def _normalize_doc_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").strip().lower())
+
+
+@router.post("/{conversation_id}/documents/upload")
+async def upload_conversation_document(
+    conversation_id: str,
+    name: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    request_counter.labels(endpoint="/api/conversations/{conversation_id}/documents/upload").inc()
+    conv = db.get(Conversation, conversation_id)
+    if not conv:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/documents/upload").inc()
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    loan = (
+        db.execute(select(Loan).where(Loan.conversation_id == conversation_id).order_by(Loan.created_at.desc(), Loan.id.desc()).limit(1))
+        .scalars()
+        .first()
+    )
+    if not loan:
+        intent = conv.intent_summary if isinstance(conv.intent_summary, dict) else {}
+        amount = _coerce_optional_str(intent.get("loanAmount"))
+        if not amount:
+            raise HTTPException(status_code=400, detail="Loan is not ready yet. Please confirm loan amount first.")
+        loan_type = _infer_loan_type("", intent)
+        loan_id = _create_loan_from_conversation(db, conv, conv.borrower_name, loan_type, amount)
+        if not loan_id:
+            raise HTTPException(status_code=400, detail="Unable to create a loan for this conversation yet.")
+        loan = db.get(Loan, loan_id)
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found")
+
+    raw = await file.read()
+    if not raw:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/documents/upload").inc()
+        raise HTTPException(status_code=400, detail="Empty upload")
+
+    target = (name or "").strip()
+    if not target:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/documents/upload").inc()
+        raise HTTPException(status_code=400, detail="Document name is required")
+
+    try:
+        from src.api.routers import v2_loans_router as loans_api
+
+        uploads_root = os.getenv("KS_LOS_UPLOAD_DIR", "data/uploads")
+        doc_id = str(uuid.uuid4())
+        safe = loans_api._safe_filename(file.filename or "document")
+        loan_dir = os.path.join(uploads_root, "loans", loan.id)
+        os.makedirs(loan_dir, exist_ok=True)
+        stored_name = f"{doc_id}-{safe}"
+        stored_path = os.path.join(loan_dir, stored_name)
+        with open(stored_path, "wb") as f:
+            f.write(raw)
+
+        now = loans_api._now_iso()
+        extracted = loans_api._extract_text_from_upload(raw, file.content_type, file.filename)
+        preview = extracted[:800] if extracted else ""
+        upload_meta = {
+            "id": doc_id,
+            "fileName": file.filename,
+            "storedName": stored_name,
+            "contentType": file.content_type,
+            "sizeBytes": len(raw),
+            "sha256": loans_api._sha256_bytes(raw),
+            "uploadedAt": now,
+            "extractedPreview": preview,
+        }
+
+        checklist = loan.document_checklist if isinstance(loan.document_checklist, dict) else {"productCode": loan.catalog_product_code, "items": [], "asOf": now}
+        items_in = checklist.get("items") if isinstance(checklist, dict) else None
+        items = items_in if isinstance(items_in, list) else []
+        updated_items: list[dict[str, Any]] = []
+        matched = False
+        norm_target = _normalize_doc_name(target)
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_name = str(item.get("name") or "")
+            if item_name == target or (_normalize_doc_name(item_name) == norm_target and norm_target):
+                updated_items.append({**item, "name": item_name or target, "status": "submitted", "updatedAt": now, "upload": upload_meta})
+                matched = True
+            else:
+                updated_items.append({**item})
+        if not matched:
+            updated_items.append({"name": target, "status": "submitted", "updatedAt": now, "upload": upload_meta})
+
+        loan.document_checklist = {**checklist, "items": updated_items, "asOf": now}
+        db.add(loan)
+        db.commit()
+        db.refresh(loan)
+        log_audit(
+            event="v2_conversation_document_upload",
+            endpoint="/api/conversations/{conversation_id}/documents/upload",
+            status="success",
+            meta={"conversationId": conversation_id, "loanId": loan.id, "document": target, "docId": doc_id},
+        )
+        return loans_api._serialize_loan(loan)
+    except HTTPException:
+        raise
+    except Exception as e:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/documents/upload").inc()
+        raise HTTPException(status_code=500, detail=str(e) or "Upload failed")
+
+
+@router.post("/{conversation_id}/signature")
+async def upload_conversation_signature(
+    conversation_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    request_counter.labels(endpoint="/api/conversations/{conversation_id}/signature").inc()
+    conv = db.get(Conversation, conversation_id)
+    if not conv:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/signature").inc()
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    loan = (
+        db.execute(select(Loan).where(Loan.conversation_id == conversation_id).order_by(Loan.created_at.desc(), Loan.id.desc()).limit(1))
+        .scalars()
+        .first()
+    )
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found for conversation")
+
+    raw = await file.read()
+    if not raw:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/signature").inc()
+        raise HTTPException(status_code=400, detail="Empty upload")
+
+    try:
+        from src.api.routers import v2_loans_router as loans_api
+
+        uploads_root = os.getenv("KS_LOS_UPLOAD_DIR", "data/uploads")
+        doc_id = str(uuid.uuid4())
+        safe = loans_api._safe_filename(file.filename or "signature.png")
+        loan_dir = os.path.join(uploads_root, "loans", loan.id)
+        os.makedirs(loan_dir, exist_ok=True)
+        stored_name = f"{doc_id}-{safe}"
+        stored_path = os.path.join(loan_dir, stored_name)
+        with open(stored_path, "wb") as f:
+            f.write(raw)
+
+        now = loans_api._now_iso()
+        upload_meta = {
+            "id": doc_id,
+            "fileName": file.filename,
+            "storedName": stored_name,
+            "contentType": file.content_type,
+            "sizeBytes": len(raw),
+            "sha256": loans_api._sha256_bytes(raw),
+            "uploadedAt": now,
+            "extractedPreview": "",
+        }
+
+        checklist = loan.document_checklist if isinstance(loan.document_checklist, dict) else {"productCode": loan.catalog_product_code, "items": [], "asOf": now}
+        items_in = checklist.get("items") if isinstance(checklist, dict) else None
+        items = items_in if isinstance(items_in, list) else []
+        signature_name = "Signature"
+        updated_items: list[dict[str, Any]] = []
+        seen_sig = False
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("name") or "") == signature_name:
+                updated_items.append({**item, "status": "submitted", "updatedAt": now, "upload": upload_meta})
+                seen_sig = True
+            else:
+                updated_items.append({**item})
+        if not seen_sig:
+            updated_items.append({"name": signature_name, "status": "submitted", "updatedAt": now, "upload": upload_meta})
+
+        loan.document_checklist = {**checklist, "items": updated_items, "asOf": now}
+        db.add(loan)
+        db.commit()
+        db.refresh(loan)
+        log_audit(
+            event="v2_conversation_signature_upload",
+            endpoint="/api/conversations/{conversation_id}/signature",
+            status="success",
+            meta={"conversationId": conversation_id, "loanId": loan.id, "docId": doc_id},
+        )
+        return loans_api._serialize_loan(loan)
+    except HTTPException:
+        raise
+    except Exception as e:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/signature").inc()
+        raise HTTPException(status_code=500, detail=str(e) or "Upload failed")

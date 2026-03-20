@@ -3,13 +3,13 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Training Agent Fallback', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/dashboard');
     // Check if we need to login
     try {
         await page.getByLabel('Username').waitFor({ state: 'visible', timeout: 3000 });
-        await page.getByLabel('Username').fill('admin');
-        await page.getByLabel('Password').fill('admin123');
-        await page.getByRole('button', { name: 'Login' }).click();
+        await page.getByLabel('Username').fill('officer');
+        await page.getByLabel('Password').fill('Password123!');
+        await page.getByRole('button', { name: 'Sign In' }).click();
     } catch (e) {
         // Already logged in
     }

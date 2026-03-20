@@ -89,12 +89,39 @@ class Loan(Base):
     catalog_product_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     document_checklist: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     underwriting_memo: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    stp_processing_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    stp_processing_log: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    stp_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    terms_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    terms_signature_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    terms_signature_mime: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    disbursement: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     conversation_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class LoanDocument(Base):
+    __tablename__ = "loan_documents"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    loan_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    uploaded_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    document_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="uploaded")
+    review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    file_name: Mapped[str] = mapped_column(Text, nullable=False)
+    original_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    mime_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class LoanProductCatalog(Base):
@@ -271,6 +298,20 @@ def _ensure_loans_schema(engine) -> None:
                 missing_columns.append(("document_checklist", "JSON"))
             if "underwriting_memo" not in existing:
                 missing_columns.append(("underwriting_memo", "JSON"))
+            if "stp_processing_status" not in existing:
+                missing_columns.append(("stp_processing_status", "TEXT"))
+            if "stp_processing_log" not in existing:
+                missing_columns.append(("stp_processing_log", "JSON"))
+            if "stp_payload" not in existing:
+                missing_columns.append(("stp_payload", "JSON"))
+            if "terms_accepted_at" not in existing:
+                missing_columns.append(("terms_accepted_at", "TIMESTAMP"))
+            if "terms_signature_path" not in existing:
+                missing_columns.append(("terms_signature_path", "TEXT"))
+            if "terms_signature_mime" not in existing:
+                missing_columns.append(("terms_signature_mime", "TEXT"))
+            if "disbursement" not in existing:
+                missing_columns.append(("disbursement", "JSON"))
 
             for col, col_type in missing_columns:
                 conn.execute(text(f"alter table loans add column {col} {col_type}"))

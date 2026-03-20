@@ -7,14 +7,14 @@ test.describe('End-to-End Integration: Training Workflow', () => {
   
   test.beforeEach(async ({ page }) => {
     // Navigate to the app
-    await page.goto('/');
+    await page.goto('/dashboard');
     
     // Login if necessary (assuming standard dev credentials)
     try {
         await page.getByLabel('Username').waitFor({ state: 'visible', timeout: 3000 });
-        await page.getByLabel('Username').fill('admin');
-        await page.getByLabel('Password').fill('admin123');
-        await page.getByRole('button', { name: 'Login' }).click();
+        await page.getByLabel('Username').fill('officer');
+        await page.getByLabel('Password').fill('Password123!');
+        await page.getByRole('button', { name: 'Sign In' }).click();
     } catch (e) {
         // Already logged in
     }

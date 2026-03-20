@@ -3,9 +3,9 @@ import { test, expect } from '@playwright/test';
 test('synthetic data generation works with new UI controls', async ({ page }) => {
   await page.goto('/dashboard');
   // Login
-  await page.getByLabel('Username').fill('admin');
-  await page.getByLabel('Password').fill('admin123');
-  await page.getByRole('button', { name: 'Login' }).click();
+  await page.getByLabel('Username').fill('officer');
+  await page.getByLabel('Password').fill('Password123!');
+  await page.getByRole('button', { name: 'Sign In' }).click();
 
   await page.getByRole('link', { name: 'Synthetic Data' }).click();
   await expect(page.getByText('Synthetic Data Generator')).toBeVisible();

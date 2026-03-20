@@ -3,9 +3,9 @@ import { test, expect } from '@playwright/test';
 test.describe('Admin Panel Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/dashboard');
-    await page.getByLabel('Username').fill('admin');
-    await page.getByLabel('Password').fill('admin123');
-    await page.getByRole('button', { name: 'Login' }).click();
+    await page.getByLabel('Username').fill('officer');
+    await page.getByLabel('Password').fill('Password123!');
+    await page.getByRole('button', { name: 'Sign In' }).click();
   });
 
   test('Sidebar navigation works', async ({ page }) => {
@@ -166,9 +166,9 @@ test.describe('Admin Panel Navigation', () => {
     await page.reload();
     try {
       await page.getByLabel('Username').waitFor({ state: 'visible', timeout: 3000 });
-      await page.getByLabel('Username').fill('admin');
-      await page.getByLabel('Password').fill('admin123');
-      await page.getByRole('button', { name: 'Login' }).click();
+      await page.getByLabel('Username').fill('officer');
+      await page.getByLabel('Password').fill('Password123!');
+      await page.getByRole('button', { name: 'Sign In' }).click();
     } catch {
       // already logged in
     }
@@ -177,6 +177,68 @@ test.describe('Admin Panel Navigation', () => {
     await expect(page.getByRole('heading', { name: 'Loans' })).toBeVisible();
     await page.getByTestId(`loan-row-${loanId}`).click();
     await expect(page.getByTestId('doc-status-PAN Card')).toHaveText('submitted');
+  });
+
+  test('Document upload, extraction, and signature work via real backend', async ({ page }) => {
+    await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
+      headers: { authorization: 'Bearer loan-officer-access' },
+    });
+
+    const productCode = `E2E-DOC-${Date.now()}`;
+    await page.request.post('http://localhost:8000/api/catalog-products', {
+      headers: { 'content-type': 'application/json', authorization: 'Bearer loan-officer-access' },
+      data: {
+        name: `E2E Docs ${Date.now()}`,
+        code: productCode,
+        category: 'kyc',
+        requiredDocuments: ['Passport', 'Job Letter'],
+        status: 'active',
+      },
+    });
+
+    const borrowerName = `E2E Upload ${Date.now()}`;
+    const createdLoan = await page.request.post('http://localhost:8000/api/loans', {
+      headers: { 'content-type': 'application/json', authorization: 'Bearer loan-officer-access' },
+      data: {
+        borrowerName,
+        loanType: 'home_loan',
+        loanAmount: '250000',
+        catalogProductCode: productCode,
+        createdBy: 'e2e',
+      },
+    });
+    const createdLoanPayload = (await createdLoan.json()) as { id?: string };
+    const loanId = createdLoanPayload.id;
+    expect(loanId).toBeTruthy();
+
+    await page.getByRole('link', { name: 'Pipeline' }).click();
+    await expect(page.getByRole('heading', { name: 'Loans' })).toBeVisible();
+    await expect(page.getByTestId(`loan-row-${loanId as string}`)).toBeVisible({ timeout: 30000 });
+    await page.getByTestId(`loan-row-${loanId as string}`).click();
+    await expect(page.getByTestId('text-doc-checklist-title')).toBeVisible({ timeout: 30000 });
+
+    await page.getByTestId('input-doc-upload-0').setInputFiles('/Users/albertohernandez/Downloads/passport-example.png');
+    await expect(page.getByTestId('doc-status-Passport')).toHaveText('submitted', { timeout: 60000 });
+    await expect(page.getByTestId('doc-uploaded-file-0')).toContainText('passport-example.png', { timeout: 60000 });
+
+    await page.getByTestId('input-doc-upload-1').setInputFiles('/Users/albertohernandez/Downloads/job-letter.pdf');
+    await expect(page.getByTestId('doc-status-Job Letter')).toHaveText('submitted', { timeout: 60000 });
+    await expect(page.getByTestId('doc-uploaded-file-1')).toContainText('job-letter.pdf', { timeout: 60000 });
+    await expect(page.getByTestId('doc-extracted-preview-1')).toHaveText(/.{10,}/, { timeout: 60000 });
+
+    const canvas = page.getByTestId('canvas-signature');
+    const box = await canvas.boundingBox();
+    expect(box).toBeTruthy();
+    const startX = (box as any).x + 40;
+    const startY = (box as any).y + 60;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 240, startY + 10, { steps: 12 });
+    await page.mouse.up();
+
+    await page.getByTestId('button-signature-save').click();
+    await expect(page.getByTestId('select-doc-status-Signature')).toBeVisible({ timeout: 30000 });
+    await expect(page.getByTestId('doc-status-Signature')).toHaveText('submitted', { timeout: 30000 });
   });
 
   test('Training tab shows steps', async ({ page }) => {

@@ -28,6 +28,8 @@ from src.api.routers.v2_conversations_router import router as v2_conversations_r
 from src.api.routers.v2_phases_router import router as v2_phases_router
 from src.api.routers.v2_loans_router import router as v2_loans_router
 from src.api.routers.v2_catalog_products_router import router as v2_catalog_products_router
+from src.api.routers.v2_documents_router import router as v2_documents_router
+from src.api.routers.v2_loan_acceptance_router import router as v2_loan_acceptance_router
 
 # Configure logging
 if os.getenv("LOG_JSON", "1") == "1":
@@ -114,6 +116,8 @@ app.include_router(v2_conversations_router)
 app.include_router(v2_phases_router)
 app.include_router(v2_loans_router)
 app.include_router(v2_catalog_products_router)
+app.include_router(v2_documents_router)
+app.include_router(v2_loan_acceptance_router)
 
 
 @app.exception_handler(HTTPException)

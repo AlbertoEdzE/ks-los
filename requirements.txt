@@ -17,6 +17,9 @@ langchain-ollama==0.2.0
 mlflow==2.10.2
 evidently==0.4.20
 python-multipart==0.0.9
+pypdf>=5.0.0
+pillow>=10.4.0
+pytesseract>=0.3.13
 protobuf<5.0.0
 redis==5.0.8
 # pytest>=8.0.0

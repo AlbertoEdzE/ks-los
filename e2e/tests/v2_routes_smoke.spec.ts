@@ -43,9 +43,9 @@ test.describe('V2 Route Skeleton', () => {
     });
 
     await page.goto('/dashboard');
-    await page.getByLabel('Username').fill('admin');
-    await page.getByLabel('Password').fill('admin123');
-    await page.getByRole('button', { name: 'Login' }).click();
+    await page.getByLabel('Username').fill('officer');
+    await page.getByLabel('Password').fill('Password123!');
+    await page.getByRole('button', { name: 'Sign In' }).click();
 
     await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Pipeline' })).toBeVisible();
@@ -68,9 +68,9 @@ test.describe('V2 Route Skeleton', () => {
     await page.reload();
     try {
       await page.getByLabel('Username').waitFor({ state: 'visible', timeout: 3000 });
-      await page.getByLabel('Username').fill('admin');
-      await page.getByLabel('Password').fill('admin123');
-      await page.getByRole('button', { name: 'Login' }).click();
+      await page.getByLabel('Username').fill('officer');
+      await page.getByLabel('Password').fill('Password123!');
+      await page.getByRole('button', { name: 'Sign In' }).click();
     } catch {
       // already logged in
     }
@@ -248,25 +248,25 @@ test.describe('V2 Route Skeleton', () => {
 
   test('Borrower route renders after login', async ({ page }) => {
     await page.goto('/');
-    await page.getByLabel('Username').fill('demo');
-    await page.getByLabel('Password').fill('demo123');
-    await page.getByRole('button', { name: 'Login' }).click();
+    await page.getByLabel('Username').fill('borrower');
+    await page.getByLabel('Password').fill('Password123!');
+    await page.getByRole('button', { name: 'Sign In' }).click();
 
     await expect(page.getByTestId('text-app-title')).toHaveText('LoanAssist AI');
     await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
   });
 
   test('Login inputs keep focus while typing', async ({ page }) => {
-    await page.goto('/login');
+    await page.goto('/login?mode=borrower-login');
     const username = page.getByLabel('Username');
     const password = page.getByLabel('Password');
 
     await username.click();
-    await username.type('demo', { delay: 10 });
-    await expect(username).toHaveValue('demo');
+    await username.type('borrower', { delay: 10 });
+    await expect(username).toHaveValue('borrower');
 
     await password.click();
-    await password.type('demo123', { delay: 10 });
-    await expect(password).toHaveValue('demo123');
+    await password.type('Password123!', { delay: 10 });
+    await expect(password).toHaveValue('Password123!');
   });
 });

@@ -52,9 +52,9 @@ function ensureDir(p: string) {
 async function ensureLoggedInIfPrompted(page: Page) {
   try {
     await page.getByLabel('Username').waitFor({ state: 'visible', timeout: 800 });
-    await page.getByLabel('Username').fill('admin');
-    await page.getByLabel('Password').fill('admin123');
-    await page.getByRole('button', { name: 'Login' }).click();
+    await page.getByLabel('Username').fill('officer');
+    await page.getByLabel('Password').fill('Password123!');
+    await page.getByRole('button', { name: 'Sign In' }).click();
   } catch {
     return;
   }

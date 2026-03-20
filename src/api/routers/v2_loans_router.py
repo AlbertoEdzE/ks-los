@@ -1,8 +1,12 @@
 import re
 from typing import Any, Optional, Literal, Annotated, Union
 from datetime import datetime, timezone
+import os
+import uuid
+import hashlib
+import io
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -86,6 +90,51 @@ def _merge_checklist(existing: Optional[dict[str, Any]], product_code: Optional[
             merged_items.append(item)
 
     return {**next_checklist, "items": merged_items}
+
+
+def _safe_filename(name: str) -> str:
+    base = (name or "").strip().replace("\\", "/").split("/")[-1]
+    base = re.sub(r"[^a-zA-Z0-9._-]+", "_", base)
+    return base[:160] or "document"
+
+
+def _sha256_bytes(data: bytes) -> str:
+    h = hashlib.sha256()
+    h.update(data)
+    return h.hexdigest()
+
+
+def _extract_text_from_upload(raw: bytes, content_type: Optional[str], filename: Optional[str]) -> str:
+    ct = (content_type or "").lower()
+    name = (filename or "").lower()
+    is_pdf = "pdf" in ct or name.endswith(".pdf")
+    is_image = ct.startswith("image/") or bool(re.search(r"\.(png|jpe?g|bmp|gif|tiff?|webp)$", name))
+
+    if is_pdf:
+        try:
+            from pypdf import PdfReader  # type: ignore
+
+            reader = PdfReader(io.BytesIO(raw))
+            parts: list[str] = []
+            for page in reader.pages:
+                t = page.extract_text() or ""
+                if t.strip():
+                    parts.append(t)
+            return "\n".join(parts).strip()
+        except Exception:
+            return ""
+
+    if is_image:
+        try:
+            from PIL import Image  # type: ignore
+            import pytesseract  # type: ignore
+
+            img = Image.open(io.BytesIO(raw))
+            return (pytesseract.image_to_string(img) or "").strip()
+        except Exception:
+            return ""
+
+    return ""
 
 
 def _get_product_by_code(db: Session, code: str) -> Optional[LoanProductCatalog]:
@@ -499,6 +548,11 @@ def _serialize_loan(l: Loan) -> dict[str, Any]:
         "catalogProductCode": l.catalog_product_code,
         "documentChecklist": l.document_checklist,
         "underwritingMemo": l.underwriting_memo,
+        "stpProcessingStatus": l.stp_processing_status,
+        "stpProcessingLog": l.stp_processing_log,
+        "stpPayload": l.stp_payload,
+        "termsAcceptedAt": l.terms_accepted_at.isoformat() if l.terms_accepted_at else None,
+        "disbursement": l.disbursement,
         "currentPhaseId": l.current_phase_id,
         "status": l.status,
         "notes": l.notes,
@@ -726,6 +780,185 @@ def patch_loan_document(loan_id: str, req: PatchLoanDocumentRequest, db: Session
         meta={"loanId": loan_id, "document": target, "statusValue": req.status},
     )
     v2_loan_document_updates_total.labels(status=req.status).inc()
+    return _serialize_loan(loan)
+
+
+@router.post("/{loan_id}/documents/upload")
+async def upload_loan_document(
+    loan_id: str,
+    name: Annotated[str, Form()],
+    file: UploadFile = File(...),
+    extractedText: Annotated[Optional[str], Form()] = None,
+    db: Session = Depends(get_db),
+):
+    request_counter.labels(endpoint="/api/loans/{loan_id}/documents/upload").inc()
+    loan = db.get(Loan, loan_id)
+    if not loan:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents/upload").inc()
+        log_audit(event="v2_loan_document_upload", endpoint="/api/loans/{loan_id}/documents/upload", status="not_found", meta={"loanId": loan_id})
+        raise HTTPException(status_code=404, detail="Loan not found")
+
+    checklist = loan.document_checklist
+    if not isinstance(checklist, dict) or not isinstance(checklist.get("items"), list):
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents/upload").inc()
+        log_audit(
+            event="v2_loan_document_upload",
+            endpoint="/api/loans/{loan_id}/documents/upload",
+            status="invalid",
+            meta={"loanId": loan_id, "error": "Loan has no document checklist"},
+        )
+        raise HTTPException(status_code=400, detail="Loan has no document checklist")
+
+    target = (name or "").strip()
+    if not target:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents/upload").inc()
+        log_audit(
+            event="v2_loan_document_upload",
+            endpoint="/api/loans/{loan_id}/documents/upload",
+            status="invalid",
+            meta={"loanId": loan_id, "error": "Document name is required"},
+        )
+        raise HTTPException(status_code=400, detail="Document name is required")
+
+    raw = await file.read()
+    if not raw:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents/upload").inc()
+        log_audit(
+            event="v2_loan_document_upload",
+            endpoint="/api/loans/{loan_id}/documents/upload",
+            status="invalid",
+            meta={"loanId": loan_id, "error": "Empty upload"},
+        )
+        raise HTTPException(status_code=400, detail="Empty upload")
+
+    uploads_root = os.getenv("KS_LOS_UPLOAD_DIR", "data/uploads")
+    doc_id = str(uuid.uuid4())
+    safe = _safe_filename(file.filename or "document")
+    loan_dir = os.path.join(uploads_root, "loans", loan_id)
+    os.makedirs(loan_dir, exist_ok=True)
+    stored_name = f"{doc_id}-{safe}"
+    stored_path = os.path.join(loan_dir, stored_name)
+    with open(stored_path, "wb") as f:
+        f.write(raw)
+
+    now = _now_iso()
+    extracted = (extractedText or "").strip()
+    if not extracted:
+        extracted = _extract_text_from_upload(raw, file.content_type, file.filename)
+    preview = extracted[:800] if extracted else ""
+    upload_meta = {
+        "id": doc_id,
+        "fileName": file.filename,
+        "storedName": stored_name,
+        "contentType": file.content_type,
+        "sizeBytes": len(raw),
+        "sha256": _sha256_bytes(raw),
+        "uploadedAt": now,
+        "extractedPreview": preview,
+    }
+
+    updated = False
+    updated_items: list[dict[str, Any]] = []
+    for item in checklist["items"]:
+        if not isinstance(item, dict):
+            continue
+        if item.get("name") == target:
+            updated_items.append({**item, "status": "submitted", "updatedAt": now, "upload": upload_meta})
+            updated = True
+        else:
+            updated_items.append({**item})
+
+    if not updated:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/documents/upload").inc()
+        log_audit(
+            event="v2_loan_document_upload",
+            endpoint="/api/loans/{loan_id}/documents/upload",
+            status="invalid",
+            meta={"loanId": loan_id, "error": "Document not found in checklist", "document": target},
+        )
+        raise HTTPException(status_code=400, detail="Document not found in checklist")
+
+    loan.document_checklist = {**checklist, "items": updated_items, "asOf": now}
+    db.add(loan)
+    db.commit()
+    db.refresh(loan)
+    log_audit(
+        event="v2_loan_document_upload",
+        endpoint="/api/loans/{loan_id}/documents/upload",
+        status="success",
+        meta={"loanId": loan_id, "document": target, "docId": doc_id},
+    )
+    v2_loan_document_updates_total.labels(status="submitted").inc()
+    return _serialize_loan(loan)
+
+
+@router.post("/{loan_id}/signature")
+async def upload_loan_signature(
+    loan_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    request_counter.labels(endpoint="/api/loans/{loan_id}/signature").inc()
+    loan = db.get(Loan, loan_id)
+    if not loan:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/signature").inc()
+        log_audit(event="v2_loan_signature_upload", endpoint="/api/loans/{loan_id}/signature", status="not_found", meta={"loanId": loan_id})
+        raise HTTPException(status_code=404, detail="Loan not found")
+
+    checklist = loan.document_checklist
+    if not isinstance(checklist, dict) or not isinstance(checklist.get("items"), list):
+        checklist = {"productCode": loan.catalog_product_code, "items": [], "asOf": _now_iso()}
+
+    raw = await file.read()
+    if not raw:
+        request_errors_total.labels(endpoint="/api/loans/{loan_id}/signature").inc()
+        log_audit(event="v2_loan_signature_upload", endpoint="/api/loans/{loan_id}/signature", status="invalid", meta={"loanId": loan_id, "error": "Empty upload"})
+        raise HTTPException(status_code=400, detail="Empty upload")
+
+    uploads_root = os.getenv("KS_LOS_UPLOAD_DIR", "data/uploads")
+    doc_id = str(uuid.uuid4())
+    safe = _safe_filename(file.filename or "signature.png")
+    loan_dir = os.path.join(uploads_root, "loans", loan_id)
+    os.makedirs(loan_dir, exist_ok=True)
+    stored_name = f"{doc_id}-{safe}"
+    stored_path = os.path.join(loan_dir, stored_name)
+    with open(stored_path, "wb") as f:
+        f.write(raw)
+
+    now = _now_iso()
+    upload_meta = {
+        "id": doc_id,
+        "fileName": file.filename,
+        "storedName": stored_name,
+        "contentType": file.content_type,
+        "sizeBytes": len(raw),
+        "sha256": _sha256_bytes(raw),
+        "uploadedAt": now,
+        "extractedPreview": "",
+    }
+
+    signature_name = "Signature"
+    items_in = checklist.get("items") if isinstance(checklist, dict) else None
+    items = items_in if isinstance(items_in, list) else []
+    updated_items: list[dict[str, Any]] = []
+    seen_sig = False
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("name") == signature_name:
+            updated_items.append({**item, "status": "submitted", "updatedAt": now, "upload": upload_meta})
+            seen_sig = True
+        else:
+            updated_items.append({**item})
+    if not seen_sig:
+        updated_items.append({"name": signature_name, "status": "submitted", "updatedAt": now, "upload": upload_meta})
+
+    loan.document_checklist = {**checklist, "items": updated_items, "asOf": now}
+    db.add(loan)
+    db.commit()
+    db.refresh(loan)
+    log_audit(event="v2_loan_signature_upload", endpoint="/api/loans/{loan_id}/signature", status="success", meta={"loanId": loan_id, "docId": doc_id})
+    v2_loan_document_updates_total.labels(status="submitted").inc()
     return _serialize_loan(loan)
 
 

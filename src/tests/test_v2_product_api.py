@@ -1,6 +1,7 @@
 import os
 import tempfile
 import uuid
+import base64
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
@@ -15,7 +16,7 @@ if os.path.exists(DB_PATH):
 os.environ["SQLITE_FALLBACK_URL"] = f"sqlite:///{DB_PATH}"
 os.environ["DATABASE_URL"] = "postgresql+psycopg://invalid:invalid@localhost:1/invalid"
 
-from src.shared.db import AuditEvent, Conversation, Loan, LoanPhase, Message, get_engine, init_db, reset_db_for_tests
+from src.shared.db import AuditEvent, Conversation, Loan, LoanDocument, LoanPhase, Message, get_engine, init_db, reset_db_for_tests
 
 reset_db_for_tests()
 
@@ -291,12 +292,48 @@ def test_v2_debt_consolidation_recommends_personal_loans():
     assert payload["loanRecommendations"][0]["type"] == "personal_loan"
 
 
+def test_v2_borrower_chat_accepts_numeric_intent_values():
+    create = client.post("/api/conversations", json={})
+    assert create.status_code == 200
+    conv_id = create.json()["conversation"]["id"]
+
+    send = client.post(
+        f"/api/conversations/{conv_id}/messages",
+        json={"content": "Home loan. 10000usd/month. No debts."},
+    )
+    assert send.status_code == 200
+    payload = send.json()
+    summary = payload["intentAnalysis"]["intentSummary"]
+    assert summary["purpose"] == "home"
+    assert summary["monthlyIncome"] == "10000"
+
+
+def test_v2_borrower_chat_converges_to_final_recommendation():
+    create = client.post("/api/conversations", json={})
+    assert create.status_code == 200
+    conv_id = create.json()["conversation"]["id"]
+
+    send1 = client.post(f"/api/conversations/{conv_id}/messages", json={"content": "I want to buy a house."})
+    assert send1.status_code == 200
+
+    send2 = client.post(f"/api/conversations/{conv_id}/messages", json={"content": "House price 35000 USD, down payment 10000."})
+    assert send2.status_code == 200
+
+    send3 = client.post(f"/api/conversations/{conv_id}/messages", json={"content": "10000usd/month, no debts, 10 years."})
+    assert send3.status_code == 200
+    payload3 = send3.json()
+    assert isinstance(payload3.get("loanRecommendations"), list)
+    assert len(payload3["loanRecommendations"]) >= 1
+    meta = payload3["message"]["metadata"]
+    assert isinstance(meta.get("finalRecommendation"), dict)
+
+
 def test_wp_v2_008_intent_summary_filters_unknown_keys():
-    from src.api.routers.v2_conversations_router import analyze_intent_message
+    from src.api.routers.v2_conversations_router import IntentSummary, _merge_intent
 
     prev = {"purpose": "home", "evil": "x"}
-    res = analyze_intent_message("income is 5000", prev)
-    assert "evil" not in res["intentSummary"]
+    merged = _merge_intent(prev, IntentSummary(monthlyIncome="5000"))
+    assert "evil" not in merged
 
 
 def test_wp_v2_015_approval_probability_navigator_schema_is_stable():
@@ -803,3 +840,263 @@ def test_wp_v2_019_audit_events_persist_for_v2_writes():
         assert len(rows) >= 1
         assert rows[-1].meta is not None
         assert rows[-1].meta.get("loanId") == loan_id
+
+
+def test_ui2_documents_endpoints_roundtrip_and_enforce_conversation_scoping():
+    create = client.post("/api/conversations", json={})
+    assert create.status_code == 200
+    conv_id = create.json()["conversation"]["id"]
+    create2 = client.post("/api/conversations", json={})
+    assert create2.status_code == 200
+    other_conv_id = create2.json()["conversation"]["id"]
+
+    with _db_session() as db:
+        loan = Loan(
+            borrower_name="UI2 Borrower",
+            loan_type="Home Loan",
+            loan_amount="250000",
+            status="draft",
+            conversation_id=conv_id,
+        )
+        db.add(loan)
+        db.commit()
+        db.refresh(loan)
+        loan_id = loan.id
+
+    list_denied = client.get(f"/api/documents/loan/{loan_id}")
+    assert list_denied.status_code == 403
+    list_wrong_conv = client.get(f"/api/documents/loan/{loan_id}", headers={"X-Conversation-ID": other_conv_id})
+    assert list_wrong_conv.status_code == 403
+
+    png_bytes = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/aa2x0QAAAAASUVORK5CYII=",
+        validate=True,
+    )
+
+    upload = client.post(
+        "/api/documents/upload",
+        data={"loanId": loan_id, "category": "identity", "documentType": "national_id"},
+        files={"file": ("id.png", png_bytes, "image/png")},
+        headers={"X-Conversation-ID": conv_id},
+    )
+    assert upload.status_code == 200
+    doc = upload.json()
+    assert doc["loanId"] == loan_id
+    assert doc["category"] == "identity"
+    assert doc["documentType"] == "national_id"
+    assert "filePath" not in doc
+
+    listed = client.get(f"/api/documents/loan/{loan_id}", headers={"X-Conversation-ID": conv_id})
+    assert listed.status_code == 200
+    docs = listed.json()
+    assert len(docs) == 1
+    doc_id = docs[0]["id"]
+
+    download_wrong_conv = client.get(f"/api/documents/{doc_id}/download", headers={"X-Conversation-ID": other_conv_id})
+    assert download_wrong_conv.status_code == 403
+
+    downloaded = client.get(f"/api/documents/{doc_id}/download", headers={"X-Conversation-ID": conv_id})
+    assert downloaded.status_code == 200
+    assert downloaded.headers.get("content-type") in {"image/png", "image/png; charset=utf-8"}
+    assert downloaded.content == png_bytes
+
+    deleted = client.delete(f"/api/documents/{doc_id}", headers={"X-Conversation-ID": conv_id})
+    assert deleted.status_code == 200
+    assert deleted.json().get("success") is True
+
+    listed2 = client.get(f"/api/documents/loan/{loan_id}", headers={"X-Conversation-ID": conv_id})
+    assert listed2.status_code == 200
+    assert listed2.json() == []
+
+
+def test_ui2_documents_review_requires_officer_and_persists_status_and_note():
+    create = client.post("/api/conversations", json={})
+    assert create.status_code == 200
+    conv_id = create.json()["conversation"]["id"]
+
+    with _db_session() as db:
+        loan = Loan(
+            borrower_name="UI2 Borrower",
+            loan_type="Home Loan",
+            loan_amount="250000",
+            status="draft",
+            conversation_id=conv_id,
+        )
+        db.add(loan)
+        db.commit()
+        db.refresh(loan)
+        loan_id = loan.id
+
+    png_bytes = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/aa2x0QAAAAASUVORK5CYII=",
+        validate=True,
+    )
+    upload = client.post(
+        "/api/documents/upload",
+        data={"loanId": loan_id, "category": "identity", "documentType": "national_id"},
+        files={"file": ("id.png", png_bytes, "image/png")},
+        headers={"X-Conversation-ID": conv_id},
+    )
+    assert upload.status_code == 200
+    doc_id = upload.json()["id"]
+
+    denied = client.patch(f"/api/documents/{doc_id}/review", json={"status": "approved", "reviewNote": "ok"})
+    assert denied.status_code == 403
+
+    reviewed = client.patch(
+        f"/api/documents/{doc_id}/review",
+        json={"status": "approved", "reviewNote": "ok"},
+        headers=OFFICER_HEADERS,
+    )
+    assert reviewed.status_code == 200
+    payload = reviewed.json()
+    assert payload["id"] == doc_id
+    assert payload["status"] == "approved"
+    assert payload["reviewNote"] == "ok"
+
+
+def test_ui2_accept_terms_persists_disbursement_and_emits_message():
+    create = client.post("/api/conversations", json={})
+    assert create.status_code == 200
+    conv_id = create.json()["conversation"]["id"]
+    create2 = client.post("/api/conversations", json={})
+    assert create2.status_code == 200
+    other_conv_id = create2.json()["conversation"]["id"]
+
+    with _db_session() as db:
+        loan = Loan(
+            borrower_name="UI2 Borrower",
+            loan_type="Home Loan",
+            loan_amount="250000",
+            status="draft",
+            conversation_id=conv_id,
+        )
+        db.add(loan)
+        db.commit()
+        db.refresh(loan)
+        loan_id = loan.id
+
+    signature_data_url = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/aa2x0QAAAAASUVORK5CYII="
+    )
+    accepted = client.post(
+        f"/api/loans/{loan_id}/accept-terms",
+        json={"signature": signature_data_url},
+        headers={"X-Conversation-ID": conv_id},
+    )
+    assert accepted.status_code == 200
+    payload = accepted.json()
+    assert payload["success"] is True
+    assert "disbursement" in payload
+    assert payload["disbursement"]["status"] == "disbursed"
+    assert payload["disbursement"]["amount"] == "250000"
+    assert "approval" in payload
+
+    with _db_session() as db:
+        refreshed = db.get(Loan, loan_id)
+        assert refreshed is not None
+        assert refreshed.terms_accepted_at is not None
+        assert refreshed.terms_signature_path is not None
+        assert refreshed.disbursement is not None
+
+        msgs = (
+            db.execute(select(Message).where(Message.conversation_id == conv_id).order_by(Message.created_at.desc(), Message.id.desc()))
+            .scalars()
+            .all()
+        )
+        assert any(
+            m.metadata_json
+            and isinstance(m.metadata_json.get("loanApplication"), dict)
+            and m.metadata_json["loanApplication"].get("stpCompleted") is True
+            and m.metadata_json["loanApplication"].get("disbursement") is not None
+            for m in msgs
+        )
+
+    denied = client.post(
+        f"/api/loans/{loan_id}/accept-terms",
+        json={"signature": signature_data_url},
+        headers={"X-Conversation-ID": other_conv_id},
+    )
+    assert denied.status_code == 403
+
+
+def test_ui2_stp_process_emits_offer_message_and_status_payload():
+    create = client.post("/api/conversations", json={})
+    assert create.status_code == 200
+    conv_id = create.json()["conversation"]["id"]
+
+    with _db_session() as db:
+        loan = Loan(
+            borrower_name="UI2 STP Borrower",
+            loan_type="Home Loan",
+            loan_amount="250000",
+            status="draft",
+            conversation_id=conv_id,
+            monthly_income="8000",
+            existing_debts="1500",
+            credit_score="750",
+        )
+        db.add(loan)
+        db.commit()
+        db.refresh(loan)
+        loan_id = loan.id
+
+    png_bytes = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/aa2x0QAAAAASUVORK5CYII=",
+        validate=True,
+    )
+    upload = client.post(
+        "/api/documents/upload",
+        data={"loanId": loan_id, "category": "identity", "documentType": "national_id"},
+        files={"file": ("id.png", png_bytes, "image/png")},
+        headers={"X-Conversation-ID": conv_id},
+    )
+    assert upload.status_code == 200
+    upload2 = client.post(
+        "/api/documents/upload",
+        data={"loanId": loan_id, "category": "income_salaried", "documentType": "job_letter"},
+        files={"file": ("job-letter.pdf", png_bytes, "application/pdf")},
+        headers={"X-Conversation-ID": conv_id},
+    )
+    assert upload2.status_code == 200
+
+    processed = client.post(f"/api/loans/{loan_id}/stp-process", headers={"X-Conversation-ID": conv_id})
+    assert processed.status_code == 200
+    processed_payload = processed.json()
+    assert processed_payload["status"] in {"awaiting_acceptance", "awaiting_documents"}
+
+    status = client.get(f"/api/loans/{loan_id}/stp-status", headers={"X-Conversation-ID": conv_id})
+    assert status.status_code == 200
+    status_payload = status.json()
+    assert status_payload["status"] in {"awaiting_acceptance", "awaiting_documents"}
+    assert isinstance(status_payload.get("log"), list)
+    if status_payload["status"] == "awaiting_acceptance":
+        assert isinstance(status_payload.get("payload"), dict)
+        assert status_payload["payload"].get("awaitingAcceptance") is True
+        assert isinstance(status_payload["payload"].get("stpSteps"), list)
+        assert isinstance(status_payload["payload"].get("approval"), dict)
+
+    with _db_session() as db:
+        refreshed = db.get(Loan, loan_id)
+        assert refreshed is not None
+        assert (refreshed.stp_processing_status or "").lower() in {"awaiting_acceptance", "awaiting_documents"}
+        if (refreshed.stp_processing_status or "").lower() == "awaiting_acceptance":
+            assert refreshed.stp_payload is not None
+            assert refreshed.interest_rate is not None
+            assert refreshed.tenure is not None
+            assert refreshed.monthly_emi is not None
+
+        msgs = (
+            db.execute(select(Message).where(Message.conversation_id == conv_id).order_by(Message.created_at.desc(), Message.id.desc()))
+            .scalars()
+            .all()
+        )
+        if (refreshed.stp_processing_status or "").lower() == "awaiting_acceptance":
+            assert any(
+                m.metadata_json
+                and m.metadata_json.get("type") == "stp_offer"
+                and isinstance(m.metadata_json.get("loanApplication"), dict)
+                and m.metadata_json["loanApplication"].get("awaitingAcceptance") is True
+                for m in msgs
+            )

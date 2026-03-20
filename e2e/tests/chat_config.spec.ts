@@ -9,11 +9,12 @@ test('borrower chat shows suggestions and phase tracker', async ({ page }) => {
   });
 
   await page.goto('/login');
-  await page.getByLabel('Username').fill('demo');
-  await page.getByLabel('Password').fill('demo123');
-  await page.getByRole('button', { name: 'Login' }).click();
+  await page.getByTestId('select-borrower').click();
+  await page.getByLabel('Username').fill('borrower');
+  await page.getByLabel('Password').fill('Password123!');
+  await page.getByRole('button', { name: 'Sign In' }).click();
   await expect(page.getByTestId('text-app-title')).toHaveText('LoanAssist AI');
-  await expect(page.getByRole('heading', { name: 'Tell me what you need' })).toBeVisible();
+  await expect(page.getByTestId('borrower-greeting')).toBeVisible();
 
   const homeLoanButton = page.getByRole('button', { name: /Home Loan/i });
   await expect(homeLoanButton).toBeVisible({ timeout: 10000 });
@@ -41,10 +42,11 @@ test('borrower chat does not repeat delinquency question after a no', async ({ p
   });
 
   await page.goto('/login');
-  await page.getByLabel('Username').fill('demo');
-  await page.getByLabel('Password').fill('demo123');
-  await page.getByRole('button', { name: 'Login' }).click();
-  await expect(page.getByRole('heading', { name: 'Tell me what you need' })).toBeVisible();
+  await page.getByTestId('select-borrower').click();
+  await page.getByLabel('Username').fill('borrower');
+  await page.getByLabel('Password').fill('Password123!');
+  await page.getByRole('button', { name: 'Sign In' }).click();
+  await expect(page.getByTestId('borrower-greeting')).toBeVisible();
 
   await page.getByRole('button', { name: /Home Loan/i }).click();
   await expect(page.getByTestId('chat-message-assistant')).toHaveCount(1, { timeout: 20000 });
@@ -78,11 +80,12 @@ test('debt consolidation recommends personal loan products', async ({ page }) =>
   });
 
   await page.goto('/login');
-  await page.getByLabel('Username').fill('demo');
-  await page.getByLabel('Password').fill('demo123');
-  await page.getByRole('button', { name: 'Login' }).click();
+  await page.getByTestId('select-borrower').click();
+  await page.getByLabel('Username').fill('borrower');
+  await page.getByLabel('Password').fill('Password123!');
+  await page.getByRole('button', { name: 'Sign In' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Tell me what you need' })).toBeVisible();
+  await expect(page.getByTestId('borrower-greeting')).toBeVisible();
   const debtButton = page.getByRole('button', { name: /Debt Consolidation/i });
   await debtButton.click();
 
@@ -101,11 +104,12 @@ test('phase tracker navigates to phase detail view', async ({ page }) => {
   });
 
   await page.goto('/login');
-  await page.getByLabel('Username').fill('demo');
-  await page.getByLabel('Password').fill('demo123');
-  await page.getByRole('button', { name: 'Login' }).click();
+  await page.getByTestId('select-borrower').click();
+  await page.getByLabel('Username').fill('borrower');
+  await page.getByLabel('Password').fill('Password123!');
+  await page.getByRole('button', { name: 'Sign In' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Tell me what you need' })).toBeVisible();
+  await expect(page.getByTestId('borrower-greeting')).toBeVisible();
   await page.getByRole('button', { name: /Home Loan/i }).click();
 
   await expect(page.getByTestId('phase-progress-tracker')).toBeVisible({ timeout: 20000 });
@@ -140,10 +144,11 @@ test('borrower chat hides officer-only notes from the thread', async ({ page }) 
   }, conversationId as string);
 
   await page.goto('/login');
-  await page.getByLabel('Username').fill('demo');
-  await page.getByLabel('Password').fill('demo123');
-  await page.getByRole('button', { name: 'Login' }).click();
+  await page.getByTestId('select-borrower').click();
+  await page.getByLabel('Username').fill('borrower');
+  await page.getByLabel('Password').fill('Password123!');
+  await page.getByRole('button', { name: 'Sign In' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Tell me what you need' })).toBeVisible();
+  await expect(page.getByTestId('borrower-greeting')).toBeVisible();
   await expect(page.getByText('OFFICER_INTERNAL_NOTE_DO_NOT_SHOW')).toHaveCount(0);
 });

@@ -2,10 +2,10 @@ import { test, expect } from '@playwright/test';
 
 test.describe('ML Training Workflow', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.getByLabel('Username').fill('admin');
-    await page.getByLabel('Password').fill('admin123');
-    await page.getByRole('button', { name: 'Login' }).click();
+    await page.goto('/dashboard');
+    await page.getByLabel('Username').fill('officer');
+    await page.getByLabel('Password').fill('Password123!');
+    await page.getByRole('button', { name: 'Sign In' }).click();
     await page.getByRole('link', { name: 'ML Training' }).click();
     await page.getByRole('button', { name: 'Training Workflow' }).click();
   });
