@@ -15,7 +15,10 @@ from src.agents.tools import GenerateProfileTool
 from src.shared.types import ApplicantCreditProfile
 from src.core.knowledge_base import KnowledgeBase
 from src.ml.inference import CreditRiskModel
-import mlflow
+try:
+    import mlflow
+except Exception:
+    mlflow = None
 import os
 from src.ml.ml_config import MLFLOW_TRACKING_URI, EXPERIMENT_NAME
 import time
@@ -70,12 +73,36 @@ def journey_coach_node(state: AgentState):
 
 def risk_engine_node(state: AgentState):
     """
-    Analyzes the credit profile using RAG-based policy lookup AND XGBoost Predictive Model.
+    Analyzes the credit profile using:
+    1. Deterministic metrics from calculation engines (Task 1)
+    2. RAG-based policy lookup
+    3. XGBoost Predictive Model
+    
+    The LLM synthesizes all three sources for a grounded decision.
     """
     profile = state.get("credit_profile")
     if not profile:
         return {"risk_score": None}
-    
+
+    # 0. Get Deterministic Metrics from Calculation Engines (NEW - Task 3)
+    calculated_metrics = state.get("calculated_metrics")
+    metrics_context = ""
+    if calculated_metrics:
+        metrics_context = f"""
+--- DETERMINISTIC CALCULATIONS (Task 1 Engines) ---
+EMI: {calculated_metrics.get('emi', 'N/A')}
+FOIR: {calculated_metrics.get('foir', 'N/A'):.2f}%
+DTI: {calculated_metrics.get('dti', 'N/A'):.2f}
+Approval Probability: {calculated_metrics.get('approval_probability', 'N/A')}%
+Risk Grade: {calculated_metrics.get('risk_grade', 'N/A')}
+APR: {calculated_metrics.get('apr', 'N/A'):.2f}%
+STP Tier: {calculated_metrics.get('stp_tier', 'N/A')}
+"""
+        logger.info(f"[RiskEngine] Using calculated metrics: FOIR={calculated_metrics.get('foir')}, Approval Prob={calculated_metrics.get('approval_probability')}%")
+    else:
+        metrics_context = "\n--- DETERMINISTIC CALCULATIONS ---\nNot available. Use standard assessment.\n"
+        logger.warning("[RiskEngine] No calculated metrics available")
+
     # 1. Retrieve Policy Context (RAG)
     kb_instance = get_kb()
     policy_context = ""
@@ -87,23 +114,23 @@ def risk_engine_node(state: AgentState):
                 "Thin file policy" if profile.summary.thin_file else "Standard approval criteria",
                 "DTI limits"
             ]
-            
+
             docs = []
             for q in queries:
                 docs.extend(kb_instance.query(q, k=2))
-            
+
             seen_content = set()
             unique_docs = []
             for d in docs:
                 if d.page_content not in seen_content:
                     seen_content.add(d.page_content)
                     unique_docs.append(d)
-            
+
             policy_context = "\n\n".join([d.page_content for d in unique_docs])
         except Exception as e:
             logger.error(f"RAG Retrieval failed: {e}")
             policy_context = "Policy retrieval unavailable. Use standard conservative fallback."
-    
+
     # 2. Get ML Prediction (XGBoost)
     ml_instance = get_ml_model()
     ml_score = 0.5
@@ -115,8 +142,9 @@ def risk_engine_node(state: AgentState):
         logger.info(f"ML Model Prediction: Prob={ml_prob:.4f}, Score={ml_score:.2f}")
 
     # 3. Construct Analysis Prompt (Ensemble Context)
-    # We inject the ML score into the prompt so the LLM can consider it
+    # We inject the ML score AND calculated metrics into the prompt
     user_prompt = build_risk_engine_user_prompt(policy_context, profile)
+    user_prompt += f"\n\n{metrics_context}"
     user_prompt += f"\n\n--- PREDICTIVE MODEL ---"
     user_prompt += f"\nXGBoost Risk Score: {ml_score:.1f}/100"
     user_prompt += f"\nProbability of Good Credit: {ml_prob:.2%}"
@@ -162,31 +190,32 @@ def risk_engine_node(state: AgentState):
         }
         
         # Inference logging to MLflow and file
-        try:
-            mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-            mlflow.set_experiment(EXPERIMENT_NAME)
-            with mlflow.start_run(run_name="inference", nested=True):
-                cid = get_correlation_id()
-                mlflow.log_params({
-                    "age": profile.identity.age if hasattr(profile.identity, "age") else None,
-                    "credit_score": profile.summary.credit_score,
-                    "utilization_ratio": profile.summary.utilization_ratio,
-                    "total_debt": profile.summary.total_current_balance_xcd,
-                    "history_length_months": profile.summary.months_oldest_account,
-                    "derogatory_marks": profile.summary.derogatory_marks,
-                    "thin_file_flag": 1 if profile.summary.thin_file else 0
-                })
-                mlflow.log_metrics({
-                    "ml_prob_good": ml_prob,
-                    "ml_score": ml_score,
-                    "risk_score": result_obj["risk_score"]
-                })
-                tags = {"decision": decision}
-                if cid:
-                    tags["correlation_id"] = cid
-                mlflow.set_tags(tags)
-        except Exception as e:
-            logger.error(f"MLflow inference logging failed: {e}")
+        if mlflow is not None:
+            try:
+                mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+                mlflow.set_experiment(EXPERIMENT_NAME)
+                with mlflow.start_run(run_name="inference", nested=True):
+                    cid = get_correlation_id()
+                    mlflow.log_params({
+                        "age": profile.identity.age if hasattr(profile.identity, "age") else None,
+                        "credit_score": profile.summary.credit_score,
+                        "utilization_ratio": profile.summary.utilization_ratio,
+                        "total_debt": profile.summary.total_current_balance_xcd,
+                        "history_length_months": profile.summary.months_oldest_account,
+                        "derogatory_marks": profile.summary.derogatory_marks,
+                        "thin_file_flag": 1 if profile.summary.thin_file else 0
+                    })
+                    mlflow.log_metrics({
+                        "ml_prob_good": ml_prob,
+                        "ml_score": ml_score,
+                        "risk_score": result_obj["risk_score"]
+                    })
+                    tags = {"decision": decision}
+                    if cid:
+                        tags["correlation_id"] = cid
+                    mlflow.set_tags(tags)
+            except Exception as e:
+                logger.error(f"MLflow inference logging failed: {e}")
         
         # Append to local inference log CSV
         try:

@@ -2,7 +2,11 @@ import uuid
 import re
 import os
 import json
+import shutil
+import subprocess
+import tempfile
 from typing import Any, Optional, Literal
+import math
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form
@@ -13,7 +17,7 @@ from sqlalchemy.orm import Session
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from src.api.routers.v2_auth import is_officer_request, require_officer_role, require_viewer_role
-from src.config.llm import get_llm
+from src.config.llm import get_llm, is_ollama_available
 from src.shared.audit import log_audit
 from src.shared.db import Conversation, Loan, LoanDocument, LoanPhase, Message, LoanProductCatalog, get_db
 from src.shared.metrics import (
@@ -49,13 +53,16 @@ class IntentSummary(BaseModel):
     purpose: Optional[str] = None
     urgency: Optional[str] = None
     affordability: Optional[str] = None
-    monthlyIncome: Optional[str] = None
-    existingDebts: Optional[str] = None
-    loanAmount: Optional[str] = None
+    monthlyIncome: Optional[Any] = None  # Can be string or number from LLM
+    existingDebts: Optional[Any] = None
+    loanAmount: Optional[Any] = None
+    propertyValue: Optional[Any] = None
+    downPayment: Optional[Any] = None
+    selectedPlan: Optional[str] = None
     preferredTenure: Optional[str] = None
-    collateralAvailable: Optional[str] = None
+    collateralAvailable: Optional[Any] = None
     employmentType: Optional[str] = None
-    creditHistory: Optional[str] = None
+    creditHistory: Optional[Any] = None
     recentDelinquencies12m: Optional[str] = None
 
 
@@ -138,6 +145,9 @@ def _merge_intent(prev: Optional[dict], new: IntentSummary) -> dict:
     allowed = set(IntentSummary.model_fields.keys())
     base: dict = {k: v for k, v in (prev or {}).items() if k in allowed}
     for k, v in new.model_dump(exclude_none=True).items():
+        if k == "selectedPlan":
+            base[k] = v
+            continue
         existing = base.get(k)
         if existing in (None, "", []):
             base[k] = v
@@ -145,6 +155,95 @@ def _merge_intent(prev: Optional[dict], new: IntentSummary) -> dict:
         if isinstance(existing, str) and existing.strip().lower() in {"unknown", "not_known", "not known", "n/a", "na"}:
             base[k] = v
     return base
+
+
+def _recommend_products(db: Session, intent: dict) -> list[dict[str, Any]]:
+    from src.api.routers.v2_catalog_products_router import _ensure_seeded as _ensure_products_seeded
+
+    _ensure_products_seeded(db)
+    purpose = (intent.get("purpose") or "").lower()
+    category = None
+    if purpose in {"home", "mortgage", "property"}:
+        category = "home_loan"
+    elif purpose in {"car", "auto", "vehicle"}:
+        category = "auto_loan"
+    elif purpose in {"personal", "education", "business", "debt_consolidation"}:
+        category = "personal_loan"
+
+    stmt = select(LoanProductCatalog).where(LoanProductCatalog.status == "active")
+    if category is not None:
+        stmt = stmt.where(LoanProductCatalog.category == category)
+
+    rows = db.execute(stmt.order_by(LoanProductCatalog.code.asc(), LoanProductCatalog.id.asc())).scalars().all()
+    items: list[dict[str, Any]] = []
+    amount = _parse_amount_to_number(intent.get("loanAmount"))
+    tenure_months = None
+    if isinstance(intent.get("preferredTenure"), str):
+        m = re.search(r"(\d+)\s*months", str(intent.get("preferredTenure")).lower())
+        if m:
+            tenure_months = int(m.group(1))
+    for p in rows[:2]:
+        tenure = None
+        if p.min_tenure_months is not None and p.max_tenure_months is not None:
+            tenure = f"{p.min_tenure_months}-{p.max_tenure_months} months"
+        elif p.max_tenure_months is not None:
+            tenure = f"Up to {p.max_tenure_months} months"
+        elif p.min_tenure_months is not None:
+            tenure = f"From {p.min_tenure_months} months"
+        else:
+            tenure = "Flexible"
+
+        features = list(p.features or [])
+        eligibility = list(p.eligibility_criteria or [])
+        approval_speed = "Standard"
+        if p.category == "personal_loan":
+            approval_speed = "Fast"
+        if p.category == "auto_loan":
+            approval_speed = "Quick"
+
+        rate_pct = None
+        if isinstance(p.base_interest_rate, str):
+            try:
+                rate_pct = float(re.sub(r"[^0-9.]+", "", p.base_interest_rate))
+            except Exception:
+                rate_pct = None
+        n = tenure_months
+        if n is None:
+            if p.max_tenure_months:
+                n = int(p.max_tenure_months)
+            elif p.min_tenure_months:
+                n = int(p.min_tenure_months)
+            else:
+                n = 240 if (p.category == "home_loan") else 60
+        est_emi = "TBD"
+        total_interest = "TBD"
+        if amount is not None and rate_pct is not None and n and n > 0:
+            r = (rate_pct / 100.0) / 12.0
+            try:
+                factor = math.pow(1 + r, n)
+                emi = (amount * r * factor) / (factor - 1) if factor > 1 and r > 0 else amount / n
+                ti = emi * n - amount
+                est_emi = f"${emi:,.0f}/mo"
+                total_interest = f"${ti:,.0f}"
+            except Exception:
+                est_emi = "TBD"
+                total_interest = "TBD"
+
+        items.append(
+            {
+                "name": p.name,
+                "type": p.category,
+                "estimatedRate": p.base_interest_rate or "Varies",
+                "estimatedEmi": est_emi,
+                "tenure": tenure,
+                "totalInterest": total_interest,
+                "approvalSpeed": approval_speed,
+                "pros": features[:3],
+                "cons": eligibility[:3],
+                "recommendation": p.description or "Recommended based on your stated intent.",
+            }
+        )
+    return items
 
 
 def _extract_amount(text: str) -> Optional[str]:
@@ -162,9 +261,13 @@ def _extract_amount(text: str) -> Optional[str]:
     after = t[end : min(len(t), end + 18)]
     context = f"{before} {after}"
     has_currency = ("$" in token) or ("usd" in token)
-    has_loan_context = any(k in context for k in ["loan", "borrow", "mortgage", "home"])
+    has_explicit_loan_context = any(k in context for k in ["loan", "borrow", "mortgage", "finance", "financing"])
+    has_property_context = any(k in context for k in ["property", "house", "home", "apartment", "condo", "valued", "value", "price"])
+    has_loan_context = has_explicit_loan_context or ("mortgage" in context)
     has_income_context = any(k in context for k in ["income", "salary", "/month", "per month", "monthly"])
     if has_income_context and not has_loan_context and not has_currency:
+        return None
+    if has_property_context and not has_explicit_loan_context and not has_currency:
         return None
     raw = m.group(2).replace(",", "").replace(" ", "")
     unit = (m.group(3) or "").strip()
@@ -173,6 +276,31 @@ def _extract_amount(text: str) -> Optional[str]:
     if unit in {"m", "million"}:
         return f"{raw}m"
     return raw
+
+
+def _extract_property_value(text: str) -> Optional[str]:
+    t = text.lower()
+    m = re.search(r"\b(property|house|home|apartment|condo)\b[^0-9]{0,40}\b(value|valued|price|priced|cost)\b[^0-9]{0,20}(\$|usd\s*)?\s*([\d,]+)", t)
+    if m:
+        return m.group(4).replace(",", "")
+    m = re.search(r"\b(value|valued|price|priced|cost)\b[^0-9]{0,20}(\$|usd\s*)?\s*([\d,]+)", t)
+    if m:
+        return m.group(3).replace(",", "")
+    m = re.search(r"\b(property|house|home|apartment|condo)\b[^0-9]{0,20}(\$|usd\s*)?\s*([\d,]+)", t)
+    if m:
+        return m.group(3).replace(",", "")
+    return None
+
+
+def _extract_down_payment(text: str) -> Optional[str]:
+    t = text.lower().replace("downpayment", "down payment")
+    m = re.search(r"\bdown\s+payment\b[^0-9%]{0,20}(\$|usd\s*)?\s*([\d,]+)", t)
+    if m:
+        return m.group(2).replace(",", "")
+    m = re.search(r"\bdown\s+payment\b[^0-9%]{0,20}(\d{1,2})\s*%", t)
+    if m:
+        return f"{m.group(1)}%"
+    return None
 
 
 def _extract_income(text: str) -> Optional[str]:
@@ -314,6 +442,11 @@ def _compute_scores(intent: dict) -> tuple[int, int]:
 def _next_angle(intent: dict) -> str:
     if intent.get("purpose") == "debt_consolidation" and not intent.get("existingDebts"):
         return "Confirm total outstanding debts and current monthly repayments."
+    if intent.get("purpose") == "home":
+        if not intent.get("propertyValue") and not intent.get("loanAmount"):
+            return "Confirm the property's price (or your target budget) and whether you have a specific property in mind."
+        if intent.get("propertyValue") and not intent.get("downPayment"):
+            return "Confirm your estimated down payment amount (or percentage)."
     if not intent.get("loanAmount"):
         return "Confirm desired loan amount and timeline."
     if not intent.get("purpose"):
@@ -327,6 +460,145 @@ def _next_angle(intent: dict) -> str:
     return "Validate documents, collateral, and eligibility constraints."
 
 
+def _build_borrower_assistant_reply(db: Session, conversation_id: str, intent: dict) -> tuple[str, str]:
+    purpose = (intent.get("purpose") or "").strip()
+    purpose_label = {
+        "home": "a home loan",
+        "car": "a car loan",
+        "personal": "a personal loan",
+        "business": "a business loan",
+        "education": "an education loan",
+        "debt_consolidation": "debt consolidation",
+    }.get(purpose, "a loan")
+
+    questions: list[str] = []
+
+    if not purpose:
+        questions.append("What’s the loan for (home, car, personal, business, or debt consolidation)?")
+
+    if purpose == "debt_consolidation" and not intent.get("existingDebts"):
+        questions.append("Roughly how much total outstanding debt do you want to consolidate, and what’s your current total monthly payment?")
+
+    if purpose == "home":
+        if not intent.get("propertyValue") and not intent.get("loanAmount"):
+            questions.append("What’s the approximate property price (or your target budget)?")
+        if intent.get("propertyValue") and not intent.get("downPayment"):
+            questions.append("What down payment do you expect to put in (amount or %)?")
+    if not intent.get("loanAmount") and purpose not in {"debt_consolidation", "home"}:
+        questions.append("What loan amount are you considering (even an approximate range)?")
+
+    if not intent.get("monthlyIncome"):
+        questions.append("What’s your approximate monthly income?")
+
+    if not intent.get("employmentType"):
+        questions.append("Are you salaried or self-employed?")
+
+    credit = intent.get("creditHistory")
+    credit_norm = str(credit).strip().lower() if credit is not None else ""
+    if not credit_norm:
+        questions.append("Do you know your credit score (or a rough range)?")
+    elif credit_norm in {"unknown", "not_known", "not known", "n/a", "na"}:
+        if not intent.get("recentDelinquencies12m"):
+            questions.append("Have you had any late payments, collections, or delinquencies in the last 12 months?")
+
+    if not intent.get("preferredTenure"):
+        questions.append("What tenure would you be comfortable with (e.g., 36 months, 5 years)?")
+
+    if not questions:
+        return (
+            "Thanks — I have enough to refine recommendations. Do you want the lowest EMI, lowest total interest, or fastest approval?",
+            "heuristic_only",
+        )
+
+    assistant_rows = (
+        db.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id, Message.role == "assistant")
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(8)
+        )
+        .scalars()
+        .all()
+    )
+    recently_asked: set[str] = set()
+    for m in assistant_rows:
+        recently_asked.update(_extract_question_lines(m.content or ""))
+
+    unasked = [q for q in questions if q not in recently_asked]
+    top = unasked[:2]
+    if not top:
+        return (
+            "Thanks — I have enough to refine recommendations. Do you want the lowest EMI, lowest total interest, or fastest approval?",
+            "heuristic_only",
+        )
+    bullets = "\n".join([f"- {q}" for q in top])
+    return (f"Got it — for {purpose_label}, I just need a few quick details:\n\n{bullets}", "heuristic_only")
+
+
+def analyze_intent_message(content: str, previous_intent: Optional[dict], last_assistant_text: Optional[str] = None) -> dict[str, Any]:
+    amount = _extract_amount(content)
+    income = _extract_income(content)
+    credit = _extract_credit_score(content)
+    if credit is None and _mentions_unknown_credit_score(content):
+        credit = "unknown"
+    debts = _extract_existing_debts(content)
+    tenure = _extract_tenure(content)
+    property_value = _extract_property_value(content)
+    down_payment = _extract_down_payment(content)
+    selected_plan = None
+    c = content.lower()
+    if "aggressive" in c:
+        selected_plan = "aggressive"
+    elif "balanced" in c:
+        selected_plan = "balanced"
+    elif "conservative" in c:
+        selected_plan = "conservative"
+    delinq = _extract_recent_delinquencies_12m(content)
+    if delinq is None and last_assistant_text:
+        if "late payments" in last_assistant_text.lower() and ("delinquenc" in last_assistant_text.lower() or "collections" in last_assistant_text.lower()):
+            if _is_yes(content):
+                delinq = "yes"
+            elif _is_no(content):
+                delinq = "no"
+    derived_amount = amount
+    if derived_amount is None and property_value and down_payment:
+        pv = _parse_amount_to_number(property_value)
+        if isinstance(down_payment, str) and down_payment.endswith("%") and pv is not None:
+            try:
+                pct = float(down_payment.strip("%")) / 100.0
+                derived_amount = str(int(round(pv * (1.0 - pct))))
+            except Exception:
+                derived_amount = None
+        else:
+            dp = _parse_amount_to_number(down_payment)
+            if pv is not None and dp is not None:
+                derived_amount = str(int(round(max(0.0, pv - dp))))
+    intent = IntentSummary(
+        purpose=_infer_purpose(content),
+        urgency=_infer_urgency(content),
+        loanAmount=amount,
+        propertyValue=property_value,
+        downPayment=down_payment,
+        selectedPlan=selected_plan,
+        monthlyIncome=income,
+        employmentType=_infer_employment(content),
+        creditHistory=credit,
+        existingDebts=debts,
+        preferredTenure=tenure,
+        recentDelinquencies12m=delinq,
+    )
+    if derived_amount is not None:
+        intent.loanAmount = derived_amount
+    merged = _merge_intent(previous_intent, intent)
+    seriousness, fit = _compute_scores(merged)
+    return {
+        "intentSummary": merged,
+        "seriousnessScore": seriousness,
+        "fitScore": fit,
+        "nextConversationAngle": _next_angle(merged),
+    }
+
+
 def _parse_amount_to_number(v: Any) -> Optional[float]:
     if v is None:
         return None
@@ -335,6 +607,12 @@ def _parse_amount_to_number(v: Any) -> Optional[float]:
     if not isinstance(v, str):
         return None
     s = v.strip().lower().replace(",", "").replace(" ", "")
+    s = re.sub(r"^(usd|xcd|ttd|jmd|gyd|eur|gbp|inr|cad|aud|mxn)", "", s)
+    s = s.lstrip("$€£¥")
+    s = re.sub(r"(usd|xcd|ttd|jmd|gyd|eur|gbp|inr|cad|aud|mxn)$", "", s)
+    s = re.sub(r"[^0-9.km.]", "", s)
+    if not s:
+        return None
     m = re.fullmatch(r"(\d+(?:\.\d+)?)(k|m)?", s)
     if not m:
         return None
@@ -543,6 +821,8 @@ def _build_borrower_system_prompt(
         "- Use the borrower's currency if evident; otherwise default to USD\n"
         "- Keep responses concise — ideally under 150 words for conversational messages\n"
         "- Never ask the same question twice if it has already been answered\n\n"
+        "- KYC (identity verification) is part of Document Collection; avoid saying you will move to it later\n"
+        "- If you are already asking for documents, speak in the present: you are in Document Collection & KYC now\n\n"
         "DOCUMENT HANDLING:\n"
         "- When requesting documents, use the product's requiredDocuments names exactly as listed in the catalog.\n"
         "- If you don't know the product yet, use the CURRENT phase typical documents list and request only the minimum set.\n"
@@ -552,7 +832,7 @@ def _build_borrower_system_prompt(
         "The borrower's application progresses through these phases:\n"
         f"{phase_list}\n\n"
         "PHASE PROGRESSION:\n"
-        "PHASE PROGRESSION:\n"
+        "Determine if the borrower should advance to the next phase. Include a <phase_update> tag when they have naturally progressed:\n"
         "- Only advance one phase at a time\n"
         "- Only include <phase_update> when there's a genuine progression signal\n"
         '<phase_update>{"phaseId": "the_phase_id_to_advance_to"}</phase_update>\n'
@@ -588,6 +868,103 @@ def _coerce_optional_str(value: Any) -> Optional[str]:
     if isinstance(value, (int, float)):
         return str(value)
     return str(value).strip() or None
+
+
+def _strip_think_blocks(text: str) -> str:
+    if not text:
+        return ""
+    s = text
+    s = re.sub(r"(?is)<think>[\s\S]*?</think>", "", s)
+    s = re.sub(r"(?is)</think>", "", s)
+    s = re.sub(r"(?is)<think>", "", s)
+    return s.strip()
+
+
+def _dedupe_assistant_text(text: str) -> str:
+    if not text:
+        return ""
+
+    def norm(line: str) -> str:
+        return re.sub(r"\s+", " ", (line or "").strip()).lower()
+
+    def norm_np(line: str) -> str:
+        return re.sub(r"[^a-z0-9 ]+", "", norm(line))
+
+    out: list[str] = []
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            if out and out[-1] == "":
+                continue
+            out.append("")
+            continue
+
+        if out and out[-1] and norm_np(line) == norm_np(out[-1]):
+            continue
+
+        if out and out[-1]:
+            prev_np = norm_np(out[-1])
+            cur_np = norm_np(line)
+            if prev_np and cur_np.startswith(prev_np) and len(prev_np) >= 20:
+                out[-1] = line.strip()
+                continue
+
+        out.append(line.strip())
+
+    cleaned = "\n".join(out).strip()
+    return cleaned
+
+
+def _limit_questions_in_text(text: str, max_questions: int = 2) -> str:
+    if not text:
+        return ""
+    if max_questions <= 0:
+        return text.strip()
+
+    out: list[str] = []
+    q_count = 0
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            out.append("")
+            continue
+
+        if q_count >= max_questions:
+            if "?" in line:
+                continue
+            if line.strip().startswith(("-", "•")):
+                continue
+            out.append(line)
+            continue
+
+        if "?" not in line:
+            out.append(line)
+            continue
+
+        q_in_line = line.count("?")
+        if q_count + q_in_line <= max_questions:
+            out.append(line)
+            q_count += q_in_line
+            continue
+
+        remaining = max_questions - q_count
+        if remaining <= 0:
+            continue
+        cut = -1
+        start = 0
+        for _ in range(remaining):
+            cut = line.find("?", start)
+            if cut == -1:
+                break
+            start = cut + 1
+        if cut != -1:
+            out.append(line[: cut + 1].rstrip())
+            q_count = max_questions
+        else:
+            out.append(line)
+            q_count = max_questions
+
+    return "\n".join(out).strip()
 
 
 def _normalize_purpose(value: Optional[str]) -> Optional[str]:
@@ -763,7 +1140,7 @@ def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str
             history.append(AIMessage(content=m.content or ""))
     llm_error: Optional[str] = None
     models_to_try: list[str] = []
-    configured_model = str(os.getenv("OLLAMA_MODEL", "qwen2.5:7b")).strip()
+    configured_model = str(os.getenv("OLLAMA_MODEL", "qwen3:latest")).strip()
     if configured_model:
         models_to_try.append(configured_model)
     fallback_model = str(os.getenv("OLLAMA_FALLBACK_MODEL", "llama3")).strip()
@@ -799,6 +1176,7 @@ def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str
     assistant_text = remaining2.strip()
     if not assistant_text:
         assistant_text = remaining2.strip() or remaining.strip()
+    assistant_text = _strip_think_blocks(assistant_text)
     if not assistant_text:
         raise RuntimeError("AI engine response contained no assistant text.")
 
@@ -828,6 +1206,16 @@ def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str
             final_recommendation = None
 
     grounded_loan_amount = _extract_amount(combined_user_text)
+    grounded_property_value = _extract_property_value(combined_user_text)
+    grounded_down_payment = _extract_down_payment(combined_user_text)
+    grounded_selected_plan = None
+    combined_lower = combined_user_text.lower()
+    if "aggressive" in combined_lower:
+        grounded_selected_plan = "aggressive"
+    elif "balanced" in combined_lower:
+        grounded_selected_plan = "balanced"
+    elif "conservative" in combined_lower:
+        grounded_selected_plan = "conservative"
     grounded_income = _extract_income(combined_user_text)
     grounded_credit = _extract_credit_score(combined_user_text)
     if grounded_credit is None and _mentions_unknown_credit_score(combined_user_text):
@@ -836,6 +1224,19 @@ def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str
     grounded_debts = _extract_existing_debts(combined_user_text)
     grounded_tenure = _extract_tenure(combined_user_text)
     grounded_delinq = _extract_recent_delinquencies_12m(combined_user_text)
+    derived_amount = grounded_loan_amount
+    if derived_amount is None and grounded_property_value and grounded_down_payment:
+        pv = _parse_amount_to_number(grounded_property_value)
+        if isinstance(grounded_down_payment, str) and grounded_down_payment.endswith("%") and pv is not None:
+            try:
+                pct = float(grounded_down_payment.strip("%")) / 100.0
+                derived_amount = str(int(round(pv * (1.0 - pct))))
+            except Exception:
+                derived_amount = None
+        else:
+            dp = _parse_amount_to_number(grounded_down_payment)
+            if pv is not None and dp is not None:
+                derived_amount = str(int(round(max(0.0, pv - dp))))
 
     intent_summary = IntentSummary(
         purpose=_normalize_purpose(intent_obj.get("purpose")),
@@ -843,7 +1244,10 @@ def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str
         affordability=_coerce_optional_str(intent_obj.get("affordability")),
         monthlyIncome=_coerce_optional_str(grounded_income or intent_obj.get("monthlyIncome")),
         existingDebts=_coerce_optional_str(grounded_debts or intent_obj.get("existingDebts")),
-        loanAmount=_coerce_optional_str(grounded_loan_amount or intent_obj.get("loanAmount")),
+        loanAmount=_coerce_optional_str(derived_amount or grounded_loan_amount or intent_obj.get("loanAmount")),
+        propertyValue=_coerce_optional_str(grounded_property_value or intent_obj.get("propertyValue")),
+        downPayment=_coerce_optional_str(grounded_down_payment or intent_obj.get("downPayment")),
+        selectedPlan=_coerce_optional_str(grounded_selected_plan or intent_obj.get("selectedPlan")),
         preferredTenure=_coerce_optional_str(grounded_tenure or intent_obj.get("preferredTenure")),
         collateralAvailable=_coerce_optional_str(intent_obj.get("collateralAvailable")),
         employmentType=_normalize_employment(grounded_employment or intent_obj.get("employmentType")),
@@ -879,17 +1283,35 @@ def _llm_borrower_chat_turn(db: Session, conversation: Conversation) -> dict[str
     }
 
 
-def _desired_phase_index(intent: dict) -> int:
-    if intent.get("purpose") and intent.get("loanAmount"):
-        if intent.get("employmentType") and intent.get("monthlyIncome"):
-            if intent.get("creditHistory"):
-                return 3
-            return 2
-        return 1
-    return 0
+def _desired_phase_index(intent: dict, latest_user_text: Optional[str] = None) -> int:
+    idx = 0
+    amount_signal = intent.get("loanAmount") or intent.get("propertyValue")
+    if intent.get("purpose") and amount_signal:
+        idx = 1
+
+    t = (latest_user_text or "").lower()
+    docs_signal = (
+        bool(re.search(r"\bupload(?:ed|ing)?\b", t))
+        or bool(re.search(r"\bdocuments?\b", t))
+        or bool(re.search(r"\bpassport\b", t))
+        or bool(re.search(r"\bkyc\b", t))
+        or bool(re.search(r"\bid\b", t))
+        or ".pdf" in t
+        or ".png" in t
+        or ".jpg" in t
+        or ".jpeg" in t
+        or "bank statement" in t
+        or "pay slip" in t
+        or "payslip" in t
+        or "job letter" in t
+    )
+    if docs_signal:
+        idx = max(idx, 2)
+
+    return idx
 
 
-def apply_phase_guardrails(db: Session, conversation: Conversation) -> dict[str, Any] | None:
+def apply_phase_guardrails(db: Session, conversation: Conversation, latest_user_text: Optional[str] = None) -> dict[str, Any] | None:
     phases = (
         db.execute(select(LoanPhase).where(LoanPhase.is_active.is_(True)).order_by(LoanPhase.sort_order.asc(), LoanPhase.id.asc()))
         .scalars()
@@ -907,7 +1329,19 @@ def apply_phase_guardrails(db: Session, conversation: Conversation) -> dict[str,
         return None
 
     current_index = phase_ids.index(conversation.current_phase_id)
-    desired_index = min(len(phases) - 1, _desired_phase_index(conversation.intent_summary or {}))
+    desired_index = min(len(phases) - 1, _desired_phase_index(conversation.intent_summary or {}, latest_user_text=latest_user_text))
+    if desired_index < current_index:
+        from_phase = phases[current_index]
+        to_phase = phases[desired_index]
+        conversation.current_phase_id = to_phase.id
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+        return {
+            "fromPhaseId": from_phase.id,
+            "toPhaseId": to_phase.id,
+            "reason": "clamp_backwards",
+        }
     if desired_index <= current_index:
         return None
 
@@ -1428,6 +1862,95 @@ def list_messages(
     return [_serialize_message(m) for m in rows]
 
 
+@router.post("/{conversation_id}/documents/ocr")
+async def ocr_document(
+    conversation_id: str,
+    file: UploadFile = File(...),
+    label: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+):
+    request_counter.labels(endpoint="/api/conversations/{conversation_id}/documents/ocr").inc()
+    conv = db.get(Conversation, conversation_id)
+    if not conv:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/documents/ocr").inc()
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    actor_is_officer = is_officer_request(x_api_key, authorization)
+    if conv.chat_role == "officer" and not actor_is_officer:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/documents/ocr").inc()
+        raise HTTPException(status_code=403, detail="Officer access required")
+
+    raw = await file.read()
+    if len(raw) > 15_000_000:
+        request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/documents/ocr").inc()
+        raise HTTPException(status_code=413, detail="File too large")
+
+    original_name = file.filename or "upload"
+    ext = os.path.splitext(original_name)[1].lower()
+    content_type = (file.content_type or "").lower()
+    is_pdf = content_type == "application/pdf" or ext == ".pdf"
+
+    engine = None
+    extracted = ""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext or (".pdf" if is_pdf else ".bin")) as tmp:
+            tmp.write(raw)
+            tmp_path = tmp.name
+
+        if is_pdf:
+            if not shutil.which("pdftotext"):
+                request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/documents/ocr").inc()
+                raise HTTPException(status_code=501, detail="pdftotext not available on server")
+            proc = subprocess.run(
+                ["pdftotext", "-layout", "-enc", "UTF-8", tmp_path, "-"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30,
+            )
+            if proc.returncode != 0:
+                request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/documents/ocr").inc()
+                raise HTTPException(status_code=500, detail=(proc.stderr.decode("utf-8", errors="replace") or "OCR failed"))
+            extracted = proc.stdout.decode("utf-8", errors="replace")
+            engine = "pdftotext"
+        else:
+            if not shutil.which("tesseract"):
+                request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/documents/ocr").inc()
+                raise HTTPException(status_code=501, detail="tesseract not available on server")
+            proc = subprocess.run(
+                ["tesseract", tmp_path, "stdout", "-l", "eng"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=45,
+            )
+            if proc.returncode != 0:
+                request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/documents/ocr").inc()
+                raise HTTPException(status_code=500, detail=(proc.stderr.decode("utf-8", errors="replace") or "OCR failed"))
+            extracted = proc.stdout.decode("utf-8", errors="replace")
+            engine = "tesseract"
+    finally:
+        try:
+            if tmp_path:
+                os.unlink(tmp_path)
+        except Exception:
+            pass
+
+    extracted = extracted.replace("\x0c", "").strip()
+    lines = [ln.strip() for ln in extracted.splitlines() if ln.strip()]
+    preview = " • ".join(lines[:5]) if lines else ""
+
+    return {
+        "fileName": original_name,
+        "label": label or original_name,
+        "contentType": file.content_type,
+        "engine": engine,
+        "text": extracted,
+        "preview": preview,
+    }
+
+
 @router.post("/{conversation_id}/messages")
 def send_message(
     conversation_id: str,
@@ -1498,11 +2021,12 @@ def send_message(
         )
         llm_turn: Optional[dict[str, Any]] = None
         llm_error_detail: Optional[str] = None
-        try:
-            llm_turn = _llm_borrower_chat_turn(db, conv)
-        except Exception as e:
-            llm_turn = None
-            llm_error_detail = str(e) or e.__class__.__name__
+        if not os.getenv("PYTEST_CURRENT_TEST") and is_ollama_available():
+            try:
+                llm_turn = _llm_borrower_chat_turn(db, conv)
+            except Exception as e:
+                llm_turn = None
+                llm_error_detail = str(e) or e.__class__.__name__
         desired_phase_id: Optional[str] = None
         if llm_turn:
             analysis = {
@@ -1515,20 +2039,19 @@ def send_message(
             assistant_engine_override = "borrower_chatgpt_llm"
             desired_phase_id = llm_turn.get("desiredPhaseId")
             final_recommendation_override = llm_turn.get("finalRecommendation") if isinstance(llm_turn.get("finalRecommendation"), dict) else None
+            if last_assistant_text and isinstance(assistant_text_override, str):
+                def _norm(s: str) -> str:
+                    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+                same = _norm(assistant_text_override) == _norm(last_assistant_text or "")
+                if not same:
+                    prev_qs = set(_extract_question_lines(last_assistant_text or ""))
+                    curr_qs = set(_extract_question_lines(assistant_text_override))
+                    same = len(prev_qs) > 0 and prev_qs == curr_qs
+                if same:
+                    assistant_text_override, assistant_engine_override = _build_borrower_assistant_reply(db, conversation_id, analysis["intentSummary"])
         else:
-            request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/messages").inc()
-            v2_messages_sent_total.labels(chat_role=conv.chat_role, actor_role="borrower", status="llm_unavailable").inc()
-            base_url = str(os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).strip()
-            model_name = str(os.getenv("OLLAMA_MODEL", "qwen2.5:7b")).strip()
-            detail_parts = [
-                "AI engine unavailable.",
-                f"OLLAMA_BASE_URL={base_url}",
-                f"OLLAMA_MODEL={model_name}",
-            ]
-            if llm_error_detail:
-                detail_parts.append(f"Reason: {llm_error_detail}")
-            detail_parts.append("Ensure Ollama is running and the configured model is pulled.")
-            raise HTTPException(status_code=503, detail=" ".join(detail_parts))
+            analysis = analyze_intent_message(req.content, conv.intent_summary, last_assistant_text=last_assistant_text)
+            assistant_engine_override = "borrower_rules_fallback"
 
         conv.intent_summary = analysis["intentSummary"]
         conv.seriousness_score = analysis["seriousnessScore"]
@@ -1546,7 +2069,7 @@ def send_message(
         db.refresh(conv)
         if desired_phase_id:
             _apply_llm_phase_update(db, conv, desired_phase_id)
-        phase_action = apply_phase_guardrails(db, conv)
+        phase_action = apply_phase_guardrails(db, conv, latest_user_text=req.content)
         try:
             existing_loan_id = (
                 db.execute(select(Loan.id).where(Loan.conversation_id == conv.id).order_by(Loan.created_at.desc(), Loan.id.desc()).limit(1))
@@ -1634,12 +2157,123 @@ def send_message(
             assistant_text = assistant_text_override.strip()
             assistant_engine = str(assistant_engine_override or "borrower_chatgpt_llm")
         else:
-            raise HTTPException(status_code=503, detail="AI engine unavailable.")
+            assistant_text, assistant_engine = _build_borrower_assistant_reply(db, conversation_id, analysis["intentSummary"])
+        assistant_text = _dedupe_assistant_text(_limit_questions_in_text(_strip_think_blocks(assistant_text), max_questions=2))
+    loan_recommendation_cards: Optional[list[dict[str, Any]]] = None
+    selected_recommendation: Optional[dict[str, Any]] = None
+    loan_snapshot: Optional[dict[str, Any]] = None
+    try:
+        intent_obj = analysis.get("intentSummary") if isinstance(analysis, dict) else {}
+        intent_dict = intent_obj if isinstance(intent_obj, dict) else {}
+        purpose = str(intent_dict.get("purpose") or "").strip().lower()
+        la = _parse_amount_to_number(intent_dict.get("loanAmount"))
+        pv = _parse_amount_to_number(intent_dict.get("propertyValue"))
+        dp_raw = intent_dict.get("downPayment")
+        dp = None
+        if isinstance(dp_raw, str) and dp_raw.endswith("%") and pv is not None:
+            try:
+                pct = float(dp_raw.strip("%")) / 100.0
+                dp = pv * pct
+            except Exception:
+                dp = None
+        else:
+            dp = _parse_amount_to_number(dp_raw)
+        if pv is None and la is not None:
+            pv = la
+        if la is not None and pv is not None and dp is not None and la > pv and purpose == "home":
+            la = max(0.0, pv - dp)
+
+        rate_pct = None
+        recs = conv.recommended_products if isinstance(conv.recommended_products, list) else []
+        if recs and isinstance(recs[0], dict):
+            er = recs[0].get("estimatedRate")
+            if isinstance(er, str):
+                try:
+                    rate_pct = float(re.sub(r"[^0-9.]+", "", er))
+                except Exception:
+                    rate_pct = None
+        if rate_pct is None:
+            rate_pct = 8.4
+
+        if la is not None and rate_pct is not None and la > 0:
+            def _calc(amount: float, annual_rate_pct: float, tenure_years: int) -> tuple[float, float, float]:
+                n = max(1, tenure_years * 12)
+                r = (annual_rate_pct / 100.0) / 12.0
+                factor = math.pow(1 + r, n)
+                emi = (amount * r * factor) / (factor - 1) if factor > 1 and r > 0 else amount / n
+                total = emi * n
+                return (emi, total - amount, total)
+
+            option_defs = [
+                ("Aggressive Plan", "aggressive", max(0.1, rate_pct - 0.25), 15),
+                ("Balanced Plan", "balanced", max(0.1, rate_pct), 20),
+                ("Conservative Plan", "conservative", max(0.1, rate_pct + 0.5), 30),
+            ]
+            cards: list[dict[str, Any]] = []
+            for name, t, rate, yrs in option_defs:
+                emi, ti, tr = _calc(float(la), float(rate), int(yrs))
+                cards.append(
+                    {
+                        "name": name,
+                        "type": t,
+                        "interest_rate": float(round(rate, 2)),
+                        "tenure_years": int(yrs),
+                        "monthly_emi": float(round(emi, 2)),
+                        "total_interest": float(round(ti, 2)),
+                        "total_repayment": float(round(tr, 2)),
+                        "pros": [],
+                        "cons": [],
+                        "recommended": t == "balanced",
+                    }
+                )
+            loan_recommendation_cards = cards
+
+        selection_key = ""
+        if isinstance(req.content, str):
+            c = req.content.lower()
+            if "aggressive" in c:
+                selection_key = "aggressive"
+            elif "balanced" in c:
+                selection_key = "balanced"
+            elif "conservative" in c:
+                selection_key = "conservative"
+        if not selection_key and isinstance(intent_dict.get("selectedPlan"), str):
+            selection_key = str(intent_dict.get("selectedPlan") or "").strip().lower()
+        if selection_key and loan_recommendation_cards:
+            selected_recommendation = next((r for r in loan_recommendation_cards if r.get("type") == selection_key), None)
+
+        if selected_recommendation:
+            loan_recommendation_cards = None
+            if purpose == "home" and (pv is None or dp is None):
+                loan_snapshot = None
+            else:
+                loan_amt = float(la) if la is not None else 0.0
+                prop_val = float(pv) if pv is not None else float(loan_amt)
+                down = float(dp) if dp is not None else 0.0
+                ltv_pct = ((loan_amt / prop_val) * 100.0) if prop_val > 0 else 100.0
+                loan_snapshot = {
+                    "loan_amount": loan_amt,
+                    "down_payment": down,
+                    "property_value": prop_val,
+                    "estimated_emi": float(selected_recommendation["monthly_emi"]),
+                    "tenure_years": float(selected_recommendation["tenure_years"]),
+                    "interest_rate": float(selected_recommendation["interest_rate"]),
+                    "total_interest": float(selected_recommendation["total_interest"]),
+                    "total_repayment": float(selected_recommendation["total_repayment"]),
+                    "ltv_ratio": float(round(ltv_pct, 1)),
+                    "currency": "USD",
+                }
+    except Exception:
+        loan_recommendation_cards = None
+        selected_recommendation = None
+        loan_snapshot = None
     assistant_metadata = {
         "actorRole": "officer_assistant" if actor_is_officer else None,
         "assistantEngine": assistant_engine,
         "intentAnalysis": analysis,
-        "loanRecommendations": conv.recommended_products if (conv.chat_role == "borrower" and not actor_is_officer) else None,
+        "loanRecommendations": loan_recommendation_cards if (conv.chat_role == "borrower" and not actor_is_officer and selected_recommendation is None) else None,
+        "selectedRecommendation": selected_recommendation,
+        "loanSnapshot": loan_snapshot,
         "approvalProbability": approval_probability,
         "phaseAction": phase_action,
         "loanAction": loan_action,

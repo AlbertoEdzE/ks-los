@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { ApplicantCreditProfile } from '../types';
 
-const API_URL = 'http://localhost:8000';
+const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';

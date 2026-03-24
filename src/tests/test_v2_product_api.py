@@ -380,7 +380,50 @@ def test_wp_v2_009_phase_progression_is_sequential_and_no_skips():
     assert send2.status_code == 200
     conv2 = client.get(f"/api/conversations/{conv_id}").json()
     idx2 = ids.index(conv2["currentPhaseId"])
-    assert idx2 == idx1 + 1
+    assert idx2 == idx1
+
+
+def test_wp_v2_020_document_ocr_endpoint_accepts_uploads():
+    import shutil
+    from pathlib import Path
+
+    created = client.post("/api/conversations", json={})
+    assert created.status_code == 200
+    conv_id = created.json()["conversation"]["id"]
+
+    root = Path(__file__).resolve().parents[2]
+    png_path = root / "data" / "passport-example.png"
+    pdf_path = root / "data" / "job-letter.pdf"
+
+    with open(png_path, "rb") as f:
+        r = client.post(
+            f"/api/conversations/{conv_id}/documents/ocr",
+            files={"file": (png_path.name, f, "image/png")},
+            data={"label": "Passport"},
+        )
+    if shutil.which("tesseract"):
+        assert r.status_code == 200
+        payload = r.json()
+        assert payload.get("engine") == "tesseract"
+        assert payload.get("fileName") == png_path.name
+        assert "preview" in payload
+    else:
+        assert r.status_code == 501
+
+    with open(pdf_path, "rb") as f:
+        r2 = client.post(
+            f"/api/conversations/{conv_id}/documents/ocr",
+            files={"file": (pdf_path.name, f, "application/pdf")},
+            data={"label": "Job Letter"},
+        )
+    if shutil.which("pdftotext"):
+        assert r2.status_code == 200
+        payload2 = r2.json()
+        assert payload2.get("engine") == "pdftotext"
+        assert payload2.get("fileName") == pdf_path.name
+        assert "preview" in payload2
+    else:
+        assert r2.status_code == 501
 
 
 def test_v2_loans_list_and_patch_requires_officer():

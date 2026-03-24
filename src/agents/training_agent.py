@@ -1,6 +1,9 @@
 from typing import Dict, Any
 import logging
-import mlflow
+try:
+    import mlflow
+except Exception:
+    mlflow = None
 from src.config.llm import get_llm
 from langchain_core.messages import SystemMessage, HumanMessage
 from src.ml.train import train_model
@@ -49,10 +52,10 @@ def propose_training_plan(context: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 def execute_training(plan: Dict[str, Any]) -> Dict[str, Any]:
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    mlflow.set_experiment(EXPERIMENT_NAME)
     hyperparams = plan.get("hyperparameters", {})
     n_samples = int(plan.get("n_samples", 2000))
+    if mlflow is not None:
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(EXPERIMENT_NAME)
     result = train_model(params=hyperparams, n_samples=n_samples)
     return result
-

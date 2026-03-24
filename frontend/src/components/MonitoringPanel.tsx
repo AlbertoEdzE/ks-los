@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react"
-import { getCorrelationId, getTraceparent, setTraceparentFromResponse } from "../lib/correlation"
 
 const ADMIN_HEADERS = { Authorization: "Bearer admin-access" }
+
+const API_BASE_URL =
+  (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.DEV ? "http://localhost:8001" : "")
 
 type Summary = {
   training_runs: number
@@ -19,10 +21,9 @@ export function MonitoringPanel() {
     const load = async () => {
       setError(null)
       try {
-        const res = await fetch("http://localhost:8000/observability/summary", { headers: { ...ADMIN_HEADERS, "X-Correlation-ID": getCorrelationId(), "traceparent": getTraceparent() || "" } })
+        const res = await fetch(`${API_BASE_URL}/observability/summary`, { headers: ADMIN_HEADERS })
         if (!res.ok) throw new Error("Failed to load summary")
         const data = (await res.json()) as Summary
-        setTraceparentFromResponse(res)
         setSummary(data)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load summary")
@@ -46,7 +47,7 @@ export function MonitoringPanel() {
           <div>
             <button
               onClick={async () => {
-                const res = await fetch("http://localhost:8000" + summary.drift_report_endpoint, { headers: ADMIN_HEADERS })
+                const res = await fetch(`${API_BASE_URL}${summary.drift_report_endpoint}`, { headers: ADMIN_HEADERS })
                 if (!res.ok) return
                 const html = await res.text()
                 const blob = new Blob([html], { type: "text/html" })

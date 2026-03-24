@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/infrastructure/docker-compose.yml"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5174}"
+MLFLOW_PORT="${MLFLOW_PORT:-5000}"
 
 wait_for_http() {
     local url="$1"
@@ -45,6 +46,10 @@ check_and_free_port() {
     local service_name=$2
     
     if lsof -i :$port >/dev/null 2>&1; then
+        if lsof -nP -i :$port | grep -qi 'com.docke'; then
+            echo "[KS LOS] Port $port ($service_name) is used by Docker Desktop. Skipping process kill."
+            return 0
+        fi
         echo "[KS LOS] Port $port ($service_name) is in use. Attempting to free..."
         local pids
         pids="$(lsof -ti :"$port" 2>/dev/null || true)"
@@ -58,6 +63,21 @@ check_and_free_port() {
             echo "[KS LOS] Freed port $port ($service_name)."
         fi
     fi
+}
+
+free_docker_port() {
+  local port="$1"
+  local name="$2"
+  if command -v docker >/dev/null 2>&1; then
+    local ids
+    ids="$(docker ps --format '{{.ID}} {{.Ports}}' | awk '/0.0.0.0:'"$port"'->/ {print $1}')"
+    if [ -n "$ids" ]; then
+      echo "[KS LOS] Stopping Docker containers using port $port ($name)..."
+      for id in $ids; do
+        docker stop "$id" >/dev/null 2>&1 || true
+      done
+    fi
+  fi
 }
 
 # Function to ensure Docker is running
@@ -102,16 +122,38 @@ fi
 # Docker services ports (in case local services are running or docker failed to clean up)
 check_and_free_port 6379 "Redis"
 check_and_free_port 5432 "Postgres"
-check_and_free_port 5000 "MLflow"
+check_and_free_port "$MLFLOW_PORT" "MLflow"
 check_and_free_port 9090 "Prometheus"
 check_and_free_port 3000 "Grafana"
 check_and_free_port 4317 "Otel Collector"
 check_and_free_port 16686 "Jaeger"
 
 # App ports
+free_docker_port "$BACKEND_PORT" "Backend API"
 check_and_free_port "$BACKEND_PORT" "Backend API"
 check_and_free_port 5173 "Frontend"
 check_and_free_port "$FRONTEND_PORT" "Frontend"
+
+if lsof -i :"$MLFLOW_PORT" >/dev/null 2>&1; then
+  for p in 5001 5002 5003 5004 5005 5006 5007 5008 5009 5010; do
+    if ! lsof -i :"$p" >/dev/null 2>&1; then
+      MLFLOW_PORT="$p"
+      break
+    fi
+  done
+fi
+export MLFLOW_PORT
+
+# Pick alternate backend port if occupied
+if lsof -i :"$BACKEND_PORT" >/dev/null 2>&1; then
+  for p in 8001 8002 8003 8004 8005 8006 8007 8008 8009 8010; do
+    if ! lsof -i :"$p" >/dev/null 2>&1; then
+      BACKEND_PORT="$p"
+      break
+    fi
+  done
+fi
+export BACKEND_PORT
 
 ensure_docker_running
 
@@ -142,7 +184,7 @@ echo "[KS LOS] Starting FastAPI (backend) on :$BACKEND_PORT..."
 export LOG_JSON=1
 export OTLP_URL="http://localhost:4317"
 export ENFORCE_RBAC=0
-export MLFLOW_TRACKING_URI="http://localhost:5000"
+export MLFLOW_TRACKING_URI="http://localhost:$MLFLOW_PORT"
 
 # Start Backend with nohup
 (
@@ -183,7 +225,7 @@ if [ -f "$FRONT_DIR/package.json" ]; then
     
     echo "[KS LOS] Starting frontend dev server..."
     
-    nohup npm run dev -- --port "$FRONTEND_PORT" --strictPort > "$ROOT_DIR/frontend.log" 2>&1 &
+    VITE_API_URL="http://localhost:$BACKEND_PORT" nohup npm run dev -- --port "$FRONTEND_PORT" --strictPort > "$ROOT_DIR/frontend.log" 2>&1 &
     echo $! > "$ROOT_DIR/.pid_frontend"
   )
 

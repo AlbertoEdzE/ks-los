@@ -1,12 +1,15 @@
 import React, { useMemo, useRef, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { LoanSnapshotCard } from './LoanSnapshotCard';
+import { LoanCard } from './LoanCard';
+import { DocumentsCard } from './DocumentsCard';
+import { StpProcessingCard, AffordabilityCard, TermsAcceptanceCard } from './StpCards';
 
 interface Props {
   onConversationUpdated?: (conversation: V2Conversation) => void;
   onPhasesUpdated?: (phases: V2Phase[]) => void;
-  conversation?: V2Conversation | null;
-  phases?: V2Phase[] | null;
+  onMessagesUpdated?: (messages: V2Message[]) => void;
   resetSignal?: number;
 }
 
@@ -40,7 +43,7 @@ export type V2Phase = {
   updatedAt?: string | null;
 };
 
-type V2Message = {
+export type V2Message = {
   id: string;
   conversationId: string;
   role: V2ChatRole;
@@ -425,6 +428,23 @@ const STORAGE_KEY = 'v2_borrower_conversation_id';
 
 type ViewState = 'welcome' | 'exiting' | 'chat';
 
+const API_BASE_URL =
+  (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.DEV ? 'http://localhost:8000' : '');
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+
+const parseMetadata = (value: unknown): Record<string, unknown> | null => {
+  if (typeof value === 'string') {
+    try {
+      return asRecord(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+  return asRecord(value);
+};
+
 const getActorRole = (metadata: unknown): string | null => {
   if (!metadata || typeof metadata !== 'object') return null;
   const role = (metadata as { actorRole?: unknown }).actorRole;
@@ -523,8 +543,9 @@ const getDocumentCategories = (loanType: string, employmentType: string): Docume
   return categories;
 };
 
-export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhasesUpdated, resetSignal }) => {
+export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhasesUpdated, onMessagesUpdated, resetSignal }) => {
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversation, setConversation] = useState<V2Conversation | null>(null);
   const [messages, setMessages] = useState<V2Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -696,6 +717,10 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   };
 
   useEffect(() => {
+    onMessagesUpdated?.(messages.filter((m) => !isOfficerOnlyMessage(m)));
+  }, [messages, onMessagesUpdated]);
+
+  useEffect(() => {
     return () => {
       if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
     };
@@ -723,6 +748,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
 
       if (!activeConversationId) {
         setConversationId(null);
+        setConversation(null);
         setMessages([]);
         setLoan(null);
         setViewState('welcome');
@@ -730,13 +756,16 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         return;
       }
 
-      const phasesRes = await fetchJson<V2Phase[]>('http://localhost:8000/api/phases/active');
-      if (phasesRes.ok) onPhasesUpdated?.(phasesRes.value);
+      const phasesRes = await fetchJson<V2Phase[]>(`${API_BASE_URL}/api/phases/active`);
+      if (phasesRes.ok) {
+        onPhasesUpdated?.(phasesRes.value);
+      }
 
-      const existing = await fetchJson<V2Conversation>(`http://localhost:8000/api/conversations/${activeConversationId}`);
+      const existing = await fetchJson<V2Conversation>(`${API_BASE_URL}/api/conversations/${activeConversationId}`);
       if (!existing.ok) {
         window.localStorage.removeItem(STORAGE_KEY);
         setConversationId(null);
+        setConversation(null);
         setMessages([]);
         setViewState('welcome');
         setBootstrapping(false);
@@ -744,11 +773,12 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       }
 
       onConversationUpdated?.(existing.value);
+      setConversation(existing.value);
       setConversationId(activeConversationId);
       setViewState('chat');
       void refreshLoan(activeConversationId);
 
-      const msgsRes = await fetchJson<V2Message[]>(`http://localhost:8000/api/conversations/${activeConversationId}/messages`);
+      const msgsRes = await fetchJson<V2Message[]>(`${API_BASE_URL}/api/conversations/${activeConversationId}/messages`);
       if (msgsRes.ok) {
         setMessages(msgsRes.value.filter((m) => !isOfficerOnlyMessage(m)));
       } else {
@@ -793,7 +823,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     setLoading(true);
 
     try {
-      const res = await fetch(`http://localhost:8000/api/conversations/${activeConversationId}/messages`, {
+      const res = await fetch(`${API_BASE_URL}/api/conversations/${activeConversationId}/messages`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ content }),
@@ -836,9 +866,11 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         ]);
       }
 
-      const refreshed = await fetch(`http://localhost:8000/api/conversations/${activeConversationId}`);
+      const refreshed = await fetch(`${API_BASE_URL}/api/conversations/${activeConversationId}`);
       if (refreshed.ok) {
-        onConversationUpdated?.((await refreshed.json()) as V2Conversation);
+        const nextConversation = (await refreshed.json()) as V2Conversation;
+        onConversationUpdated?.(nextConversation);
+        setConversation(nextConversation);
       }
       await refreshLoan(activeConversationId);
     } catch {
@@ -863,7 +895,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     transitionToChat();
     setLoading(true);
     try {
-      const createRes = await fetch('http://localhost:8000/api/conversations', {
+      const createRes = await fetch(`${API_BASE_URL}/api/conversations`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({}),
@@ -907,10 +939,14 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       setConversationId(created.id);
       onConversationUpdated?.(created);
       void refreshLoan(created.id);
+      setConversation(created);
+      setConversation(created);
+      void refreshLoan(created.id);
 
-      const phasesRes = await fetch(`http://localhost:8000/api/phases/active`);
+      const phasesRes = await fetch(`${API_BASE_URL}/api/phases/active`);
       if (phasesRes.ok) {
-        onPhasesUpdated?.((await phasesRes.json()) as V2Phase[]);
+        const phasesData = await phasesRes.json();
+        onPhasesUpdated?.(phasesData);
       }
 
       await sendToExisting(created.id, firstMessage);
@@ -971,6 +1007,255 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         'glass-bubble-bot max-w-[85%] rounded-3xl rounded-bl-lg px-4 py-3 text-sm leading-relaxed bg-white dark:bg-white/[0.05] border border-slate-200/60 dark:border-white/[0.06] text-slate-800 dark:text-slate-200 shadow-sm',
     } as const;
   }, []);
+
+  const selectedPlanType = useMemo(() => {
+    const intent = asRecord(conversation?.intentSummary);
+    const selected = intent?.selectedPlan;
+    if (typeof selected !== 'string') return null;
+    const v = selected.trim().toLowerCase();
+    return v === 'aggressive' || v === 'balanced' || v === 'conservative' ? v : null;
+  }, [conversation?.intentSummary]);
+
+  const isLoanRecommendation = (value: unknown): value is {
+    name: string;
+    type: 'aggressive' | 'balanced' | 'conservative';
+    interest_rate: number;
+    tenure_years: number;
+    monthly_emi: number;
+    total_interest: number;
+    total_repayment: number;
+    pros: string[];
+    cons: string[];
+    recommended: boolean;
+  } => {
+    const rec = asRecord(value);
+    if (!rec) return false;
+    if (typeof rec.name !== 'string') return false;
+    if (rec.type !== 'aggressive' && rec.type !== 'balanced' && rec.type !== 'conservative') return false;
+    if (typeof rec.interest_rate !== 'number') return false;
+    if (typeof rec.tenure_years !== 'number') return false;
+    if (typeof rec.monthly_emi !== 'number') return false;
+    if (typeof rec.total_interest !== 'number') return false;
+    if (typeof rec.total_repayment !== 'number') return false;
+    if (!Array.isArray(rec.pros) || !rec.pros.every((p) => typeof p === 'string')) return false;
+    if (!Array.isArray(rec.cons) || !rec.cons.every((c) => typeof c === 'string')) return false;
+    if (typeof rec.recommended !== 'boolean') return false;
+    return true;
+  };
+
+  const isLoanSnapshot = (value: unknown): value is {
+    loan_amount: number;
+    down_payment: number;
+    property_value: number;
+    estimated_emi: number;
+    tenure_years: number;
+    interest_rate: number;
+    total_interest: number;
+    total_repayment: number;
+    ltv_ratio: number;
+    foir_ratio?: number;
+    currency: string;
+  } => {
+    const snap = asRecord(value);
+    if (!snap) return false;
+    if (typeof snap.loan_amount !== 'number') return false;
+    if (typeof snap.down_payment !== 'number') return false;
+    if (typeof snap.property_value !== 'number') return false;
+    if (typeof snap.estimated_emi !== 'number') return false;
+    if (typeof snap.tenure_years !== 'number') return false;
+    if (typeof snap.interest_rate !== 'number') return false;
+    if (typeof snap.total_interest !== 'number') return false;
+    if (typeof snap.total_repayment !== 'number') return false;
+    if (typeof snap.ltv_ratio !== 'number') return false;
+    if (typeof snap.currency !== 'string') return false;
+    if (snap.foir_ratio !== undefined && typeof snap.foir_ratio !== 'number') return false;
+    return true;
+  };
+
+  const earliestSnapshotMsgId = useMemo(() => {
+    for (const msg of messages) {
+      if (msg.role !== 'assistant') continue;
+      const metadata = parseMetadata(msg.metadata);
+      if (!metadata) continue;
+      if (isLoanRecommendation(metadata.selectedRecommendation) && isLoanSnapshot(metadata.loanSnapshot)) {
+        return msg.id;
+      }
+    }
+    return null;
+  }, [messages]);
+
+  const isDocumentsChecklist = (value: unknown): value is {
+    identity: Array<{ name: string; status: 'required' | 'optional'; description: string; uploaded?: boolean }>;
+    income: Array<{ name: string; status: 'required' | 'optional'; description: string; uploaded?: boolean }>;
+    business?: Array<{ name: string; status: 'required' | 'optional'; description: string; uploaded?: boolean }>;
+    property?: Array<{ name: string; status: 'required' | 'optional'; description: string; uploaded?: boolean }>;
+    vehicle?: Array<{ name: string; status: 'required' | 'optional'; description: string; uploaded?: boolean }>;
+  } => {
+    const checklist = asRecord(value);
+    if (!checklist) return false;
+    if (!Array.isArray(checklist.identity) || !Array.isArray(checklist.income)) return false;
+    return true;
+  };
+
+  const renderCardsForMessage = (msg: V2Message) => {
+    const metadata = parseMetadata(msg.metadata);
+    if (!metadata) return null;
+    const cards: React.ReactNode[] = [];
+
+    // Loan Snapshot Card (show only at the earliest occurrence)
+    if (
+      earliestSnapshotMsgId &&
+      msg.id === earliestSnapshotMsgId &&
+      isLoanRecommendation(metadata.selectedRecommendation) &&
+      isLoanSnapshot(metadata.loanSnapshot)
+    ) {
+      cards.push(<LoanSnapshotCard key="snapshot" snapshot={metadata.loanSnapshot} />);
+    }
+
+    // Loan Recommendations Cards
+    if (Array.isArray(metadata.loanRecommendations) && !isLoanRecommendation(metadata.selectedRecommendation)) {
+      const recs = metadata.loanRecommendations
+        .map((rec) => (isLoanRecommendation(rec) ? rec : null))
+        .filter((rec): rec is NonNullable<typeof rec> => rec !== null);
+
+      if (recs.length > 0) {
+        cards.push(
+          <div key="recs" className="w-full space-y-3 mt-1">
+            <div className="flex items-center gap-2 text-xs font-medium text-[#0078D4] pl-1">
+              <span>Recommended Borrowing Paths</span>
+              <div className="flex-1 h-px bg-gradient-to-r from-[#0078D4]/30 to-transparent" />
+            </div>
+            <p className="text-[11px] text-[#1B2A4A]/50 dark:text-white/45 pl-1">Tap a card to select your preferred option</p>
+            <div className="grid gap-3">
+              {recs.map((rec, idx) => (
+                <LoanCard
+                  key={`rec-${rec.type}-${idx}`}
+                  recommendation={rec}
+                  selected={selectedPlanType === rec.type}
+                  onSelect={(selected) => {
+                    void handleSend(`I prefer the ${selected.name}`);
+                  }}
+                  disabled={msg.role !== 'assistant'}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      }
+    }
+
+    // Documents Checklist Card
+    if (isDocumentsChecklist(metadata.documentsChecklist)) {
+      cards.push(
+        <DocumentsCard
+          key="documents"
+          checklist={metadata.documentsChecklist}
+          onUpload={(docName) => {
+            const el = fileInputRef.current;
+            if (el) {
+              el.dataset.docName = docName;
+              el.click();
+            } else {
+              void handleSend(`I'm uploading ${docName}`);
+            }
+          }}
+        />
+      );
+    }
+
+    // STP Processing Card
+    if (Array.isArray(metadata.stpCheckpoints)) {
+      cards.push(
+        <StpProcessingCard
+          key="stp"
+          checkpoints={metadata.stpCheckpoints}
+          inProgress={metadata.stpInProgress === true}
+          completed={metadata.stpCompleted === true}
+          approved={metadata.stpApproved === true}
+          bureauScore={typeof metadata.bureauScore === 'number' ? metadata.bureauScore : undefined}
+        />
+      );
+    }
+
+    // Affordability Card
+    {
+      const affordability = asRecord(metadata.affordability);
+      const monthlyIncome = affordability?.monthlyIncome;
+      const monthlyEmi = affordability?.monthlyEmi;
+      const foir = affordability?.foir;
+      if (typeof monthlyIncome === 'number' && typeof monthlyEmi === 'number' && typeof foir === 'number') {
+        cards.push(
+          <AffordabilityCard
+            key="affordability"
+            monthlyIncome={monthlyIncome}
+            monthlyEmi={monthlyEmi}
+            foir={foir}
+            existingDebts={typeof affordability?.existingDebts === 'number' ? affordability.existingDebts : undefined}
+            dti={typeof affordability?.dti === 'number' ? affordability.dti : undefined}
+            approved={affordability?.approved === true}
+          />
+        );
+      }
+    }
+
+    // Terms Acceptance Card
+    if (metadata.awaitingAcceptance === true && asRecord(metadata.loanApplication)) {
+      const loanApp = metadata.loanApplication as Record<string, unknown>;
+      const snapshot = asRecord(metadata.loanSnapshot) ?? {};
+      const recommendation = asRecord(metadata.selectedRecommendation) ?? {};
+      
+      cards.push(
+        <TermsAcceptanceCard
+          key="terms"
+          loanAmount={typeof loanApp.amount === 'number' ? loanApp.amount : typeof snapshot.loan_amount === 'number' ? snapshot.loan_amount : 0}
+          interestRate={
+            typeof recommendation.interest_rate === 'number'
+              ? recommendation.interest_rate
+              : typeof loanApp.rate === 'number'
+                ? loanApp.rate
+                : 0
+          }
+          tenure={
+            typeof recommendation.tenure_years === 'number'
+              ? recommendation.tenure_years
+              : typeof loanApp.tenure === 'number'
+                ? loanApp.tenure
+                : 0
+          }
+          monthlyEmi={
+            typeof recommendation.monthly_emi === 'number' ? recommendation.monthly_emi : typeof loanApp.emi === 'number' ? loanApp.emi : 0
+          }
+          totalInterest={
+            typeof recommendation.total_interest === 'number'
+              ? recommendation.total_interest
+              : typeof snapshot.total_interest === 'number'
+                ? snapshot.total_interest
+                : 0
+          }
+          totalRepayment={
+            typeof recommendation.total_repayment === 'number'
+              ? recommendation.total_repayment
+              : typeof snapshot.total_repayment === 'number'
+                ? snapshot.total_repayment
+                : 0
+          }
+          onAccept={() => {
+            void handleSend(`I accept the terms and provide my electronic signature`);
+          }}
+        />
+      );
+    }
+
+    // Disbursement Confirmation Card
+    if (metadata.disbursementCompleted === true) {
+      const loanApp = getLoanApplicationMeta(metadata);
+      if (loanApp?.stpCompleted && loanApp.disbursement) {
+        cards.push(<DisbursementConfirmationCard key="disbursement" loanApplication={loanApp} />);
+      }
+    }
+
+    return cards.length > 0 ? <div className="mt-3 space-y-3">{cards}</div> : null;
+  };
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -1087,29 +1372,29 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
             <div className="anim-chat-enter space-y-4">
               {messages.map((msg) => (
                 <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className="max-w-[85%]">
+                  <div className="w-full max-w-2xl">
                     <div data-testid={`chat-message-${msg.role}`} className={`chat-message-content ${msg.role === 'user' ? bubbleClassForRole.user : bubbleClassForRole.assistant}`}>
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                     </div>
-                    {msg.role === 'assistant' ? (() => {
-                      const loanApp = getLoanApplicationMeta(msg.metadata);
-                      if (!loanApp) return null;
-                      if (loanApp.awaitingAcceptance)
-                        return (
-                          <StpOfferCard
-                            loanApplication={loanApp}
-                            conversationId={conversationId}
-                            loanId={loan?.id}
-                            onAccepted={async () => {
-                              if (!conversationId) return;
-                              await refreshLoan(conversationId);
-                              await refreshMessages(conversationId);
-                            }}
-                          />
-                        );
-                      if (loanApp.stpCompleted && loanApp.disbursement) return <DisbursementConfirmationCard loanApplication={loanApp} />;
-                      return null;
-                    })() : null}
+                    {msg.role === 'assistant' && renderCardsForMessage(msg)}
+                    {msg.role === 'assistant'
+                      ? (() => {
+                          const loanApp = getLoanApplicationMeta(msg.metadata);
+                          if (!loanApp?.awaitingAcceptance) return null;
+                          return (
+                            <StpOfferCard
+                              loanApplication={loanApp}
+                              conversationId={conversationId}
+                              loanId={loan?.id}
+                              onAccepted={async () => {
+                                if (!conversationId) return;
+                                await refreshLoan(conversationId);
+                                await refreshMessages(conversationId);
+                              }}
+                            />
+                          );
+                        })()
+                      : null}
                   </div>
                 </div>
               ))}
@@ -1312,8 +1597,86 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                   target.style.height = Math.min(target.scrollHeight, 120) + 'px';
                 }}
               />
-            </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".png,.jpg,.jpeg,.pdf"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files && e.target.files[0];
+                  if (!file) return;
+                  const label = (e.target as HTMLInputElement).dataset.docName || file.name;
+                  let preview = '';
+                  try {
+                    if (conversationId) {
+                      const fd = new FormData();
+                      fd.append('file', file);
+                      fd.append('label', label);
+                      const res = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/documents/ocr`, {
+                        method: 'POST',
+                        body: fd,
+                      });
+                      if (res.ok) {
+                        const data = (await res.json()) as { preview?: unknown };
+                        preview = typeof data.preview === 'string' ? data.preview : '';
+                      }
+                    }
+                  } catch {
+                    preview = '';
+                  }
 
+                  if (!preview) {
+                    const loadScript = (src: string) =>
+                      new Promise<void>((resolve, reject) => {
+                        if (document.querySelector(`script[src="${src}"]`)) return resolve();
+                        const s = document.createElement('script');
+                        s.src = src;
+                        s.async = true;
+                        s.onload = () => resolve();
+                        s.onerror = () => reject(new Error('Failed to load ' + src));
+                        document.head.appendChild(s);
+                      });
+                    const recognizeImage = async (image: HTMLImageElement | Blob): Promise<string> => {
+                      const CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.2/dist/tesseract.min.js';
+                      await loadScript(CDN);
+                      type TesseractNS = { recognize: (img: unknown, lang: string, opts?: unknown) => Promise<{ data?: { text?: string } }> };
+                      const T = (window as unknown as { Tesseract?: TesseractNS }).Tesseract;
+                      if (!T) return '';
+                      const res = await T.recognize(image, 'eng', {});
+                      return typeof res?.data?.text === 'string' ? res.data.text : '';
+                    };
+                    try {
+                      let extracted = '';
+                      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+                        extracted = await recognizeImage(file);
+                      }
+                      preview = extracted ? extracted.trim().split('\n').filter(Boolean).slice(0, 5).join(' • ') : '';
+                    } catch {
+                      preview = '';
+                    }
+                  }
+
+                  const msg =
+                    preview && preview.length > 0
+                      ? `Uploaded "${label}". OCR preview: ${preview}`
+                      : `Uploaded "${label}".`;
+                  void handleSend(msg);
+                  e.target.value = '';
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={loading || bootstrapping}
+              className="rounded-2xl h-12 w-12 bg-white/80 dark:bg-white/[0.06] border border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 shadow-sm flex items-center justify-center hover:bg-slate-50 dark:hover:bg-white/[0.08] transition-colors disabled:opacity-30"
+              aria-label="Attach"
+              title="Attach document"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 1 1 5.66 5.66L9.88 17.05a2 2 0 1 1-2.83-2.83l8.49-8.49" />
+              </svg>
+            </button>
             <button
               type="button"
               onClick={() => {

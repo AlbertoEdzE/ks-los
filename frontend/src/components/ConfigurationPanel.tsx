@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 const ADMIN_HEADERS = { Authorization: 'Bearer admin-access' };
+const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000';
 
 const SuggestionsToggle: React.FC = () => {
   const [enabled, setEnabled] = useState(true);
@@ -8,7 +9,7 @@ const SuggestionsToggle: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch('http://localhost:8000/admin/config/suggestions_enabled', { headers: ADMIN_HEADERS });
+        const r = await fetch(`${API_URL}/admin/config/suggestions_enabled`, { headers: ADMIN_HEADERS });
         if (r.ok) {
           const data = await r.json();
           setEnabled(!!data.value);
@@ -21,7 +22,7 @@ const SuggestionsToggle: React.FC = () => {
 
   const toggle = async () => {
     try {
-      const r = await fetch(`http://localhost:8000/admin/config/suggestions_enabled?value=${(!enabled).toString()}`, { method: 'POST', headers: ADMIN_HEADERS });
+      const r = await fetch(`${API_URL}/admin/config/suggestions_enabled?value=${(!enabled).toString()}`, { method: 'POST', headers: ADMIN_HEADERS });
       if (r.ok) {
         const data = await r.json();
         setEnabled(!!data.value);

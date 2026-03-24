@@ -275,11 +275,66 @@ A view is accepted only when all are true:
 
 This document aligns with the v2 work packages in: [02_work_packages.md](file:///Users/albertohernandez/Documents/projects/ks-los/doc/02_v2/02_work_packages.md)
 
+### Completed Tasks
+
+**Task 1: Calculation Engines** ✅ (2026-03-23)
+- Ported all 8 calculation engines from LNAI TypeScript to Python
+- Created comprehensive test suite (44/44 tests passing)
+- Caribbean market adaptations (currency detection, XCD thresholds)
+- Documentation: `/doc/02_v2/04_documentation/phase_2/task_1_calculation_engines.md`
+
+**Task 2: UI Components Port** ✅ (2026-03-23)
+- Ported 4 core borrower UI components from LNAI to KS-LOS React 19
+- Created unit test suite (11/11 tests passing)
+- Type-safe implementations with inline SVG icons
+- Documentation: `/doc/02_v2/04_documentation/phase_2/task_2_ui_components.md`
+
+**Task 3: LangGraph Integration** ✅ (2026-03-23)
+- Integrated calculation engines with LangGraph agent workflow
+- Added `calculation_node` for deterministic metrics (EMI, FOIR, approval probability)
+- Updated risk_engine to use calculated metrics (no hallucination)
+- Created integration test suite (6/6 tests passing)
+- Documentation: `/doc/02_v2/04_documentation/phase_2/task_3_langgraph_integration.md`
+
+**Task 4: Chat Contract Hardening** ✅ (2026-03-23)
+- Defined strict metadata schemas (Pydantic v2) for all agent outputs
+- Created validation middleware with FastAPI integration
+- Built golden test datasets (5 canonical borrower scenarios)
+- Created correctness test suite (25/25 tests passing)
+- Schema versioning for backward compatibility
+- Documentation: `/doc/02_v2/04_documentation/phase_2/task_4_chat_contract_hardening.md`
+
+**Task 5: STP Auto-Processing** ✅ (2026-03-23)
+- Implemented full 17-checkpoint STP pipeline (Rule Groups A through V)
+- Created Caribbean Credit Bureau integration (simulated for demo)
+- Two-phase processing (stop before disbursement for acceptance)
+- Currency-aware thresholds (XCD, TTD, GYD, JMD, BBD, USD)
+- Created comprehensive test suite (19/19 tests passing)
+- Documentation: `/doc/02_v2/04_documentation/phase_2/task_5_stp_auto_processing.md`
+
+---
+
+## Phase 2: COMPLETE ✅
+
+**All 5 tasks completed with 105/105 tests passing.**
+
+| Task | Tests | Status |
+|------|-------|--------|
+| Task 1: Calculation Engines | 44/44 | ✅ |
+| Task 2: UI Components Port | 11/11 | ✅ |
+| Task 3: LangGraph Integration | 6/6 | ✅ |
+| Task 4: Chat Contract Hardening | 25/25 | ✅ |
+| Task 5: STP Auto-Processing | 19/19 | ✅ |
+| **Total** | **105/105** | **✅ Phase 2 Complete** |
+
+### Implementation Status
+
 - **Implemented (baseline):** WP-V2-001 .. WP-V2-012 (route set + core APIs + borrower workflow + pipeline baseline)
 - **Implemented (baseline):** WP-V2-013 .. WP-V2-014 (officer lifecycle chat action semantics)
 - **Implemented (incremental):** WP-V2-015 .. WP-V2-017 (probability navigator, checklist baseline, underwriting memo)
 - **Implemented (Phase 5 incremental):** WP-V2-018 (RBAC auth boundary + authorization tests)
 - **Implemented (Phase 5 incremental):** WP-V2-019 (audit coverage + v2 funnel metrics + evidence tests)
+- **Completed (Task 1):** Calculation engines with deterministic metrics
 - **Planned (Phase 5 hardening):** WP-V2-020 (deterministic regression hardening)
 
 ---

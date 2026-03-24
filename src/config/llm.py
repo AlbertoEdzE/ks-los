@@ -7,8 +7,8 @@ import json
 import urllib.request
 import urllib.error
 
-# Default to Qwen 2.5 7B as per architecture
-MODEL_NAME = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+# Default to Qwen3 latest unless overridden
+MODEL_NAME = os.getenv("OLLAMA_MODEL", "qwen3:latest")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 

@@ -1,4 +1,7 @@
-import mlflow
+try:
+    import mlflow
+except Exception:
+    mlflow = None
 import pandas as pd
 import logging
 import os
@@ -27,6 +30,10 @@ class CreditRiskModel:
         Loads the latest production model from MLflow, or a specific version.
         """
         try:
+            if mlflow is None:
+                logger.warning("MLflow is not available; skipping model load.")
+                self._model = None
+                return False
             mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
             from mlflow.tracking import MlflowClient
             client = MlflowClient()
@@ -62,6 +69,8 @@ class CreditRiskModel:
 
     def list_versions(self):
         try:
+            if mlflow is None:
+                return []
             from mlflow.tracking import MlflowClient
             client = MlflowClient()
             versions = client.search_model_versions(f"name='{REGISTERED_MODEL_NAME}'")
@@ -71,7 +80,6 @@ class CreditRiskModel:
             ], key=lambda x: int(x["version"]), reverse=True)
         except Exception:
             return []
-
     def rollback(self):
         """Rolls back to the previous version relative to the current one."""
         if not self._current_version:

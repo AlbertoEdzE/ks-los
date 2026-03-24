@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { ChatInterface, type V2Conversation, type V2Phase } from './components/ChatInterface';
+import { ChatInterface, type V2Conversation, type V2Message as V2ChatMessage, type V2Phase } from './components/ChatInterface';
+import { BorrowerJourneyTracker } from './components/BorrowerJourneyTracker';
 import './App.css';
 import { ConfigurationPanel } from './components/ConfigurationPanel';
 import { MetricsPanel } from './components/MetricsPanel';
@@ -9,6 +10,7 @@ import { TrainingPanel } from './components/TrainingPanel';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { User, Briefcase, Eye, EyeOff, ArrowRight, Sparkles, CheckCircle2, TrendingUp, BarChart3, Wallet, Building2 } from 'lucide-react';
 
 type LoginPageProps = {
   mode: 'select' | 'borrower-login' | 'officer-login' | 'borrower-register' | 'officer-register' | 'borrower-forgot' | 'officer-forgot';
@@ -296,7 +298,8 @@ function App() {
   React.useEffect(() => {
     if (location.pathname !== '/login') return;
     const params = new URLSearchParams(location.search);
-    const raw = (params.get('mode') || '').trim();
+    const raw = params.get('mode');
+    const next = (raw || '').trim();
     const allowed: LoginPageProps['mode'][] = [
       'select',
       'borrower-login',
@@ -306,12 +309,41 @@ function App() {
       'borrower-forgot',
       'officer-forgot',
     ];
-    if (allowed.includes(raw as LoginPageProps['mode'])) {
-      setAuthMode(raw as LoginPageProps['mode']);
-    } else if (authMode !== 'select') {
-      setAuthMode('select');
+    if (next && allowed.includes(next as LoginPageProps['mode'])) {
+      if (authMode !== (next as LoginPageProps['mode'])) setAuthMode(next as LoginPageProps['mode']);
+      return;
     }
-  }, [authMode, location.pathname, location.search]);
+    if (!next) {
+      const adminRoutes = new Set([
+        '/dashboard',
+        '/pipeline',
+        '/loan-products',
+        '/officer-chat',
+        '/synthetic-data',
+        '/training',
+        '/metrics',
+        '/simulator',
+        '/configuration',
+      ]);
+      if (fromPath && adminRoutes.has(fromPath) && authMode === 'select') {
+        setAuthMode('officer-login');
+        return;
+      }
+      return;
+    }
+    const adminRoutes = new Set([
+      '/dashboard',
+      '/pipeline',
+      '/loan-products',
+      '/officer-chat',
+      '/synthetic-data',
+      '/training',
+      '/metrics',
+      '/simulator',
+      '/configuration',
+    ]);
+    if (adminRoutes.has(next) && authMode !== 'select') setAuthMode('select');
+  }, [authMode, fromPath, location.pathname, location.search]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -343,6 +375,11 @@ function App() {
 
     const normalizedUsername = username.trim();
     const normalizedPassword = password;
+
+    if (authMode === 'select') {
+      setLoginError('Choose Loan Applicant or Loan Officer to continue.');
+      return;
+    }
 
     if (authMode.endsWith('register') || authMode.endsWith('forgot')) {
       setLoginError('This workflow is not implemented yet in this build.');
@@ -395,6 +432,7 @@ function App() {
   const BorrowerHomePage = () => {
     const [phases, setPhases] = useState<V2Phase[]>([]);
     const [conversation, setConversation] = useState<V2Conversation | null>(null);
+    const [visibleMessages, setVisibleMessages] = useState<V2ChatMessage[]>([]);
     const [resetSignal, setResetSignal] = useState(0);
     const routeLocation = useLocation();
     const [designOverlayOpacity, setDesignOverlayOpacity] = useState(0.5);
@@ -542,82 +580,92 @@ function App() {
         </header>
 
         {activePhases.length > 0 && conversation?.currentPhaseId ? (
-          <div data-testid="phase-progress-tracker" className="glass-header relative z-10 border-b border-slate-200/40 dark:border-white/[0.04] bg-white/50 dark:bg-white/[0.02] backdrop-blur-sm">
-            <div className="max-w-3xl mx-auto px-4 py-3">
-              <div className="flex items-center gap-1.5 mb-2.5">
-                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Your Loan Journey</span>
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 ml-auto">
-                  Step {Math.max(currentIndex + 1, 1)} of {activePhases.length}
-                </span>
-              </div>
+          <>
+            <div data-testid="phase-progress-tracker" className="glass-header relative z-10 border-b border-slate-200/40 dark:border-white/[0.04] bg-white/50 dark:bg-white/[0.02] backdrop-blur-sm">
+              <div className="max-w-3xl mx-auto px-4 py-3">
+                <div className="flex items-center gap-1.5 mb-2.5">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Your Loan Journey</span>
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 ml-auto">
+                    Step {Math.max(currentIndex + 1, 1)} of {activePhases.length}
+                  </span>
+                </div>
 
-              <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
-                <div className="flex items-start min-w-max gap-0">
-                  {activePhases.map((p, i) => {
-                    const isCompleted = i < currentIndex;
-                    const isCurrent = i === currentIndex;
-                    return (
-                      <div key={p.id} className="flex items-start">
-                        <button
-                          type="button"
-                          onClick={() => navigate(`/phases/${p.id}`)}
-                          className="flex flex-col items-center"
-                          style={{ minWidth: '72px' }}
-                          data-testid={`phase-step-${i}`}
-                        >
-                          <div className="relative">
-                            {isCurrent ? (
-                              <div className="absolute inset-0 w-8 h-8 -m-1 rounded-full bg-blue-400/15 animate-ping" style={{ animationDuration: '2s' }} />
-                            ) : null}
-                            <div
-                              className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-500 ${
-                                isCompleted
-                                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-200/50 dark:shadow-blue-900/30'
-                                  : isCurrent
-                                    ? 'bg-blue-600 text-white shadow-md shadow-blue-200/50 dark:shadow-blue-900/30 ring-2 ring-blue-100 dark:ring-blue-500/15'
-                                    : 'bg-slate-100 dark:bg-white/[0.06] text-slate-400 dark:text-slate-500'
+                <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
+                  <div className="flex items-start min-w-max gap-0">
+                    {activePhases.map((p, i) => {
+                      const isCompleted = i < currentIndex;
+                      const isCurrent = i === currentIndex;
+                      return (
+                        <div key={p.id} className="flex items-start">
+                          <Link
+                            to={`/phases/${p.id}`}
+                            className="flex flex-col items-center"
+                            style={{ minWidth: '72px' }}
+                            data-testid={`phase-step-${i}`}
+                          >
+                            <div className="relative">
+                              {isCurrent ? (
+                                <div className="absolute inset-0 w-8 h-8 -m-1 rounded-full bg-blue-400/15 animate-ping" style={{ animationDuration: '2s' }} />
+                              ) : null}
+                              <div
+                                className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-500 ${
+                                  isCompleted
+                                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-200/50 dark:shadow-blue-900/30'
+                                    : isCurrent
+                                      ? 'bg-blue-600 text-white shadow-md shadow-blue-200/50 dark:shadow-blue-900/30 ring-2 ring-blue-100 dark:ring-blue-500/15'
+                                      : 'bg-slate-100 dark:bg-white/[0.06] text-slate-400 dark:text-slate-500'
+                                }`}
+                              >
+                                {isCompleted ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                ) : (
+                                  <span>{i + 1}</span>
+                                )}
+                              </div>
+                            </div>
+                            <p
+                              className={`text-[9px] mt-1.5 text-center leading-tight max-w-[68px] transition-colors duration-300 ${
+                                isCurrent
+                                  ? 'font-semibold text-blue-700 dark:text-blue-400'
+                                  : isCompleted
+                                    ? 'font-medium text-blue-600 dark:text-blue-500'
+                                    : 'text-slate-400 dark:text-slate-500'
                               }`}
                             >
-                              {isCompleted ? (
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                  <polyline points="20 6 9 17 4 12" />
-                                </svg>
-                              ) : (
-                                <span>{i + 1}</span>
-                              )}
+                              {p.name}
+                            </p>
+                          </Link>
+                          {i < activePhases.length - 1 ? (
+                            <div className="flex items-center pt-3 -mx-0.5">
+                              <div className={`h-[2px] w-6 transition-colors duration-500 ${i < currentIndex ? 'bg-blue-500' : 'bg-slate-200 dark:bg-white/[0.06]'}`} />
                             </div>
-                          </div>
-                          <p
-                            className={`text-[9px] mt-1.5 text-center leading-tight max-w-[68px] transition-colors duration-300 ${
-                              isCurrent
-                                ? 'font-semibold text-blue-700 dark:text-blue-400'
-                                : isCompleted
-                                  ? 'font-medium text-blue-600 dark:text-blue-500'
-                                  : 'text-slate-400 dark:text-slate-500'
-                            }`}
-                          >
-                            {p.name}
-                          </p>
-                        </button>
-                        {i < activePhases.length - 1 ? (
-                          <div className="flex items-center pt-3 -mx-0.5">
-                            <div className={`h-[2px] w-6 transition-colors duration-500 ${i < currentIndex ? 'bg-blue-500' : 'bg-slate-200 dark:bg-white/[0.06]'}`} />
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+
+            {role === 'user' ? (
+              <BorrowerJourneyTracker currentPhaseName={activePhases[currentIndex]?.name || null} messages={visibleMessages} />
+            ) : null}
+          </>
         ) : null}
 
-        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide relative z-10">
-          <div className="min-h-full max-w-6xl mx-auto px-4 md:px-6 py-6">
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6 min-h-full">
-              <div className="min-h-0 rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-xl shadow-black/[0.04] dark:shadow-black/40 overflow-hidden flex">
-                <ChatInterface onConversationUpdated={setConversation} onPhasesUpdated={setPhases} resetSignal={resetSignal} />
+        <div className="flex-1 min-h-0 relative z-10 overflow-hidden">
+          <div className="h-full max-w-6xl mx-auto px-4 md:px-6 py-6 flex flex-col">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6 flex-1 min-h-0">
+              <div className="min-h-0 rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-xl shadow-black/[0.04] dark:shadow-black/40 overflow-hidden flex flex-col">
+                <ChatInterface
+                  onConversationUpdated={setConversation}
+                  onPhasesUpdated={setPhases}
+                  onMessagesUpdated={setVisibleMessages}
+                  resetSignal={resetSignal}
+                />
               </div>
 
               <div className="hidden lg:flex flex-col gap-4 min-h-0">
@@ -3164,20 +3212,20 @@ function App() {
         }
       />
       <Route
+        path="/phases/:id"
+        element={
+          <RequireAuth>
+            <PhaseDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/"
         element={
           <RequireAuth>
             <RequireRole allow="user">
               <BorrowerHomePage />
             </RequireRole>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/phases/:id"
-        element={
-          <RequireAuth>
-            <PhaseDetailPage />
           </RequireAuth>
         }
       />

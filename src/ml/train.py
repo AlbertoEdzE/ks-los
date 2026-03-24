@@ -1,8 +1,11 @@
 import pandas as pd
 import numpy as np
 import xgboost as xgb
-import mlflow
-import mlflow.xgboost
+try:
+    import mlflow
+    import mlflow.xgboost
+except Exception:
+    mlflow = None
 import logging
 import os
 import time
@@ -98,61 +101,59 @@ def train_model(params: dict | None = None, n_samples: int = 2000) -> dict:
     """
     training_manager.start_training()
     try:
-        # 1. Setup MLflow
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-        mlflow.set_experiment(EXPERIMENT_NAME)
-        
-        with mlflow.start_run() as run:
+        run_id = None
+        model_uri = None
+        if mlflow is not None:
+            mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+            mlflow.set_experiment(EXPERIMENT_NAME)
+            run = mlflow.start_run()
+            run_id = run.info.run_id
             cid = get_correlation_id()
             if cid:
                 mlflow.set_tags({"correlation_id": cid})
-            
-            # 2. Data Generation
-            df = generate_training_data(n_samples=n_samples, progress_callback=training_manager.update_progress)
-            
-            training_manager.update_progress(50, "preprocessing", "Splitting dataset...")
-            
-            X = df[FEATURES]
-            y = df[TARGET]
-            
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            
-            training_manager.update_progress(60, "training", f"Training XGBoost on {len(X_train)} samples...")
+        
+        df = generate_training_data(n_samples=n_samples, progress_callback=training_manager.update_progress)
+        
+        training_manager.update_progress(50, "preprocessing", "Splitting dataset...")
+        
+        X = df[FEATURES]
+        y = df[TARGET]
+        
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        training_manager.update_progress(60, "training", f"Training XGBoost on {len(X_train)} samples...")
 
-            # 3. Train
-            if params is None:
-                params = {
-                    "objective": "binary:logistic",
-                    "eval_metric": "logloss",
-                    "learning_rate": 0.1,
-                    "max_depth": 5,
-                    "n_estimators": 100
-                }
-            
-            # Use callback for training progress
-            class ProgressCallback(xgb.callback.TrainingCallback):
-                def after_iteration(self, model, epoch, evals_log):
-                    pct = 60 + int((epoch + 1) / params.get("n_estimators", 100) * 30) # 60% to 90%
-                    training_manager.update_progress(pct, "training", f"Epoch {epoch+1}/{params.get('n_estimators', 100)}")
-                    return False
+        if params is None:
+            params = {
+                "objective": "binary:logistic",
+                "eval_metric": "logloss",
+                "learning_rate": 0.1,
+                "max_depth": 5,
+                "n_estimators": 100
+            }
+        
+        class ProgressCallback(xgb.callback.TrainingCallback):
+            def after_iteration(self, model, epoch, evals_log):
+                pct = 60 + int((epoch + 1) / params.get("n_estimators", 100) * 30)
+                training_manager.update_progress(pct, "training", f"Epoch {epoch+1}/{params.get('n_estimators', 100)}")
+                return False
 
-            clf = xgb.XGBClassifier(**params, callbacks=[ProgressCallback()])
-            clf.fit(X_train, y_train)
-            
-            training_manager.update_progress(90, "evaluating", "Evaluating model...")
+        clf = xgb.XGBClassifier(**params, callbacks=[ProgressCallback()])
+        clf.fit(X_train, y_train)
+        
+        training_manager.update_progress(90, "evaluating", "Evaluating model...")
 
-            # 4. Evaluate
-            y_pred = clf.predict(X_test)
-            y_prob = clf.predict_proba(X_test)[:, 1]
-            
-            acc = accuracy_score(y_test, y_pred)
-            auc = roc_auc_score(y_test, y_prob)
-            prec = precision_score(y_test, y_pred, zero_division=0)
-            rec = recall_score(y_test, y_pred, zero_division=0)
-            f1 = f1_score(y_test, y_pred, zero_division=0)
-            cm = confusion_matrix(y_test, y_pred).tolist()
+        y_pred = clf.predict(X_test)
+        y_prob = clf.predict_proba(X_test)[:, 1]
+        
+        acc = accuracy_score(y_test, y_pred)
+        auc = roc_auc_score(y_test, y_prob)
+        prec = precision_score(y_test, y_pred, zero_division=0)
+        rec = recall_score(y_test, y_pred, zero_division=0)
+        f1 = f1_score(y_test, y_pred, zero_division=0)
+        cm = confusion_matrix(y_test, y_pred).tolist()
 
-            # Log metrics
+        if mlflow is not None:
             mlflow.log_metrics({
                 "accuracy": acc, 
                 "auc": auc,
@@ -160,31 +161,36 @@ def train_model(params: dict | None = None, n_samples: int = 2000) -> dict:
                 "recall": rec,
                 "f1": f1
             })
-            
-            # Log model
             mlflow.xgboost.log_model(clf, "model", registered_model_name=REGISTERED_MODEL_NAME)
-            
-            result = {
-                "accuracy": float(acc),
-                "auc": float(auc),
-                "precision": float(prec),
-                "recall": float(rec),
-                "f1": float(f1),
-                "confusion_matrix": cm,
-                "model_uri": f"runs:/{run.info.run_id}/model",
-                "run_id": run.info.run_id,
-                "dataset_size": n_samples,
-                "train_size": len(X_train),
-                "test_size": len(X_test)
-            }
-            
-            training_manager.complete_training(result)
-            return result
+            model_uri = f"runs:/{run_id}/model" if run_id else None
+        
+        result = {
+            "accuracy": float(acc),
+            "auc": float(auc),
+            "precision": float(prec),
+            "recall": float(rec),
+            "f1": float(f1),
+            "confusion_matrix": cm,
+            "model_uri": model_uri,
+            "run_id": run_id,
+            "dataset_size": n_samples,
+            "train_size": len(X_train),
+            "test_size": len(X_test)
+        }
+        
+        training_manager.complete_training(result)
+        return result
             
     except Exception as e:
         logger.error(f"Training failed: {e}")
         training_manager.fail_training(str(e))
         raise e
+    finally:
+        if mlflow is not None:
+            try:
+                mlflow.end_run()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     train_model()

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { SuggestionStrip } from '../SuggestionStrip';
 import { vi, describe, it, expect } from 'vitest';
-import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/vitest';
 
 describe('SuggestionStrip', () => {
   const mockSuggestions = [
