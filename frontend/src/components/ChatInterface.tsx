@@ -191,11 +191,9 @@ const StpOfferCard: React.FC<{
   loanId: string | null | undefined;
   onAccepted: () => Promise<void>;
 }> = ({ loanApplication, conversationId, loanId, onAccepted }) => {
-  if (!loanApplication.awaitingAcceptance) return null;
   const a = loanApplication.approval;
-  if (!a) return null;
   const steps = Array.isArray(loanApplication.stpSteps) ? loanApplication.stpSteps : [];
-  const conditions = Array.isArray(a.conditions) ? a.conditions : [];
+  const conditions = Array.isArray(a?.conditions) ? a.conditions : [];
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [sigDrawing, setSigDrawing] = useState(false);
   const [sigHasInk, setSigHasInk] = useState(false);
@@ -220,6 +218,8 @@ const StpOfferCard: React.FC<{
     ...extractFacts('Affordability', affordability),
     ...extractFacts('Liability', liabilityComparison),
   ].slice(0, 6);
+
+  if (!loanApplication.awaitingAcceptance || !a) return null;
 
   const clearSignature = () => {
     const c = sigCanvasRef.current;
@@ -456,13 +456,6 @@ const isOfficerOnlyMessage = (message: V2Message): boolean => {
   return actorRole === 'officer' || actorRole === 'officer_assistant';
 };
 
-const DEFAULT_QUICK_PROMPTS: Array<{ title: string; prompt: string }> = [
-  { title: 'Home Loan', prompt: 'I want a home loan to buy a house.' },
-  { title: 'Car Loan', prompt: 'I need a car loan for a vehicle purchase.' },
-  { title: 'Personal Loan', prompt: 'I need a personal loan for an urgent expense.' },
-  { title: 'Debt Consolidation', prompt: 'I want to consolidate multiple debts into one EMI.' },
-];
-
 type DocumentCategory = {
   key: string;
   label: string;
@@ -605,7 +598,8 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       if (!res.ok) return;
       const next = (await res.json()) as V2Message[];
       setMessages(next.filter((m) => !isOfficerOnlyMessage(m)));
-    } catch {
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -640,7 +634,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     if (!loan) return;
     const st = (loan.stpProcessingStatus || '').toLowerCase();
     if (st && ['awaiting_documents', 'processing', 'awaiting_acceptance', 'completed'].includes(st)) setDocsOpen(true);
-  }, [loan?.stpProcessingStatus]);
+  }, [loan]);
 
   useEffect(() => {
     if (ui2Docs.length > 0) setDocsOpen(true);
@@ -692,7 +686,8 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       });
       if (!res.ok) return;
       await refreshUi2Docs(conversationId, loan.id);
-    } catch {
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -712,7 +707,8 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-    } catch {
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -836,6 +832,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
           const parsed = JSON.parse(raw) as { detail?: unknown };
           if (typeof parsed?.detail === 'string') detail = parsed.detail;
         } catch {
+          detail = raw;
         }
         setMessages((prev) => [
           ...prev,

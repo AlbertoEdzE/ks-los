@@ -174,9 +174,39 @@ if [ -z "$PYTHON_BIN" ]; then
   fi
 fi
 
+VSTR="$($PYTHON_BIN -c 'import sys; print(f\"{sys.version_info.major}.{sys.version_info.minor}\")' 2>/dev/null || echo '')"
+REQ_OK=0
+case "$VSTR" in
+  3.11|3.12|3.13) REQ_OK=1 ;;
+esac
+if [ "$REQ_OK" -ne 1 ]; then
+  echo "[KS LOS] Warning: Python $VSTR detected; 3.11–3.13 recommended."
+fi
+
+if [ ! -x "$ROOT_DIR/venv/bin/python" ]; then
+  "$PYTHON_BIN" -m venv "$ROOT_DIR/venv" || true
+fi
+if [ -x "$ROOT_DIR/venv/bin/python" ]; then
+  PYTHON_BIN="$ROOT_DIR/venv/bin/python"
+fi
+"$PYTHON_BIN" -m pip install -U pip wheel setuptools >/dev/null 2>&1 || true
+if ! "$PYTHON_BIN" -c "import uvicorn" >/dev/null 2>&1; then
+  if [ -f "$ROOT_DIR/requirements.txt" ]; then
+    echo "[KS LOS] Installing backend dependencies..."
+    "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
+  fi
+fi
+
 if ! "$PYTHON_BIN" -c "import uvicorn" >/dev/null 2>&1; then
   echo "[KS LOS] Error: uvicorn not installed for $PYTHON_BIN."
   exit 1
+fi
+
+if ! command -v tesseract >/dev/null 2>&1; then
+  echo "[KS LOS] Warning: tesseract not found; image OCR endpoints will return 501."
+fi
+if ! command -v pdftotext >/dev/null 2>&1; then
+  echo "[KS LOS] Warning: pdftotext not found; PDF OCR endpoints will return 501."
 fi
 
 echo "[KS LOS] Starting FastAPI (backend) on :$BACKEND_PORT..."
@@ -220,7 +250,11 @@ if [ -f "$FRONT_DIR/package.json" ]; then
     # Install dependencies if node_modules is missing
     if [ ! -d "node_modules" ]; then
       echo "[KS LOS] Installing frontend dependencies (this may take a moment)..."
-      npm install
+      if [ -f "package-lock.json" ]; then
+        npm ci || npm install
+      else
+        npm install
+      fi
     fi
     
     echo "[KS LOS] Starting frontend dev server..."
@@ -244,7 +278,7 @@ echo "[KS LOS] Stack URLs:"
 echo "  API:        http://localhost:$BACKEND_PORT/health"
 echo "  Metrics:    http://localhost:$BACKEND_PORT/metrics"
 echo "  Observability Summary: http://localhost:$BACKEND_PORT/observability/summary"
-echo "  MLflow:     http://localhost:5000/"
+echo "  MLflow:     http://localhost:$MLFLOW_PORT/"
 echo "  Prometheus: http://localhost:9090/"
 echo "  Grafana:    http://localhost:3000/"
 echo "  Drift Report: http://localhost:$BACKEND_PORT/training/drift/report"

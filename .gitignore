@@ -129,3 +129,5 @@ mlflow.db
 # Runtime artifacts
 data/inference_log.csv
 doc/04_documentation/
+data/uploads/
+venv*/

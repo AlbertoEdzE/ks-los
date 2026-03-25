@@ -19,6 +19,10 @@ def route_journey_coach(state: AgentState):
     if last_message.tool_calls:
         return "tools"
 
+    content = (getattr(last_message, "content", "") or "").lower()
+    if any(k in content for k in ["credit profile", "generate a credit profile", "risk score", "credit score profile"]):
+        return "tools"
+
     # Otherwise, stop (and wait for user input in next turn)
     return END
 

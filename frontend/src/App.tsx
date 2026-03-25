@@ -1,4 +1,7 @@
 import React, { useMemo, useState } from 'react';
+import { toast } from 'sonner';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as Dialog from '@radix-ui/react-dialog';
 import { ChatInterface, type V2Conversation, type V2Message as V2ChatMessage, type V2Phase } from './components/ChatInterface';
 import { BorrowerJourneyTracker } from './components/BorrowerJourneyTracker';
 import './App.css';
@@ -10,7 +13,8 @@ import { TrainingPanel } from './components/TrainingPanel';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { User, Briefcase, Eye, EyeOff, ArrowRight, Sparkles, CheckCircle2, TrendingUp, BarChart3, Wallet, Building2 } from 'lucide-react';
+import { CheckCircle2 } from 'lucide-react';
+import { DocumentsCard } from './components/DocumentsCard';
 
 type LoginPageProps = {
   mode: 'select' | 'borrower-login' | 'officer-login' | 'borrower-register' | 'officer-register' | 'borrower-forgot' | 'officer-forgot';
@@ -451,7 +455,10 @@ function App() {
       if (!import.meta.env.DEV) return null;
       const name = designOverlayName.trim();
       if (!name) return null;
-      const p = `/Users/albertohernandez/Documents/projects/ks-los/doc/02_Loan-Navigator-AI/attached_assets/${name}`;
+      const base =
+        (import.meta.env.VITE_OVERLAY_DIR as string | undefined) ??
+        '/Users/alberto/Documents/projects/ks-los/doc/01_execution/image';
+      const p = `${base}/${name}`;
       return `/@fs${p}`;
     }, [designOverlayName]);
 
@@ -1290,7 +1297,8 @@ function App() {
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
-      } catch {
+      } catch (e) {
+        console.error(e);
       }
     };
 
@@ -3230,6 +3238,56 @@ function App() {
         }
       />
       <Route
+        path="/borrower"
+        element={
+          <RequireAuth>
+            <RequireRole allow="user">
+              <BorrowerHomePage />
+            </RequireRole>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/borrower/apply"
+        element={
+          <RequireAuth>
+            <RequireRole allow="user">
+              <BorrowerApplyPage />
+            </RequireRole>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/borrower/thank-you"
+        element={
+          <RequireAuth>
+            <RequireRole allow="user">
+              <BorrowerThankYouPage />
+            </RequireRole>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/borrower/applications"
+        element={
+          <RequireAuth>
+            <RequireRole allow="user">
+              <BorrowerApplicationsPage />
+            </RequireRole>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/borrower/application/:id"
+        element={
+          <RequireAuth>
+            <RequireRole allow="user">
+              <BorrowerApplicationDetailPage />
+            </RequireRole>
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/dashboard"
         element={
           <RequireAuth>
@@ -3335,3 +3393,431 @@ function App() {
 }
 
 export default App;
+
+function BorrowerApplyPage() {
+  const navigate = useNavigate();
+  const [name, setName] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [phone, setPhone] = React.useState('');
+  const [loanType, setLoanType] = React.useState('Home Loan');
+  const [amount, setAmount] = React.useState('');
+  const [error, setError] = React.useState('');
+  const API_BASE_URL =
+    (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.DEV ? 'http://localhost:8000' : '');
+  const STORAGE_KEY = 'v2_borrower_conversation_id';
+  const submitApplication = useMutation({
+    mutationFn: async (payload: {
+      borrowerName: string;
+      borrowerEmail: string | null;
+      borrowerPhone: string | null;
+      loanType: string;
+      loanAmount: string;
+      catalogProductCode: string | null;
+    }) => {
+      const existingConv = ((): string | null => {
+        try {
+          return window.localStorage.getItem(STORAGE_KEY) || null;
+        } catch {
+          return null;
+        }
+      })();
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (existingConv) headers['X-Conversation-ID'] = existingConv;
+      const res = await fetch(`${API_BASE_URL}/api/borrower/applications`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(t || `Failed to submit (${res.status})`);
+      }
+      return (await res.json()) as { conversationId: string; loan: { id: string } };
+    },
+    onSuccess: (payload) => {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, payload.conversationId);
+      } catch (e) {
+        void e;
+      }
+      toast.success('Application submitted');
+      navigate('/borrower/thank-you', { replace: true });
+    },
+    onError: (e: unknown) => {
+      setError(e instanceof Error ? e.message : 'Submit failed');
+    },
+  });
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    const trimmedAmount = amount.trim();
+    if (!trimmedName || !trimmedEmail || !trimmedAmount) return;
+    submitApplication.mutate({
+      borrowerName: trimmedName,
+      borrowerEmail: trimmedEmail,
+      borrowerPhone: phone.trim() || null,
+      loanType,
+      loanAmount: trimmedAmount,
+      catalogProductCode: null,
+    });
+  };
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30 dark:from-[#0d0d0d] dark:via-[#111] dark:to-[#0d0d0d]">
+      <header className="glass-header border-b border-slate-200/40 dark:border-white/[0.04] px-6 py-4 flex items-center justify-between bg-white/70 dark:bg-[#141414]/80 backdrop-blur-xl">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-2xl bg-white dark:bg-white/10 flex items-center justify-center shadow-sm">
+            <span className="text-sm font-black tracking-tight text-slate-900 dark:text-white">KS</span>
+          </div>
+          <div>
+            <h1 className="font-bold text-lg tracking-tight text-slate-900 dark:text-white">LoanAssist AI</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Start your application</p>
+          </div>
+        </div>
+        <Link to="/" className="no-underline">
+          <span className="inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold bg-white/80 dark:bg-white/[0.06] border border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 shadow-sm">
+            Back to Home
+          </span>
+        </Link>
+      </header>
+      <div className="max-w-3xl mx-auto p-6">
+        <div className="rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-xl p-6">
+          <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-1">Quick Apply</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Share a few details to get started. You can complete the rest in chat.</p>
+          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">Full name</label>
+              <input value={name} onChange={(e)=>setName(e.target.value)} className="mt-1 w-full px-4 py-3 rounded-2xl border border-slate-200/60 dark:border-white/[0.10] bg-white/70 dark:bg-white/[0.03] text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/20" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">Email</label>
+              <input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} className="mt-1 w-full px-4 py-3 rounded-2xl border border-slate-200/60 dark:border-white/[0.10] bg-white/70 dark:bg-white/[0.03] text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/20" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">Phone</label>
+              <input value={phone} onChange={(e)=>setPhone(e.target.value)} className="mt-1 w-full px-4 py-3 rounded-2xl border border-slate-200/60 dark:border-white/[0.10] bg-white/70 dark:bg-white/[0.03] text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/20" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">Loan type</label>
+              <select value={loanType} onChange={(e)=>setLoanType(e.target.value)} className="mt-1 w-full px-4 py-3 rounded-2xl border border-slate-200/60 dark:border-white/[0.10] bg-white/70 dark:bg-white/[0.03] text-slate-900 dark:text-white outline-none">
+                <option>Home Loan</option>
+                <option>Personal Loan</option>
+                <option>Auto Loan</option>
+                <option>Business Loan</option>
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">Desired amount</label>
+              <input value={amount} onChange={(e)=>setAmount(e.target.value)} placeholder="$20,000" className="mt-1 w-full px-4 py-3 rounded-2xl border border-slate-200/60 dark:border-white/[0.10] bg-white/70 dark:bg-white/[0.03] text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/20" />
+            </div>
+            <div className="md:col-span-2">
+              {error ? <div className="mb-2 text-sm font-semibold text-red-600 dark:text-red-400">{error}</div> : null}
+              <button type="submit" disabled={submitApplication.isPending} className="w-full rounded-2xl bg-gradient-to-r from-blue-600 to-blue-700 px-4 py-3 text-sm font-extrabold text-white shadow-lg shadow-blue-600/20">
+                {submitApplication.isPending ? 'Submitting…' : 'Submit Application'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BorrowerThankYouPage() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30 dark:from-[#0d0d0d] dark:via-[#111] dark:to-[#0d0d0d]">
+      <div className="max-w-lg mx-auto p-6 pt-20">
+        <div className="rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-xl p-6 text-center">
+          <div className="w-14 h-14 rounded-2xl mx-auto mb-4 bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/25">
+            <CheckCircle2 className="w-7 h-7 text-white" />
+          </div>
+          <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-1">Thanks! We received your details</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">Check your borrower home for next steps or continue in chat for guidance.</p>
+          <Link to="/" className="no-underline inline-block rounded-2xl bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-3 text-sm font-extrabold text-white shadow-lg shadow-blue-600/20">Go to Borrower Home</Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BorrowerApplicationsPage() {
+  const API_BASE_URL =
+    (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.DEV ? 'http://localhost:8000' : '');
+  const STORAGE_KEY = 'v2_borrower_conversation_id';
+  const convId = React.useMemo(() => {
+    try {
+      return window.localStorage.getItem(STORAGE_KEY) || null;
+    } catch {
+      return null;
+    }
+  }, []);
+  const appsQuery = useQuery({
+    queryKey: ['borrowerApplications', convId],
+    enabled: !!convId,
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/api/borrower/applications`, { headers: { 'X-Conversation-ID': convId! } });
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(t || `Failed to load (${res.status})`);
+      }
+      return (await res.json()) as Array<{ id: string; loanType?: string | null; loanAmount?: string | null; status?: string | null }>;
+    },
+    staleTime: 10_000,
+    gcTime: 5 * 60_000,
+  });
+  const items = appsQuery.data ?? [];
+  const error = appsQuery.error instanceof Error ? appsQuery.error.message : '';
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30 dark:from-[#0d0d0d] dark:via-[#111] dark:to-[#0d0d0d]">
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-xl p-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">Your Applications</h2>
+            <Link to="/borrower/apply" className="no-underline rounded-2xl px-3 py-2 text-xs font-semibold bg-white/80 dark:bg-white/[0.06] border border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 shadow-sm">New Application</Link>
+          </div>
+          {error ? <div className="mt-3 text-sm font-semibold text-red-600 dark:text-red-400">{error}</div> : null}
+          {appsQuery.isLoading ? <div className="mt-4 text-slate-500 dark:text-slate-400">Loading…</div> : null}
+          {!appsQuery.isLoading && items.length === 0 ? (
+            <div className="mt-4 rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+              {convId ? 'No applications to show yet.' : 'Start an application to see it here.'}
+            </div>
+          ) : null}
+          <div className="mt-4 grid gap-3">
+            {items.map((it) => (
+              <Link
+                to={`/borrower/application/${it.id}`}
+                key={it.id}
+                className="no-underline rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-4 flex items-center justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-extrabold text-slate-900 dark:text-white">Application {it.id.slice(0, 8)}</div>
+                  <div className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
+                    {it.loanType || '—'} · {it.loanAmount || '—'}
+                  </div>
+                </div>
+                <div className="shrink-0 text-[11px] font-extrabold text-slate-700 dark:text-slate-300">{it.status || '—'}</div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BorrowerApplicationDetailPage() {
+  const { id } = useParams();
+  const [error, setError] = React.useState('');
+  const [pendingDoc, setPendingDoc] = React.useState<string | null>(null);
+  const [dropFile, setDropFile] = React.useState<File | null>(null);
+  const [docPickerOpen, setDocPickerOpen] = React.useState(false);
+  const [dragActive, setDragActive] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const API_BASE_URL =
+    (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.DEV ? 'http://localhost:8000' : '');
+  const STORAGE_KEY = 'v2_borrower_conversation_id';
+  const qc = useQueryClient();
+  const convId = React.useMemo(() => {
+    try {
+      return window.localStorage.getItem(STORAGE_KEY) || null;
+    } catch {
+      return null;
+    }
+  }, []);
+  const loanQuery = useQuery({
+    queryKey: ['borrowerApplication', convId, id],
+    enabled: !!convId && !!id,
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE_URL}/api/borrower/applications/${id}`, { headers: { 'X-Conversation-ID': convId! } });
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(t || `Failed to load (${res.status})`);
+      }
+      return (await res.json()) as Record<string, unknown>;
+    },
+    staleTime: 10_000,
+    gcTime: 5 * 60_000,
+  });
+  const loan = loanQuery.data ?? null;
+  const items = React.useMemo(() => {
+    const cl = (loan as { documentChecklist?: unknown } | null)?.documentChecklist;
+    const arr = (cl && typeof cl === 'object' ? (cl as { items?: unknown }).items : null) as Array<Record<string, unknown>> | null;
+    const docs = Array.isArray(arr) ? arr : [];
+    const mapped = docs.map((d) => {
+      const name = String(d.name ?? 'Document');
+      const status = String(d.status ?? 'missing').toLowerCase();
+      const uploaded = status !== 'missing';
+      return { name, status: uploaded ? 'optional' as const : 'required' as const, description: '', uploaded };
+    });
+    return {
+      identity: mapped,
+      income: [] as Array<{ name: string; status: 'required' | 'optional'; description: string; uploaded?: boolean }>,
+    };
+  }, [loan]);
+  const uploadDocument = useMutation({
+    mutationFn: async (payload: { docName: string; file: File; category?: string }) => {
+      if (!id || !convId) throw new Error('Missing application context');
+      const form = new FormData();
+      form.append('loanId', id);
+      const deriveCategory = () => {
+        const n = payload.docName.toLowerCase();
+        const inIdentity = items.identity.some((x) => x.name.toLowerCase() === n);
+        const inIncome = items.income.some((x) => x.name.toLowerCase() === n);
+        if (inIncome) return 'income';
+        if (inIdentity) return 'identity';
+        return 'identity';
+      };
+      form.append('category', payload.category || deriveCategory());
+      const typeKey = payload.docName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+      form.append('documentType', typeKey || 'document');
+      form.append('file', payload.file, payload.file.name);
+      const res = await fetch(`${API_BASE_URL}/api/documents/upload`, {
+        method: 'POST',
+        headers: { 'X-Conversation-ID': convId },
+        body: form,
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(t || `Upload failed (${res.status})`);
+      }
+      return true;
+    },
+    onSuccess: () => {
+      setPendingDoc(null);
+      setDropFile(null);
+      setDocPickerOpen(false);
+      toast.success('Document uploaded');
+      void qc.invalidateQueries({ queryKey: ['borrowerApplication', convId, id] });
+      void qc.invalidateQueries({ queryKey: ['borrowerApplications', convId] });
+    },
+    onError: (e: unknown) => {
+      setError(e instanceof Error ? e.message : 'Upload failed');
+      toast.error('Upload failed');
+    },
+  });
+  const missingDocs = React.useMemo(() => items.identity.filter((d) => !d.uploaded).map((d) => d.name), [items.identity]);
+  const onUpload = React.useCallback((docName: string) => {
+    if (uploadDocument.isPending) return;
+    setPendingDoc(docName);
+    const el = fileInputRef.current;
+    if (el) {
+      el.value = '';
+      el.click();
+    }
+  }, [uploadDocument.isPending]);
+  const handleFile = React.useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files || e.target.files.length === 0 || !pendingDoc) return;
+      const f = e.target.files[0]!;
+      const n = pendingDoc.toLowerCase();
+      const inIncome = items.income.some((x) => x.name.toLowerCase() === n);
+      const category = inIncome ? 'income' : 'identity';
+      uploadDocument.mutate({ docName: pendingDoc, file: f, category });
+    },
+    [pendingDoc, uploadDocument, items.income],
+  );
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30 dark:from-[#0d0d0d] dark:via-[#111] dark:to-[#0d0d0d]">
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-xl p-6">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">Application #{id}</h2>
+            <Link to="/borrower/applications" className="no-underline rounded-2xl px-3 py-2 text-xs font-semibold bg-white/80 dark:bg-white/[0.06] border border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 shadow-sm">Back to list</Link>
+          </div>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Upload required documents to progress your application.</p>
+          {error ? <div className="mb-3 text-sm font-semibold text-red-600 dark:text-red-400">{error}</div> : null}
+          {loanQuery.isLoading ? <div className="text-slate-500 dark:text-slate-400">Loading…</div> : null}
+          {!loanQuery.isLoading ? (
+            <>
+              <div
+                className={`mb-4 rounded-2xl border border-dashed px-5 py-4 ${dragActive ? 'border-blue-400 bg-blue-50/70 dark:bg-blue-900/20' : 'border-slate-200/60 dark:border-white/[0.08] bg-white/60 dark:bg-white/[0.03]'}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragLeave={() => setDragActive(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragActive(false);
+                  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+                  if (!f) return;
+                  if (uploadDocument.isPending) return;
+                  setDropFile(f);
+                  if (missingDocs.length === 1) {
+                    const dn = missingDocs[0]!;
+                    const n = dn.toLowerCase();
+                    const inIncome = items.income.some((x) => x.name.toLowerCase() === n);
+                    const category = inIncome ? 'income' : 'identity';
+                    uploadDocument.mutate({ docName: dn, file: f, category });
+                    return;
+                  }
+                  setDocPickerOpen(true);
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-extrabold text-slate-900 dark:text-white">Drag & drop documents</div>
+                    <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                      Drop a PDF or image here, then choose which requirement it satisfies.
+                    </div>
+                  </div>
+                  <div className="text-[11px] font-extrabold text-slate-700 dark:text-slate-300">
+                    {uploadDocument.isPending ? 'Uploading…' : 'Ready'}
+                  </div>
+                </div>
+              </div>
+
+              <DocumentsCard checklist={items} onUpload={onUpload} busyDocumentName={uploadDocument.isPending ? pendingDoc : null} disableUpload={uploadDocument.isPending} />
+
+              <Dialog.Root open={docPickerOpen} onOpenChange={setDocPickerOpen}>
+                <Dialog.Portal>
+                  <Dialog.Overlay className="fixed inset-0 bg-black/40" />
+                  <Dialog.Content className="fixed left-1/2 top-1/2 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200/60 dark:border-white/[0.08] bg-white dark:bg-[#111113] p-4 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <Dialog.Title className="text-sm font-extrabold text-slate-900 dark:text-white">Select document type</Dialog.Title>
+                        <Dialog.Description className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                          Choose which checklist item this file should satisfy.
+                        </Dialog.Description>
+                      </div>
+                      <Dialog.Close asChild>
+                        <button type="button" className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                          Close
+                        </button>
+                      </Dialog.Close>
+                    </div>
+                    <div className="mt-3 grid gap-2">
+                      {missingDocs.length ? (
+                        missingDocs.map((d) => (
+                          <button
+                            key={d}
+                            type="button"
+                            disabled={!dropFile || uploadDocument.isPending}
+                            onClick={() => {
+                              if (!dropFile) return;
+                              const n = d.toLowerCase();
+                              const inIncome = items.income.some((x) => x.name.toLowerCase() === n);
+                              const category = inIncome ? 'income' : 'identity';
+                              uploadDocument.mutate({ docName: d, file: dropFile, category });
+                            }}
+                            className="text-left rounded-xl border border-slate-200/60 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.04] px-3 py-2 text-xs font-bold text-slate-800 dark:text-slate-200 disabled:opacity-50"
+                          >
+                            {d}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="text-xs text-slate-500 dark:text-slate-400">No missing checklist items.</div>
+                      )}
+                    </div>
+                  </Dialog.Content>
+                </Dialog.Portal>
+              </Dialog.Root>
+            </>
+          ) : null}
+          <input ref={fileInputRef} type="file" onChange={handleFile} className="hidden" />
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -34,3 +34,32 @@ def test_v2_errors_emit_error_metrics():
     assert missing.status_code == 404
     metrics = client.get("/metrics").text
     assert 'request_errors_total{endpoint="/api/loans/{loan_id}"}' in metrics
+
+
+def test_borrower_application_endpoints():
+    created = client.post(
+        "/api/borrower/applications",
+        json={
+            "borrowerName": "Test Borrower",
+            "borrowerEmail": "test@example.com",
+            "borrowerPhone": "555-0100",
+            "loanType": "Home Loan",
+            "loanAmount": "250000",
+        },
+    )
+    assert created.status_code == 200
+    payload = created.json()
+    conv_id = payload.get("conversationId")
+    loan = payload.get("loan") or {}
+    loan_id = loan.get("id")
+    assert isinstance(conv_id, str) and conv_id
+    assert isinstance(loan_id, str) and loan_id
+
+    listed = client.get("/api/borrower/applications", headers={"X-Conversation-ID": conv_id})
+    assert listed.status_code == 200
+    rows = listed.json()
+    assert any(r.get("id") == loan_id for r in rows)
+
+    fetched = client.get(f"/api/borrower/applications/{loan_id}", headers={"X-Conversation-ID": conv_id})
+    assert fetched.status_code == 200
+    assert fetched.json().get("id") == loan_id

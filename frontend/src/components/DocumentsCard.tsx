@@ -16,9 +16,11 @@ interface DocumentsChecklist {
 interface DocumentsCardProps {
   checklist: DocumentsChecklist;
   onUpload?: (documentName: string) => void;
+  busyDocumentName?: string | null;
+  disableUpload?: boolean;
 }
 
-export function DocumentsCard({ checklist, onUpload }: DocumentsCardProps) {
+export function DocumentsCard({ checklist, onUpload, busyDocumentName = null, disableUpload = false }: DocumentsCardProps) {
   const renderDocumentSection = (title: string, documents: DocumentItem[]) => (
     <div className="mb-4">
       <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
@@ -48,9 +50,10 @@ export function DocumentsCard({ checklist, onUpload }: DocumentsCardProps) {
             </div>
             <button
               onClick={() => onUpload?.(doc.name)}
-              className="ml-3 px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+              disabled={disableUpload}
+              className="ml-3 px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {doc.uploaded ? 'Replace' : 'Upload'}
+              {busyDocumentName === doc.name ? 'Uploading…' : doc.uploaded ? 'Replace' : 'Upload'}
             </button>
           </div>
         ))}

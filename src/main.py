@@ -24,7 +24,7 @@ from src.api.routers.chat_support_router import router as chat_support_router
 from src.api.routers.admin_config_router import router as admin_config_router
 from src.api.routers.admin_seed_router import router as admin_seed_router
 from src.api.routers.model_manage_router import router as model_manage_router
-from src.api.routers.v2_conversations_router import router as v2_conversations_router
+from src.api.routers.v2_conversations_router import router as v2_conversations_router, borrower_router as v2_borrower_router
 from src.api.routers.v2_phases_router import router as v2_phases_router
 from src.api.routers.v2_loans_router import router as v2_loans_router
 from src.api.routers.v2_catalog_products_router import router as v2_catalog_products_router
@@ -114,6 +114,7 @@ app.include_router(admin_config_router)
 app.include_router(admin_seed_router)
 app.include_router(model_manage_router)
 app.include_router(v2_conversations_router)
+app.include_router(v2_borrower_router)
 app.include_router(v2_phases_router)
 app.include_router(v2_loans_router)
 app.include_router(v2_catalog_products_router)

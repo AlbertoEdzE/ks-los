@@ -30,6 +30,7 @@ from src.shared.metrics import (
 
 
 router = APIRouter(prefix="/api/conversations", tags=["v2_conversations"], dependencies=[Depends(require_viewer_role)])
+borrower_router = APIRouter(prefix="/api/borrower", tags=["borrower"], dependencies=[Depends(require_viewer_role)])
 
 
 class CreateConversationRequest(BaseModel):
@@ -45,6 +46,20 @@ class UpdateConversationRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str
+
+
+class CreateBorrowerApplicationRequest(BaseModel):
+    borrowerName: str
+    borrowerEmail: Optional[str] = None
+    borrowerPhone: Optional[str] = None
+    loanType: str
+    loanAmount: str
+    catalogProductCode: Optional[str] = None
+
+
+class CreateBorrowerApplicationResponse(BaseModel):
+    conversationId: str
+    loan: dict[str, Any]
 
 
 class IntentSummary(BaseModel):
@@ -306,9 +321,15 @@ def _extract_down_payment(text: str) -> Optional[str]:
 def _extract_income(text: str) -> Optional[str]:
     t = text.lower()
     m = re.search(r"\b(income|salary)\b\s*(is|=|:)?\s*(\$|₹|usd\s*)?\s*([\d,]+)", t)
-    if not m:
-        return None
-    return m.group(4).replace(",", "")
+    if m:
+        return m.group(4).replace(",", "")
+    m2 = re.search(r"\b([\d,]+)\s*(?:usd|\$)\s*(?:/|per\s*)?\s*(?:month|mo)\b", t.replace("usd/", "usd /"))
+    if m2:
+        return m2.group(1).replace(",", "")
+    m3 = re.search(r"\b([\d,]+)(?:usd|\$)\s*(?:/|per\s*)?\s*(?:month|mo)\b", t)
+    if m3:
+        return m3.group(1).replace(",", "")
+    return None
 
 
 def _extract_existing_debts(text: str) -> Optional[str]:
@@ -458,6 +479,19 @@ def _next_angle(intent: dict) -> str:
     if not intent.get("preferredTenure"):
         return "Confirm preferred tenure and repayment comfort level."
     return "Validate documents, collateral, and eligibility constraints."
+
+
+def _extract_question_lines(text: str) -> list[str]:
+    out: list[str] = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("- "):
+            line = line[2:].strip()
+        if "?" in line:
+            out.append(line)
+    return out
 
 
 def _build_borrower_assistant_reply(db: Session, conversation_id: str, intent: dict) -> tuple[str, str]:
@@ -2062,8 +2096,12 @@ def send_message(
         llm_recs = llm_turn.get("loanRecommendations") if isinstance(llm_turn, dict) else None
         if isinstance(llm_recs, list):
             conv.recommended_products = llm_recs
-        elif conv.recommended_products is None:
-            conv.recommended_products = []
+        else:
+            heuristic = _recommend_products(db, analysis["intentSummary"] if isinstance(analysis, dict) else {})
+            if heuristic:
+                conv.recommended_products = heuristic
+            elif conv.recommended_products is None:
+                conv.recommended_products = []
         db.add(conv)
         db.commit()
         db.refresh(conv)
@@ -2267,6 +2305,27 @@ def send_message(
         loan_recommendation_cards = None
         selected_recommendation = None
         loan_snapshot = None
+    final_recommendation = None
+    if conv.chat_role == "borrower" and not actor_is_officer:
+        if isinstance(final_recommendation_override, dict):
+            final_recommendation = final_recommendation_override
+        elif isinstance(selected_recommendation, dict):
+            final_recommendation = selected_recommendation
+        else:
+            intent_obj = analysis.get("intentSummary") if isinstance(analysis, dict) else {}
+            intent_dict = intent_obj if isinstance(intent_obj, dict) else {}
+            has_amount = _parse_amount_to_number(intent_dict.get("loanAmount")) is not None
+            has_income = _parse_amount_to_number(intent_dict.get("monthlyIncome")) is not None
+            has_tenure = isinstance(intent_dict.get("preferredTenure"), str) and bool(str(intent_dict.get("preferredTenure") or "").strip())
+            purpose = str(intent_dict.get("purpose") or "").strip().lower()
+            home_ok = True
+            if purpose == "home":
+                home_ok = _parse_amount_to_number(intent_dict.get("propertyValue")) is not None and _parse_amount_to_number(intent_dict.get("downPayment")) is not None
+            recs = conv.recommended_products if isinstance(conv.recommended_products, list) else []
+            if purpose and has_amount and has_income and has_tenure and home_ok and recs:
+                first = recs[0]
+                if isinstance(first, dict):
+                    final_recommendation = first
     assistant_metadata = {
         "actorRole": "officer_assistant" if actor_is_officer else None,
         "assistantEngine": assistant_engine,
@@ -2279,7 +2338,7 @@ def send_message(
         "loanAction": loan_action,
         "conversationPatch": conversation_patch,
         "actionResults": action_results,
-        "finalRecommendation": final_recommendation_override if (conv.chat_role == "borrower" and not actor_is_officer) else None,
+        "finalRecommendation": final_recommendation,
     }
     assistant_msg = Message(
         id=str(uuid.uuid4()),
@@ -2545,3 +2604,150 @@ async def upload_conversation_signature(
     except Exception as e:
         request_errors_total.labels(endpoint="/api/conversations/{conversation_id}/signature").inc()
         raise HTTPException(status_code=500, detail=str(e) or "Upload failed")
+
+
+def _default_required_documents(loan_type: str) -> list[str]:
+    lt = (loan_type or "").strip().lower()
+    docs = [
+        "National ID or Passport",
+        "Proof of Address",
+        "Last 3 Payslips",
+        "Last 6 Months Bank Statements",
+    ]
+    if any(k in lt for k in ["home", "property", "mortgage"]):
+        docs += [
+            "Agreement / Contract of Sale",
+            "Property Valuation Report",
+            "Title Search / Deed",
+        ]
+    if any(k in lt for k in ["auto", "car", "vehicle"]):
+        docs += [
+            "Dealer Quotation / Pro-forma Invoice",
+            "Vehicle Registration (if used)",
+        ]
+    return docs
+
+
+def _require_borrower_conversation(
+    *,
+    db: Session,
+    conversation_id: Optional[str],
+    x_api_key: Optional[str],
+    authorization: Optional[str],
+) -> Conversation:
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="X-Conversation-ID header required")
+    conv = db.get(Conversation, conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if is_officer_request(x_api_key, authorization):
+        return conv
+    if conv.id != conversation_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return conv
+
+
+def _require_borrower_loan_access(
+    *,
+    db: Session,
+    loan_id: str,
+    conversation_id: Optional[str],
+    x_api_key: Optional[str],
+    authorization: Optional[str],
+) -> Loan:
+    loan = db.get(Loan, loan_id)
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found")
+    if is_officer_request(x_api_key, authorization):
+        return loan
+    if not conversation_id or not loan.conversation_id or loan.conversation_id != conversation_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return loan
+
+
+@borrower_router.get("/applications")
+def list_borrower_applications(
+    x_conversation_id: str | None = Header(default=None, alias="X-Conversation-ID"),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    request_counter.labels(endpoint="/api/borrower/applications").inc()
+    conv = _require_borrower_conversation(db=db, conversation_id=x_conversation_id, x_api_key=x_api_key, authorization=authorization)
+    rows = (
+        db.execute(select(Loan).where(Loan.conversation_id == conv.id).order_by(Loan.updated_at.desc(), Loan.created_at.desc(), Loan.id.desc()))
+        .scalars()
+        .all()
+    )
+    from src.api.routers import v2_loans_router as loans_api
+
+    return [loans_api._serialize_loan(l) for l in rows]
+
+
+@borrower_router.get("/applications/{loan_id}")
+def get_borrower_application(
+    loan_id: str,
+    x_conversation_id: str | None = Header(default=None, alias="X-Conversation-ID"),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    request_counter.labels(endpoint="/api/borrower/applications/{loan_id}").inc()
+    loan = _require_borrower_loan_access(
+        db=db, loan_id=loan_id, conversation_id=x_conversation_id, x_api_key=x_api_key, authorization=authorization
+    )
+    from src.api.routers import v2_loans_router as loans_api
+
+    return loans_api._serialize_loan(loan)
+
+
+@borrower_router.post("/applications", response_model=CreateBorrowerApplicationResponse)
+def create_borrower_application(
+    req: CreateBorrowerApplicationRequest,
+    x_conversation_id: str | None = Header(default=None, alias="X-Conversation-ID"),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    request_counter.labels(endpoint="/api/borrower/applications").inc()
+
+    conv_id = x_conversation_id
+    conv = db.get(Conversation, conv_id) if conv_id else None
+    if not conv:
+        conv = Conversation(id=str(uuid.uuid4()), borrower_name=req.borrowerName, status="active", chat_role="borrower")
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+        conv_id = conv.id
+
+    if not is_officer_request(x_api_key, authorization) and x_conversation_id and conv.id != x_conversation_id:
+        request_errors_total.labels(endpoint="/api/borrower/applications").inc()
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    from src.api.routers import v2_loans_router as loans_api
+
+    product = loans_api._get_product_by_code(db, req.catalogProductCode) if req.catalogProductCode else None
+    required_docs = product.required_documents if product and isinstance(product.required_documents, list) else _default_required_documents(req.loanType)
+    checklist = loans_api._build_document_checklist(req.catalogProductCode, required_docs)
+
+    loan = Loan(
+        borrower_name=req.borrowerName,
+        borrower_email=req.borrowerEmail,
+        borrower_phone=req.borrowerPhone,
+        loan_type=req.loanType,
+        loan_amount=req.loanAmount,
+        catalog_product_code=req.catalogProductCode,
+        document_checklist=checklist,
+        conversation_id=conv_id,
+        status="draft",
+    )
+    db.add(loan)
+    db.commit()
+    db.refresh(loan)
+    log_audit(
+        event="borrower_application_created",
+        endpoint="/api/borrower/applications",
+        status="success",
+        meta={"conversationId": conv_id, "loanId": loan.id},
+    )
+    return {"conversationId": conv_id, "loan": loans_api._serialize_loan(loan)}

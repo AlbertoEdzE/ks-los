@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import * as RadixTooltip from '@radix-ui/react-tooltip';
 
 interface Props {
   fullName?: string;
@@ -15,51 +16,43 @@ const PROCESS_STEPS = [
   { id: 'aggregation', label: 'Decision', description: 'Synthesizing all insights into a final credit decision recommendation.' }
 ];
 
-const Tooltip = ({ text }: { text: string }) => {
-  const [show, setShow] = useState(false);
-  return (
-    <div 
-      style={{ position: 'relative', display: 'inline-block', marginLeft: '4px', cursor: 'help' }}
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
-      onClick={(e) => { e.stopPropagation(); setShow(!show); }}
-    >
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10"></circle>
-        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-        <line x1="12" y1="17" x2="12.01" y2="17"></line>
-      </svg>
-      {show && (
-        <div style={{
-          position: 'absolute',
-          bottom: '100%',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          backgroundColor: '#1f2937',
-          color: 'white',
-          padding: '6px 10px',
-          borderRadius: '6px',
-          fontSize: '0.7rem',
-          whiteSpace: 'nowrap',
-          zIndex: 50,
-          marginBottom: '6px',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-        }}>
-          {text}
-          <div style={{
-            position: 'absolute',
-            top: '100%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            borderWidth: '4px',
-            borderStyle: 'solid',
-            borderColor: '#1f2937 transparent transparent transparent'
-          }}></div>
-        </div>
-      )}
-    </div>
-  );
-};
+const Tooltip = ({ text }: { text: string }) => (
+  <RadixTooltip.Provider delayDuration={150}>
+    <RadixTooltip.Root>
+      <RadixTooltip.Trigger asChild>
+        <button
+          type="button"
+          aria-label="More info"
+          style={{ marginLeft: '4px', cursor: 'help', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 0, padding: 0 }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </button>
+      </RadixTooltip.Trigger>
+      <RadixTooltip.Portal>
+        <RadixTooltip.Content side="top" sideOffset={8}>
+          <div
+            style={{
+              backgroundColor: '#1f2937',
+              color: 'white',
+              padding: '6px 10px',
+              borderRadius: '6px',
+              fontSize: '0.7rem',
+              whiteSpace: 'nowrap',
+              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+            }}
+          >
+            {text}
+          </div>
+          <RadixTooltip.Arrow width={8} height={4} style={{ fill: '#1f2937' }} />
+        </RadixTooltip.Content>
+      </RadixTooltip.Portal>
+    </RadixTooltip.Root>
+  </RadixTooltip.Provider>
+);
 
 export const GlobalProgressBar: React.FC<Props> = ({ fullName, onComplete, isActive = true }) => {
   const [currentStepId, setCurrentStepId] = useState<string>('intake');

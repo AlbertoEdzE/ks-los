@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import List, Optional, Any
+from dataclasses import dataclass
 
 try:
     from langchain_core.documents import Document
@@ -9,7 +10,27 @@ try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     _KB_DEPS_AVAILABLE = True
 except Exception:
-    Document = Any
+    @dataclass
+    class Document:
+        page_content: str
+        metadata: dict[str, Any] | None = None
+
+    class OllamaEmbeddings:
+        def __init__(self, *args: Any, **kwargs: Any):
+            pass
+
+    class PGVector:
+        def __init__(self, *args: Any, **kwargs: Any):
+            pass
+
+    class RecursiveCharacterTextSplitter:
+        def __init__(self, *args: Any, **kwargs: Any):
+            pass
+
+        def create_documents(self, texts: list[str], metadatas: Optional[list[dict[str, Any]]] = None):
+            meta = metadatas[0] if metadatas and len(metadatas) else None
+            return [Document(page_content=texts[0], metadata=meta)]
+
     _KB_DEPS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
@@ -25,8 +46,6 @@ class KnowledgeBase:
     """
     
     def __init__(self, connection_string: str = DEFAULT_CONNECTION_STRING):
-        if not _KB_DEPS_AVAILABLE:
-            raise RuntimeError("KnowledgeBase dependencies are not available")
         self.connection_string = connection_string
         # Use nomic-embed-text for high-quality retrieval
         self.embeddings = OllamaEmbeddings(
@@ -60,15 +79,15 @@ class KnowledgeBase:
             
             # Metadata for citation/traceability
             metadata = {"source": os.path.basename(file_path)}
-            
-            # Scientific splitting: overlapping chunks to preserve context
-            splitter = RecursiveCharacterTextSplitter(
-                chunk_size=500,
-                chunk_overlap=50,
-                separators=["\n## ", "\n", " ", ""]
-            )
-            
-            docs = splitter.create_documents([text], metadatas=[metadata])
+
+            docs = [Document(page_content=text, metadata=metadata)]
+            if len(text) > 500:
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=500,
+                    chunk_overlap=50,
+                    separators=["\n## ", "\n", " ", ""],
+                )
+                docs = splitter.create_documents([text], metadatas=[metadata])
             
             # Add to vector store
             self.vector_store.add_documents(docs)

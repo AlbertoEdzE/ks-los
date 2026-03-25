@@ -371,9 +371,26 @@ def accept_terms(
         authorization=authorization,
     )
 
-    if (loan.stp_processing_status or "").lower() != "awaiting_acceptance":
+    stp_status = (loan.stp_processing_status or "").strip().lower()
+    if stp_status and stp_status != "awaiting_acceptance":
         request_errors_total.labels(endpoint="/api/loans/{id}/accept-terms").inc()
         raise HTTPException(status_code=400, detail="Loan is not awaiting acceptance")
+    if not stp_status:
+        bureau = _compute_bureau_report(loan)
+        approval_calc = _compute_terms(loan, bureau)
+        loan.interest_rate = approval_calc.get("rate")
+        loan.tenure = approval_calc.get("tenure")
+        loan.monthly_emi = approval_calc.get("emi")
+        loan.stp_processing_status = "awaiting_acceptance"
+        loan.stp_payload = {
+            "stpApproved": True,
+            "loanId": loan.id,
+            "bureauReport": bureau,
+            "awaitingAcceptance": True,
+            "approval": {**approval_calc, "conditions": ["Subject to final document verification"]},
+            "stpCompleted": False,
+            "disbursement": None,
+        }
 
     signature_bytes, signature_mime = _decode_signature_data_url(payload.signature)
 
