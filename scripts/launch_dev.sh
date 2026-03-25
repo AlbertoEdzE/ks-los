@@ -6,6 +6,8 @@ COMPOSE_FILE="$ROOT_DIR/infrastructure/docker-compose.yml"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5174}"
 MLFLOW_PORT="${MLFLOW_PORT:-5000}"
+OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3:latest}"
 
 wait_for_http() {
     local url="$1"
@@ -160,6 +162,45 @@ ensure_docker_running
 echo "[KS LOS] Bootstrapping observability stack (Prometheus, Grafana, MLflow)..."
 docker compose -f "$COMPOSE_FILE" up -d postgres redis mlflow prometheus grafana otel-collector jaeger
 
+# Ensure Ollama is installed and serving a model locally (optional but recommended for LLM features)
+ensure_ollama_running() {
+  if command -v ollama >/dev/null 2>&1; then
+    if ! curl -fsS "http://localhost:${OLLAMA_PORT}/api/version" >/dev/null 2>&1; then
+      echo "[KS LOS] Starting Ollama daemon..."
+      nohup ollama serve > "$ROOT_DIR/ollama.log" 2>&1 &
+      for i in $(seq 1 30); do
+        if curl -fsS "http://localhost:${OLLAMA_PORT}/api/version" >/dev/null 2>&1; then
+          break
+        fi
+        sleep 1
+      done
+    fi
+    if curl -fsS "http://localhost:${OLLAMA_PORT}/api/version" >/dev/null 2>&1; then
+      echo "[KS LOS] Ensuring model '${OLLAMA_MODEL}' is available..."
+      ollama pull "${OLLAMA_MODEL}" >/dev/null 2>&1 || true
+    else
+      echo "[KS LOS] Warning: Ollama daemon did not respond on :${OLLAMA_PORT}. LLM calls may be disabled."
+    fi
+  else
+    echo "[KS LOS] Warning: 'ollama' not found; local LLM will be unavailable."
+    if command -v brew >/dev/null 2>&1; then
+      echo "[KS LOS] You can install it via: brew install ollama"
+    fi
+  fi
+}
+ensure_ollama_running
+
+open_url() {
+  local url="$1"
+  if command -v open >/dev/null 2>&1; then
+    open "$url"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url" >/dev/null 2>&1 || echo "[KS LOS] Please open: $url"
+  else
+    echo "[KS LOS] Please open in your browser: $url"
+  fi
+}
+
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [ -z "$PYTHON_BIN" ]; then
   if [ -x "$ROOT_DIR/venv/bin/python" ]; then
@@ -215,6 +256,7 @@ export LOG_JSON=1
 export OTLP_URL="http://localhost:4317"
 export ENFORCE_RBAC=0
 export MLFLOW_TRACKING_URI="http://localhost:$MLFLOW_PORT"
+export OLLAMA_MODEL="${OLLAMA_MODEL}"
 
 # Start Backend with nohup
 (
@@ -227,6 +269,12 @@ if ! wait_for_http "http://localhost:$BACKEND_PORT/health" "Backend API" 45; the
   tail_log "$ROOT_DIR/backend.log" "backend"
   echo "[KS LOS] Tip: if you see import errors, activate venv and reinstall deps."
   exit 1
+fi
+
+# Initialize knowledge base or any seed data if script is present
+if [ -f "$ROOT_DIR/scripts/init_kb.py" ]; then
+  echo "[KS LOS] Initializing knowledge base..."
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/init_kb.py" || true
 fi
 
 FRONT_DIR="$ROOT_DIR/frontend"
@@ -268,7 +316,7 @@ if [ -f "$FRONT_DIR/package.json" ]; then
     exit 1
   fi
   echo "[KS LOS] Opening frontend in default browser..."
-  open "http://localhost:$FRONTEND_PORT"
+  open_url "http://localhost:$FRONTEND_PORT"
 
 else
   echo "[KS LOS] Frontend package.json not found; skipping frontend start."
