@@ -571,9 +571,9 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const [ui2DocsError, setUi2DocsError] = useState<string | null>(null);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [docsOpen, setDocsOpen] = useState(false);
-  const [docsUserOverride, setDocsUserOverride] = useState<boolean | null>(null);
   const [uploadingType, setUploadingType] = useState<string | null>(null);
   const [uploadingChecklistName, setUploadingChecklistName] = useState<string | null>(null);
+  const [dismissedDocPromptId, setDismissedDocPromptId] = useState<string | null>(null);
   const [docPreviewOpen, setDocPreviewOpen] = useState(false);
   const [docPreview, setDocPreview] = useState<{
     title: string;
@@ -601,6 +601,31 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     if (hour < 18) return 'Good Afternoon';
     return 'Good Evening';
   }, []);
+
+  const lastAssistantMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m?.role === 'assistant') return m.id;
+    }
+    return null;
+  }, [messages]);
+
+  const nextRequiredDoc = useMemo(() => {
+    if (!loan) return null;
+    const categories = getDocumentCategories(loan.loanType || '', loan.employmentType || '');
+    const getDocsForType = (documentType: string) =>
+      ui2Docs.filter((d) => (d.documentType || '').toLowerCase() === documentType.toLowerCase());
+
+    for (const cat of categories) {
+      for (const t of cat.types) {
+        if (!t.required) continue;
+        if (getDocsForType(t.key).length === 0) {
+          return { categoryKey: cat.key, documentType: t.key, label: t.label };
+        }
+      }
+    }
+    return null;
+  }, [loan, ui2Docs]);
 
   const scrollToBottom = () => {
     const el = scrollRef.current;
@@ -666,21 +691,15 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     void refreshUi2Docs(conversationId, loan.id);
   }, [conversationId, loan?.id]);
 
-  useEffect(() => {
-    if (!loan) return;
-    const st = (loan.stpProcessingStatus || '').toLowerCase();
-    if (docsUserOverride !== null) return;
-    if (st && ['awaiting_documents', 'processing', 'awaiting_acceptance', 'completed'].includes(st)) setDocsOpen(true);
-  }, [loan, docsUserOverride]);
-
-  useEffect(() => {
-    if (docsUserOverride !== null) return;
-    if (ui2Docs.length > 0) setDocsOpen(true);
-  }, [ui2Docs.length, docsUserOverride]);
-
   const triggerUi2Upload = (category: string, documentType: string) => {
     pendingUploadRef.current = { category, documentType };
     ui2FileInputRef.current?.click();
+  };
+
+  const triggerInlineUi2Upload = (category: string, documentType: string) => {
+    pendingChecklistNameRef.current = null;
+    pendingUploadRef.current = { category, documentType };
+    ocrFileInputRef.current?.click();
   };
 
   const normalizeDocumentType = (name: string) => {
@@ -837,7 +856,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     const bootstrap = async () => {
       setBootstrapping(true);
       setDocsOpen(false);
-      setDocsUserOverride(null);
       setExpandedCategory(null);
       setUi2Docs([]);
       setUi2DocsError(null);
@@ -1203,6 +1221,28 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     return true;
   };
 
+  const borrowerReadyForRecommendations = (metadata: Record<string, unknown>): boolean => {
+    const intentAnalysis = asRecord(metadata.intentAnalysis);
+    const intent = intentAnalysis ? asRecord(intentAnalysis.intentSummary) : null;
+    if (!intent) return false;
+
+    const purpose = String(intent.purpose ?? '').trim().toLowerCase();
+    const loanAmount = String(intent.loanAmount ?? '').trim();
+    const monthlyIncome = String(intent.monthlyIncome ?? '').trim();
+    const employmentType = String(intent.employmentType ?? '').trim();
+    const creditHistory = String(intent.creditHistory ?? '').trim();
+    const propertyValue = String(intent.propertyValue ?? '').trim();
+    const downPayment = String(intent.downPayment ?? '').trim();
+
+    const hasLoanAmount = /[0-9]/.test(loanAmount);
+    const hasIncome = /[0-9]/.test(monthlyIncome);
+    const hasEmployment = employmentType.length > 0;
+    const hasCredit = creditHistory.length > 0;
+    const homeOk = purpose !== 'home' || (/[0-9]/.test(propertyValue) && downPayment.length > 0);
+
+    return purpose.length > 0 && hasLoanAmount && hasIncome && hasEmployment && hasCredit && homeOk;
+  };
+
   const renderCardsForMessage = (msg: V2Message) => {
     const metadata = parseMetadata(msg.metadata);
     if (!metadata) return null;
@@ -1224,7 +1264,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         .map((rec) => (isLoanRecommendation(rec) ? rec : null))
         .filter((rec): rec is NonNullable<typeof rec> => rec !== null);
 
-      if (recs.length > 0) {
+      if (recs.length > 0 && borrowerReadyForRecommendations(metadata)) {
         cards.push(
           <div key="recs" className="w-full space-y-3 mt-1">
             <div className="flex items-center gap-2 text-xs font-medium text-[#0078D4] pl-1">
@@ -1261,6 +1301,74 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
           onUpload={(docName) => triggerChecklistUpload(docName)}
         />
       );
+    }
+
+    if (
+      viewState === 'chat' &&
+      msg.role === 'assistant' &&
+      msg.id === lastAssistantMessageId &&
+      loan?.id &&
+      conversationId &&
+      nextRequiredDoc &&
+      dismissedDocPromptId !== msg.id
+    ) {
+      const asksForDocs = /\b(upload|document|documents|passport|payslip|pay slip|bank statement|job letter|proof of address|kyc|id)\b/i.test(
+        msg.content || ''
+      );
+      if (asksForDocs) {
+        cards.push(
+          <div
+            key="doc-prompt"
+            data-testid="card-next-document"
+            className="my-3 rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] p-4 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs font-extrabold tracking-tight text-slate-800 dark:text-slate-200">Next document</div>
+                <div className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-white truncate">{nextRequiredDoc.label}</div>
+                <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  Tap the paperclip (attachments) button, or use Upload to select the file.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDismissedDocPromptId(msg.id)}
+                className="shrink-0 text-[11px] font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              >
+                Not now
+              </button>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                disabled={bootstrapping || loading || uploadingType !== null}
+                onClick={() => {
+                  setDocsOpen(true);
+                  setExpandedCategory(nextRequiredDoc.categoryKey);
+                  triggerInlineUi2Upload(nextRequiredDoc.categoryKey, nextRequiredDoc.documentType);
+                  setTimeout(() => docsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+                }}
+                className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 text-[11px] font-extrabold disabled:opacity-40 disabled:cursor-not-allowed"
+                data-testid="button-upload-next-document"
+              >
+                Upload
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDocsOpen(true);
+                  setExpandedCategory(nextRequiredDoc.categoryKey);
+                  setTimeout(() => docsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+                }}
+                className="rounded-xl border border-slate-200/60 dark:border-white/[0.06] bg-white/90 dark:bg-white/[0.06] px-3 py-2 text-[11px] font-extrabold text-slate-700 dark:text-slate-200"
+                data-testid="button-open-documents-panel"
+              >
+                Open panel
+              </button>
+            </div>
+          </div>
+        );
+      }
     }
 
     // STP Processing Card
@@ -1531,7 +1639,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                     type="button"
                     onClick={() => {
                       setDocsOpen(false);
-                      setDocsUserOverride(false);
                     }}
                     className="text-[10px] font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
                     aria-label="Hide documents panel"
@@ -1648,7 +1755,16 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                                       <div className="mt-2 grid gap-1">
                                         {docsForType.slice(0, 3).map((d) => {
                                           const ex = getDocExtraction(d);
-                                          const exLabel = ex.status === 'ok' ? 'OCR: ok' : ex.status === 'error' ? 'OCR: error' : 'OCR: none';
+                                          const err = (ex.error || '').toLowerCase();
+                                          const isUnavailable = err.includes('ocr_unavailable') || err.includes('tesseract');
+                                          const exLabel =
+                                            ex.status === 'ok'
+                                              ? 'OCR: ok'
+                                              : ex.status === 'error'
+                                                ? isUnavailable
+                                                  ? 'OCR: unavailable'
+                                                  : 'OCR: error'
+                                                : 'OCR: none';
                                           const exTone =
                                             ex.status === 'ok'
                                               ? 'text-emerald-700 dark:text-emerald-400'
@@ -1750,7 +1866,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                 if (viewState !== 'chat' || !conversationId || !loan?.id) return;
                 const next = !docsOpen;
                 setDocsOpen(next);
-                setDocsUserOverride(next);
                 if (next) setTimeout(() => docsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
               }}
               disabled={viewState !== 'chat' || bootstrapping || !conversationId || !loan?.id}

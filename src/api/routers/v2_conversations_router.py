@@ -884,7 +884,9 @@ def _build_borrower_system_prompt(
         "DOCUMENT HANDLING:\n"
         "- When requesting documents, use the product's requiredDocuments names exactly as listed in the catalog.\n"
         "- If you don't know the product yet, use the CURRENT phase typical documents list and request only the minimum set.\n"
-        "- Mention that documents can be uploaded securely using the upload panel in the chat.\n"
+        "- Request one document at a time whenever possible. Ask: \"Can you upload X now?\" then wait.\n"
+        "- Keep document requests short and non-verbose. Do not paste a long checklist into chat.\n"
+        "- Mention that documents can be uploaded securely using the paperclip/attachments button in the chat.\n"
         f"{phase_docs_block}"
         "LOAN JOURNEY PHASES:\n"
         "The borrower's application progresses through these phases:\n"
@@ -2262,6 +2264,16 @@ def send_message(
         intent_obj = analysis.get("intentSummary") if isinstance(analysis, dict) else {}
         intent_dict = intent_obj if isinstance(intent_obj, dict) else {}
         purpose = str(intent_dict.get("purpose") or "").strip().lower()
+        income_num = _parse_amount_to_number(intent_dict.get("monthlyIncome"))
+        has_income = income_num is not None
+        employment = str(intent_dict.get("employmentType") or "").strip()
+        has_employment = bool(employment)
+        credit = intent_dict.get("creditHistory")
+        credit_norm = str(credit).strip().lower() if credit is not None else ""
+        has_credit = bool(credit_norm)
+        home_ok = True
+        if purpose == "home":
+            home_ok = _parse_amount_to_number(intent_dict.get("propertyValue")) is not None and _parse_amount_to_number(intent_dict.get("downPayment")) is not None
         la = _parse_amount_to_number(intent_dict.get("loanAmount"))
         pv = _parse_amount_to_number(intent_dict.get("propertyValue"))
         dp_raw = intent_dict.get("downPayment")
@@ -2291,7 +2303,8 @@ def send_message(
         if rate_pct is None:
             rate_pct = 8.4
 
-        if la is not None and rate_pct is not None and la > 0:
+        ready_for_recommendations = bool(purpose) and la is not None and la > 0 and has_income and has_employment and has_credit and home_ok
+        if ready_for_recommendations and rate_pct is not None:
             def _calc(amount: float, annual_rate_pct: float, tenure_years: int) -> tuple[float, float, float]:
                 n = max(1, tenure_years * 12)
                 r = (annual_rate_pct / 100.0) / 12.0

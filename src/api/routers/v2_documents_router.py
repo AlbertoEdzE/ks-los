@@ -77,13 +77,21 @@ def _extract_text(raw: bytes, mime_type: str | None) -> tuple[str | None, str | 
 
         if mt.startswith("image/") or raw[:3] == b"\xff\xd8\xff" or raw[:8] == b"\x89PNG\r\n\x1a\n":
             try:
-                from PIL import Image  # type: ignore[import-not-found]
+                from PIL import Image, ImageOps  # type: ignore[import-not-found]
                 import pytesseract  # type: ignore[import-not-found]
             except Exception as e:
                 return None, f"ocr_unavailable:{type(e).__name__}"
 
+            try:
+                _ = pytesseract.get_tesseract_version()
+            except Exception as e:
+                return None, f"ocr_unavailable:{type(e).__name__}"
+
             img = Image.open(BytesIO(raw))
-            txt = pytesseract.image_to_string(img) or ""
+            img = ImageOps.exif_transpose(img)
+            if img.mode not in {"RGB", "L"}:
+                img = img.convert("RGB")
+            txt = pytesseract.image_to_string(img, config="--psm 6") or ""
             out = txt.strip()
             return (out if out else None), None
     except Exception as e:
