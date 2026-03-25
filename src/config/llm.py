@@ -118,7 +118,7 @@ class _TestLLM:
 
             next_angle = "Confirm repayment tenure and down payment to refine options."
             if not loan_amount:
-                assistant_text = "Understood. What’s the approximate property price (or your target budget) and your expected down payment?"
+                assistant_text = "Understood. What’s the home purchase price (rough estimate)? That’s the property price — not your salary."
             elif not income:
                 assistant_text = "Understood. What’s your approximate monthly income (and currency), and do you have any existing monthly obligations?"
             else:

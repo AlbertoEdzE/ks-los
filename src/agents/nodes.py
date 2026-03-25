@@ -28,15 +28,23 @@ from src.shared.correlation import get_correlation_id
 
 logger = logging.getLogger(__name__)
 
-# Initialize LLM and Tools
-llm = get_llm()
+llm = None
 tools = [GenerateProfileTool()]
-llm_with_tools = llm.bind_tools(tools)
 tool_node = ToolNode(tools)
 
 # Lazy initialization of KB to avoid import-time DB connection issues
 kb = None
 ml_model = None
+
+def _get_runtime_llm():
+    global llm
+    if llm is None:
+        llm = get_llm()
+    return llm
+
+def _get_runtime_llm_with_tools():
+    base = _get_runtime_llm()
+    return base.bind_tools(tools)
 
 def get_kb():
     global kb
@@ -68,6 +76,7 @@ def journey_coach_node(state: AgentState):
     if not isinstance(messages[0], SystemMessage):
         messages = [SystemMessage(content=JOURNEY_COACH_SYSTEM_PROMPT)] + messages
     
+    llm_with_tools = _get_runtime_llm_with_tools()
     response = llm_with_tools.invoke(messages)
     return {"messages": [response]}
 
@@ -155,7 +164,8 @@ STP Tier: {calculated_metrics.get('stp_tier', 'N/A')}
     start = time.monotonic()
     try:
         with tracer.start_as_current_span("risk_inference") as span:
-            response = llm.invoke([
+            runtime_llm = _get_runtime_llm()
+            response = runtime_llm.invoke([
             SystemMessage(content=RISK_ENGINE_SYSTEM_PROMPT),
             HumanMessage(content=user_prompt)
         ])
@@ -278,7 +288,8 @@ def advisory_node(state: AgentState):
         HumanMessage(content=prompt)
     ]
     
-    response = llm.invoke(messages)
+    runtime_llm = _get_runtime_llm()
+    response = runtime_llm.invoke(messages)
     
     # Wrap advice in AIMessage so it appears in chat history
     advice_message = AIMessage(content=f"**Advisory Recommendation:**\n\n**Decision: {decision}**\n\n{response.content}")

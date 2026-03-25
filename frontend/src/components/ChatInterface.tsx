@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import * as Dialog from '@radix-ui/react-dialog';
 import { LoanSnapshotCard } from './LoanSnapshotCard';
 import { LoanCard } from './LoanCard';
 import { DocumentsCard } from './DocumentsCard';
@@ -83,6 +84,7 @@ type V2LoanDocument = {
   fileSize?: number | null;
   uploadedAt?: string | null;
   reviewedAt?: string | null;
+  meta?: unknown;
 };
 
 type V2LoanApplicationMeta = {
@@ -571,6 +573,15 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const [docsOpen, setDocsOpen] = useState(false);
   const [docsUserOverride, setDocsUserOverride] = useState<boolean | null>(null);
   const [uploadingType, setUploadingType] = useState<string | null>(null);
+  const [uploadingChecklistName, setUploadingChecklistName] = useState<string | null>(null);
+  const [docPreviewOpen, setDocPreviewOpen] = useState(false);
+  const [docPreview, setDocPreview] = useState<{
+    title: string;
+    status: 'ok' | 'error' | 'none';
+    error?: string;
+    textPreview?: string;
+    fields?: Record<string, unknown>;
+  } | null>(null);
   const [stpBusy, setStpBusy] = useState(false);
   const [stpError, setStpError] = useState<string | null>(null);
 
@@ -582,6 +593,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const ui2FileInputRef = useRef<HTMLInputElement>(null);
   const ocrFileInputRef = useRef<HTMLInputElement>(null);
   const pendingUploadRef = useRef<{ category: string; documentType: string } | null>(null);
+  const pendingChecklistNameRef = useRef<string | null>(null);
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -635,12 +647,15 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         const raw = await res.text().catch(() => '');
         setUi2DocsError(raw ? `Failed to load documents: ${raw}` : `Failed to load documents (${res.status}).`);
         setUi2Docs([]);
-        return;
+        return null;
       }
-      setUi2Docs((await res.json()) as V2LoanDocument[]);
+      const next = (await res.json()) as V2LoanDocument[];
+      setUi2Docs(next);
+      return next;
     } catch {
       setUi2DocsError('Failed to load documents due to a network error.');
       setUi2Docs([]);
+      return null;
     } finally {
       setUi2DocsLoading(false);
     }
@@ -668,10 +683,66 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     ui2FileInputRef.current?.click();
   };
 
+  const normalizeDocumentType = (name: string) => {
+    const s = (name || '').trim().toLowerCase();
+    if (!s) return 'document';
+    return s.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 64) || 'document';
+  };
+
+  const inferDocumentCategory = (name: string) => {
+    const s = (name || '').toLowerCase();
+    if (/(pan|aadhaar|aadhar|passport|national id|driver|license|licence|id card)/i.test(s)) return 'identity';
+    if (/(salary|pay\\s*slip|payslip|pay slip|bank\\s*statement|statement)/i.test(s)) return 'income';
+    if (/(property|title|valuation|deed)/i.test(s)) return 'property';
+    if (/(vehicle|registration|invoice|dealer)/i.test(s)) return 'vehicle';
+    return 'other';
+  };
+
+  const triggerChecklistUpload = (docName: string) => {
+    const category = inferDocumentCategory(docName);
+    const documentType = normalizeDocumentType(docName);
+    pendingChecklistNameRef.current = docName;
+    pendingUploadRef.current = { category, documentType };
+    const el = ocrFileInputRef.current;
+    if (el) {
+      el.dataset.docName = docName;
+      el.click();
+      return;
+    }
+    ui2FileInputRef.current?.click();
+  };
+
+  const getDocExtraction = (doc: V2LoanDocument) => {
+    type ExtractionStatus = 'ok' | 'error' | 'none';
+    const meta = doc.meta && typeof doc.meta === 'object' ? (doc.meta as Record<string, unknown>) : null;
+    const extraction = meta?.extraction && typeof meta.extraction === 'object' ? (meta.extraction as Record<string, unknown>) : null;
+    const statusRaw = typeof extraction?.status === 'string' ? extraction.status : 'none';
+    const status: ExtractionStatus = statusRaw === 'ok' || statusRaw === 'error' ? statusRaw : 'none';
+    const textPreview = typeof extraction?.textPreview === 'string' ? extraction.textPreview : undefined;
+    const error = typeof extraction?.error === 'string' ? extraction.error : undefined;
+    const fields = extraction?.fields && typeof extraction.fields === 'object' ? (extraction.fields as Record<string, unknown>) : undefined;
+    return { status, textPreview, error, fields };
+  };
+
+  const openDocPreview = (doc: V2LoanDocument) => {
+    const title = doc.originalName || doc.fileName || 'document';
+    const ex = getDocExtraction(doc);
+    setDocPreview({
+      title,
+      status: ex.status,
+      error: ex.error,
+      textPreview: ex.textPreview,
+      fields: ex.fields,
+    });
+    setDocPreviewOpen(true);
+  };
+
   const uploadUi2Document = async (file: File) => {
     if (!conversationId || !loan?.id) return;
     const pending = pendingUploadRef.current;
     if (!pending) return;
+    const checklistName = pendingChecklistNameRef.current;
+    if (checklistName) setUploadingChecklistName(checklistName);
     setUploadingType(pending.documentType);
     try {
       const fd = new FormData();
@@ -689,14 +760,21 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         setUi2DocsError(raw ? `Upload failed: ${raw}` : `Upload failed (${res.status}).`);
         return;
       }
-      await refreshUi2Docs(conversationId, loan.id);
+      const created = (await res.json().catch(() => null)) as V2LoanDocument | null;
+      const nextDocs = await refreshUi2Docs(conversationId, loan.id);
       await refreshLoan(conversationId);
       await refreshMessages(conversationId);
+      if (created && created.id) {
+        const best = nextDocs?.find((d) => d.id === created.id) ?? created;
+        openDocPreview(best);
+      }
     } catch {
       setUi2DocsError('Upload failed due to a network error.');
     } finally {
       setUploadingType(null);
+      setUploadingChecklistName(null);
       pendingUploadRef.current = null;
+      pendingChecklistNameRef.current = null;
     }
   };
 
@@ -1178,15 +1256,9 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         <DocumentsCard
           key="documents"
           checklist={metadata.documentsChecklist}
-          onUpload={(docName) => {
-            const el = ocrFileInputRef.current;
-            if (el) {
-              el.dataset.docName = docName;
-              el.click();
-            } else {
-              void handleSend(`I'm uploading ${docName}`);
-            }
-          }}
+          busyDocumentName={uploadingChecklistName}
+          disableUpload={bootstrapping || loading || uploadingChecklistName !== null}
+          onUpload={(docName) => triggerChecklistUpload(docName)}
         />
       );
     }
@@ -1574,10 +1646,30 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
 
                                     {docsForType.length > 0 ? (
                                       <div className="mt-2 grid gap-1">
-                                        {docsForType.slice(0, 3).map((d) => (
-                                          <div key={d.id} className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300">
-                                            <div className="min-w-0 truncate">{d.originalName || d.fileName || 'document'}</div>
-                                            <div className="shrink-0 flex items-center gap-2">
+                                        {docsForType.slice(0, 3).map((d) => {
+                                          const ex = getDocExtraction(d);
+                                          const exLabel = ex.status === 'ok' ? 'OCR: ok' : ex.status === 'error' ? 'OCR: error' : 'OCR: none';
+                                          const exTone =
+                                            ex.status === 'ok'
+                                              ? 'text-emerald-700 dark:text-emerald-400'
+                                              : ex.status === 'error'
+                                                ? 'text-rose-700 dark:text-rose-400'
+                                                : 'text-slate-500 dark:text-slate-400';
+                                          return (
+                                            <div key={d.id} className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                                              <div className="min-w-0 truncate">
+                                                {d.originalName || d.fileName || 'document'}
+                                                <span className={`ml-2 ${exTone}`}>{exLabel}</span>
+                                              </div>
+                                              <div className="shrink-0 flex items-center gap-2">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openDocPreview(d)}
+                                                  className="text-[11px] font-bold text-slate-700 dark:text-slate-200"
+                                                  data-testid={`button-doc-preview-${d.id}`}
+                                                >
+                                                  Preview
+                                                </button>
                                               <button
                                                 type="button"
                                                 onClick={() => void downloadUi2Document(d.id, d.originalName || d.fileName || 'document')}
@@ -1595,8 +1687,9 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                                                 Delete
                                               </button>
                                             </div>
-                                          </div>
-                                        ))}
+                                            </div>
+                                          );
+                                        })}
                                       </div>
                                     ) : null}
 
@@ -1641,68 +1734,13 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
               <input
                 ref={ocrFileInputRef}
                 type="file"
-                accept=".png,.jpg,.jpeg,.pdf"
+                accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
                 className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files && e.target.files[0];
-                  if (!file) return;
-                  const label = (e.target as HTMLInputElement).dataset.docName || file.name;
-                  let preview = '';
-                  try {
-                    if (conversationId) {
-                      const fd = new FormData();
-                      fd.append('file', file);
-                      fd.append('label', label);
-                      const res = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/documents/ocr`, {
-                        method: 'POST',
-                        body: fd,
-                      });
-                      if (res.ok) {
-                        const data = (await res.json()) as { preview?: unknown };
-                        preview = typeof data.preview === 'string' ? data.preview : '';
-                      }
-                    }
-                  } catch {
-                    preview = '';
-                  }
-
-                  if (!preview) {
-                    const loadScript = (src: string) =>
-                      new Promise<void>((resolve, reject) => {
-                        if (document.querySelector(`script[src="${src}"]`)) return resolve();
-                        const s = document.createElement('script');
-                        s.src = src;
-                        s.async = true;
-                        s.onload = () => resolve();
-                        s.onerror = () => reject(new Error('Failed to load ' + src));
-                        document.head.appendChild(s);
-                      });
-                    const recognizeImage = async (image: HTMLImageElement | Blob): Promise<string> => {
-                      const CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.2/dist/tesseract.min.js';
-                      await loadScript(CDN);
-                      type TesseractNS = { recognize: (img: unknown, lang: string, opts?: unknown) => Promise<{ data?: { text?: string } }> };
-                      const T = (window as unknown as { Tesseract?: TesseractNS }).Tesseract;
-                      if (!T) return '';
-                      const res = await T.recognize(image, 'eng', {});
-                      return typeof res?.data?.text === 'string' ? res.data.text : '';
-                    };
-                    try {
-                      let extracted = '';
-                      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-                        extracted = await recognizeImage(file);
-                      }
-                      preview = extracted ? extracted.trim().split('\n').filter(Boolean).slice(0, 5).join(' • ') : '';
-                    } catch {
-                      preview = '';
-                    }
-                  }
-
-                  const msg =
-                    preview && preview.length > 0
-                      ? `Uploaded "${label}". OCR preview: ${preview}`
-                      : `Uploaded "${label}".`;
-                  void handleSend(msg);
-                  e.target.value = '';
+                onChange={(e) => {
+                  const f = e.target.files && e.target.files[0];
+                  if (!f) return;
+                  e.currentTarget.value = '';
+                  void uploadUi2Document(f);
                 }}
               />
             </div>
@@ -1749,6 +1787,62 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
           </p>
         </div>
       </div>
+
+      <Dialog.Root open={docPreviewOpen} onOpenChange={setDocPreviewOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/40" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200/60 dark:border-white/[0.08] bg-white dark:bg-[#111113] p-4 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <Dialog.Title className="text-sm font-extrabold text-slate-900 dark:text-white truncate">
+                  {docPreview?.title || 'Document preview'}
+                </Dialog.Title>
+                <Dialog.Description className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  {docPreview?.status === 'ok'
+                    ? 'Text extracted successfully.'
+                    : docPreview?.status === 'error'
+                      ? `Text extraction failed: ${docPreview?.error || 'unknown error'}`
+                      : 'No extracted text available for this file.'}
+                </Dialog.Description>
+              </div>
+              <Dialog.Close asChild>
+                <button type="button" className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                  Close
+                </button>
+              </Dialog.Close>
+            </div>
+
+            <div className="mt-3 grid gap-3">
+              {docPreview?.fields ? (
+                <div className="rounded-xl border border-slate-200/60 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.04] px-3 py-2">
+                  <div className="text-xs font-extrabold text-slate-800 dark:text-slate-200">Extracted fields</div>
+                  <div className="mt-1 grid gap-1 text-[11px] text-slate-600 dark:text-slate-300">
+                    {Object.entries(docPreview.fields).map(([k, v]) => (
+                      <div key={k} className="flex items-start justify-between gap-3">
+                        <div className="font-bold">{k}</div>
+                        <div className="text-right break-words">{typeof v === 'string' ? v : JSON.stringify(v)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {docPreview?.textPreview ? (
+                <div className="rounded-xl border border-slate-200/60 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.04] px-3 py-2">
+                  <div className="text-xs font-extrabold text-slate-800 dark:text-slate-200">Extracted text preview</div>
+                  <pre className="mt-2 whitespace-pre-wrap text-[11px] text-slate-700 dark:text-slate-200 max-h-[50vh] overflow-y-auto">
+                    {docPreview.textPreview}
+                  </pre>
+                </div>
+              ) : null}
+
+              {!docPreview?.fields && !docPreview?.textPreview ? (
+                <div className="text-xs text-slate-500 dark:text-slate-400">Nothing to preview for this file.</div>
+              ) : null}
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   );
 };

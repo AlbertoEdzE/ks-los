@@ -83,7 +83,7 @@ export function DocumentsCard({ checklist, onUpload, busyDocumentName = null, di
 
       <div className="mt-4 p-3 rounded-xl bg-blue-50/80 dark:bg-blue-900/20 border border-blue-200/60 dark:border-blue-500/20">
         <p className="text-xs text-blue-800 dark:text-blue-300">
-          💡 <strong>Tip:</strong> Upload clear photos or PDFs. Documents are processed using OCR for faster verification.
+          <strong>Tip:</strong> Upload clear photos or PDFs. Documents are processed using OCR for faster verification.
         </p>
       </div>
     </div>

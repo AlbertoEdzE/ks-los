@@ -98,7 +98,7 @@ export function BorrowerJourneyTracker({ currentPhaseName, currentStepIndex, mes
   return (
     <div
       data-testid="borrower-journey-tracker"
-      className="relative z-10 border-b border-slate-200/40 dark:border-white/[0.04] bg-white/50 dark:bg-white/[0.02] backdrop-blur-sm"
+      className="glass-header sticky top-0 z-40 border-b border-slate-200/40 dark:border-white/[0.04] bg-white/70 dark:bg-[#141414]/80 backdrop-blur-xl"
     >
       <div className="max-w-3xl mx-auto px-4 py-3">
         <div className="flex items-center gap-1.5 mb-2.5">

@@ -465,7 +465,7 @@ def _next_angle(intent: dict) -> str:
         return "Confirm total outstanding debts and current monthly repayments."
     if intent.get("purpose") == "home":
         if not intent.get("propertyValue") and not intent.get("loanAmount"):
-            return "Confirm the property's price (or your target budget) and whether you have a specific property in mind."
+            return "Confirm the property's purchase price and whether you have a specific property in mind."
         if intent.get("propertyValue") and not intent.get("downPayment"):
             return "Confirm your estimated down payment amount (or percentage)."
     if not intent.get("loanAmount"):
@@ -505,40 +505,50 @@ def _build_borrower_assistant_reply(db: Session, conversation_id: str, intent: d
         "debt_consolidation": "debt consolidation",
     }.get(purpose, "a loan")
 
-    questions: list[str] = []
+    def _fmt_usd(n: float) -> str:
+        try:
+            return f"${n:,.0f}"
+        except Exception:
+            return "$—"
 
-    if not purpose:
-        questions.append("What’s the loan for (home, car, personal, business, or debt consolidation)?")
+    def _question_to_ask() -> str | None:
+        if not purpose:
+            return "What’s the loan for (home, car, personal, business, or debt consolidation)?"
 
-    if purpose == "debt_consolidation" and not intent.get("existingDebts"):
-        questions.append("Roughly how much total outstanding debt do you want to consolidate, and what’s your current total monthly payment?")
+        if purpose == "debt_consolidation" and not intent.get("existingDebts"):
+            return "Roughly how much total debt do you want to consolidate, and what’s your current total monthly payment?"
 
-    if purpose == "home":
-        if not intent.get("propertyValue") and not intent.get("loanAmount"):
-            questions.append("What’s the approximate property price (or your target budget)?")
-        if intent.get("propertyValue") and not intent.get("downPayment"):
-            questions.append("What down payment do you expect to put in (amount or %)?")
-    if not intent.get("loanAmount") and purpose not in {"debt_consolidation", "home"}:
-        questions.append("What loan amount are you considering (even an approximate range)?")
+        if purpose == "home":
+            pv = _parse_amount_to_number(intent.get("propertyValue"))
+            la = _parse_amount_to_number(intent.get("loanAmount"))
+            if pv is None and la is None:
+                return "What’s the home purchase price (rough estimate)? That’s the property price — not your salary."
+            if intent.get("propertyValue") and not intent.get("downPayment"):
+                return "What down payment do you expect to put in (amount or %)?"
 
-    if not intent.get("monthlyIncome"):
-        questions.append("What’s your approximate monthly income?")
+        if not intent.get("loanAmount") and purpose not in {"debt_consolidation", "home"}:
+            return "What loan amount are you considering (even an approximate range)?"
 
-    if not intent.get("employmentType"):
-        questions.append("Are you salaried or self-employed?")
+        if not intent.get("monthlyIncome"):
+            return "What’s your monthly income (and currency), and do you have any existing monthly debt payments?"
 
-    credit = intent.get("creditHistory")
-    credit_norm = str(credit).strip().lower() if credit is not None else ""
-    if not credit_norm:
-        questions.append("Do you know your credit score (or a rough range)?")
-    elif credit_norm in {"unknown", "not_known", "not known", "n/a", "na"}:
-        if not intent.get("recentDelinquencies12m"):
-            questions.append("Have you had any late payments, collections, or delinquencies in the last 12 months?")
+        if not intent.get("employmentType"):
+            return "Are you salaried or self-employed?"
 
-    if not intent.get("preferredTenure"):
-        questions.append("What tenure would you be comfortable with (e.g., 36 months, 5 years)?")
+        credit = intent.get("creditHistory")
+        credit_norm = str(credit).strip().lower() if credit is not None else ""
+        if not credit_norm:
+            return "Do you know your credit score (or a rough range)? If not, say “unknown”."
+        if credit_norm in {"unknown", "not_known", "not known", "n/a", "na"} and not intent.get("recentDelinquencies12m"):
+            return "Have you had any late payments, collections, or delinquencies in the last 12 months?"
 
-    if not questions:
+        if not intent.get("preferredTenure"):
+            return "What tenure would you be comfortable with (e.g., 15, 20, or 30 years)?"
+
+        return None
+
+    question = _question_to_ask()
+    if not question:
         return (
             "Thanks — I have enough to refine recommendations. Do you want the lowest EMI, lowest total interest, or fastest approval?",
             "heuristic_only",
@@ -558,15 +568,28 @@ def _build_borrower_assistant_reply(db: Session, conversation_id: str, intent: d
     for m in assistant_rows:
         recently_asked.update(_extract_question_lines(m.content or ""))
 
-    unasked = [q for q in questions if q not in recently_asked]
-    top = unasked[:2]
-    if not top:
+    if question in recently_asked:
         return (
             "Thanks — I have enough to refine recommendations. Do you want the lowest EMI, lowest total interest, or fastest approval?",
             "heuristic_only",
         )
-    bullets = "\n".join([f"- {q}" for q in top])
-    return (f"Got it — for {purpose_label}, I just need a few quick details:\n\n{bullets}", "heuristic_only")
+
+    summary_bits: list[str] = []
+    if purpose == "home":
+        pv_num = _parse_amount_to_number(intent.get("propertyValue"))
+        dp_raw = intent.get("downPayment")
+        la_num = _parse_amount_to_number(intent.get("loanAmount"))
+        if pv_num is not None and pv_num > 0:
+            summary_bits.append(f"property price about {_fmt_usd(pv_num)}")
+        if isinstance(dp_raw, str) and dp_raw.strip():
+            summary_bits.append(f"down payment {dp_raw.strip()}")
+        if la_num is not None and la_num > 0 and pv_num is not None and pv_num > 0:
+            ltv = la_num / pv_num
+            if 0 < ltv < 2:
+                summary_bits.append(f"loan around {_fmt_usd(la_num)} (~{round(ltv * 100):.0f}% LTV)")
+
+    opener = f"Got it — for {purpose_label}." if not summary_bits else f"Got it — for {purpose_label}, I have {', '.join(summary_bits)}."
+    return (f"{opener} {question}", "heuristic_only")
 
 
 def analyze_intent_message(content: str, previous_intent: Optional[dict], last_assistant_text: Optional[str] = None) -> dict[str, Any]:
@@ -815,7 +838,7 @@ def _build_borrower_system_prompt(
         "PROGRESSIVE INFORMATION GATHERING:\n"
         "- Gather details naturally across 2-4 exchanges, not all at once\n"
         "- Prioritize questions by what matters most for THEIR specific loan type\n"
-        "- For home loans: property identified? → budget → down payment capacity → income\n"
+        "- For home loans: property identified? → purchase price → down payment capacity → income\n"
         "- For personal loans: amount needed → timeline → income → existing obligations\n"
         "- For business loans: purpose → revenue → vintage → collateral\n"
         "- For education: institution → course cost → co-applicant → future earning potential\n\n"
@@ -855,6 +878,7 @@ def _build_borrower_system_prompt(
         "- Use the borrower's currency if evident; otherwise default to USD\n"
         "- Keep responses concise — ideally under 150 words for conversational messages\n"
         "- Never ask the same question twice if it has already been answered\n\n"
+        "- If the borrower confuses purchase price/budget with salary, clarify briefly and continue\n\n"
         "- KYC (identity verification) is part of Document Collection; avoid saying you will move to it later\n"
         "- If you are already asking for documents, speak in the present: you are in Document Collection & KYC now\n\n"
         "DOCUMENT HANDLING:\n"
@@ -912,6 +936,36 @@ def _strip_think_blocks(text: str) -> str:
     s = re.sub(r"(?is)</think>", "", s)
     s = re.sub(r"(?is)<think>", "", s)
     return s.strip()
+
+def _strip_emojis(text: str) -> str:
+    if not text:
+        return ""
+    s = text
+    s = re.sub(r"[\u200d\uFE0E\uFE0F]", "", s)
+    s = re.sub(r"[\U0001F300-\U0001FAFF\U00002700-\U000027BF\U00002600-\U000026FF]", "", s)
+    s = re.sub(r"\s{2,}", " ", s)
+    return s.strip()
+
+def _maybe_append_credit_score_question(assistant_text: str, intent: dict, approval_probability: Any) -> str:
+    credit = intent.get("creditHistory") if isinstance(intent, dict) else None
+    credit_norm = str(credit).strip().lower() if credit is not None else ""
+    missing_credit = not credit_norm or credit_norm in {"unknown", "not_known", "not known", "n/a", "na"}
+    if not missing_credit:
+        return assistant_text
+    ap = approval_probability if isinstance(approval_probability, dict) else None
+    blockers = ap.get("topBlockers") if isinstance(ap, dict) else None
+    has_missing_blocker = False
+    if isinstance(blockers, list):
+        for b in blockers:
+            if isinstance(b, dict) and str(b.get("title") or "").strip().lower() == "missing credit score":
+                has_missing_blocker = True
+                break
+    if not has_missing_blocker:
+        return assistant_text
+    low = (assistant_text or "").lower()
+    if "credit score" in low:
+        return assistant_text
+    return (assistant_text.rstrip() + " Do you know your credit score (or a rough range)? If not, say “unknown”.").strip()
 
 
 def _dedupe_assistant_text(text: str) -> str:
@@ -2196,6 +2250,10 @@ def send_message(
             assistant_engine = str(assistant_engine_override or "borrower_chatgpt_llm")
         else:
             assistant_text, assistant_engine = _build_borrower_assistant_reply(db, conversation_id, analysis["intentSummary"])
+        intent_dict = analysis.get("intentSummary") if isinstance(analysis, dict) else {}
+        intent_dict = intent_dict if isinstance(intent_dict, dict) else {}
+        assistant_text = _strip_emojis(assistant_text)
+        assistant_text = _maybe_append_credit_score_question(assistant_text, intent_dict, approval_probability)
         assistant_text = _dedupe_assistant_text(_limit_questions_in_text(_strip_think_blocks(assistant_text), max_questions=2))
     loan_recommendation_cards: Optional[list[dict[str, Any]]] = None
     selected_recommendation: Optional[dict[str, Any]] = None
