@@ -331,6 +331,23 @@ export function TermsAcceptanceCard({
     }).format(amount);
   };
 
+  const formatMaybeCurrency = (amount: number) => {
+    if (!Number.isFinite(amount) || amount <= 0) return '—';
+    return formatCurrency(amount);
+  };
+
+  const formatMaybePercent = (rate: number) => {
+    if (!Number.isFinite(rate) || rate <= 0) return '—';
+    return `${rate.toFixed(2)}%`;
+  };
+
+  const formatMaybeYears = (years: number) => {
+    if (!Number.isFinite(years) || years <= 0) return '—';
+    return `${years} years`;
+  };
+
+  const hasPricing = loanAmount > 0 && interestRate > 0 && tenure > 0 && monthlyEmi > 0;
+
   return (
     <div
       data-testid="terms-acceptance-card"
@@ -348,27 +365,27 @@ export function TermsAcceptanceCard({
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="p-3 rounded-xl bg-white/60 dark:bg-white/5">
           <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Loan Amount</p>
-          <p className="text-sm font-bold text-slate-900 dark:text-white">{formatCurrency(loanAmount)}</p>
+          <p className="text-sm font-bold text-slate-900 dark:text-white">{formatMaybeCurrency(loanAmount)}</p>
         </div>
         <div className="p-3 rounded-xl bg-white/60 dark:bg-white/5">
           <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Interest Rate</p>
-          <p className="text-sm font-bold text-blue-600 dark:text-blue-400">{interestRate.toFixed(2)}%</p>
+          <p className="text-sm font-bold text-blue-600 dark:text-blue-400">{formatMaybePercent(interestRate)}</p>
         </div>
         <div className="p-3 rounded-xl bg-white/60 dark:bg-white/5">
           <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Tenure</p>
-          <p className="text-sm font-bold text-slate-900 dark:text-white">{tenure} years</p>
+          <p className="text-sm font-bold text-slate-900 dark:text-white">{formatMaybeYears(tenure)}</p>
         </div>
         <div className="p-3 rounded-xl bg-white/60 dark:bg-white/5">
           <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Monthly EMI</p>
-          <p className="text-sm font-bold text-blue-600 dark:text-blue-400">{formatCurrency(monthlyEmi)}</p>
+          <p className="text-sm font-bold text-blue-600 dark:text-blue-400">{formatMaybeCurrency(monthlyEmi)}</p>
         </div>
         <div className="p-3 rounded-xl bg-white/60 dark:bg-white/5">
           <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Interest</p>
-          <p className="text-sm font-bold text-amber-600 dark:text-amber-400">{formatCurrency(totalInterest)}</p>
+          <p className="text-sm font-bold text-amber-600 dark:text-amber-400">{formatMaybeCurrency(totalInterest)}</p>
         </div>
         <div className="p-3 rounded-xl bg-white/60 dark:bg-white/5">
           <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Repayment</p>
-          <p className="text-sm font-bold text-slate-900 dark:text-white">{formatCurrency(totalRepayment)}</p>
+          <p className="text-sm font-bold text-slate-900 dark:text-white">{formatMaybeCurrency(totalRepayment)}</p>
         </div>
       </div>
 
@@ -441,7 +458,7 @@ export function TermsAcceptanceCard({
 
       <button
         onClick={handleAccept}
-        disabled={!signature || !agreed}
+        disabled={!signature || !agreed || !hasPricing}
         className="w-full py-3 px-4 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-600/20"
       >
         Accept Terms & Receive Funds

@@ -528,7 +528,7 @@ function App() {
         <div className="absolute bottom-[-150px] right-1/4 w-[500px] h-[500px] bg-blue-200/15 dark:bg-blue-500/5 rounded-full blur-[100px] pointer-events-none" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] bg-indigo-200/10 dark:bg-indigo-500/3 rounded-full blur-[150px] pointer-events-none" />
 
-        <header className="glass-header relative z-10 border-b border-slate-200/40 dark:border-white/[0.04] px-6 py-4 flex items-center justify-between bg-white/70 dark:bg-[#141414]/80 backdrop-blur-xl">
+        <header className="glass-header relative z-30 shrink-0 border-b border-slate-200/40 dark:border-white/[0.04] px-6 py-4 flex items-center justify-between bg-white/70 dark:bg-[#141414]/80 backdrop-blur-xl">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-white dark:bg-white/10 flex items-center justify-center shadow-sm">
               <span className="text-sm font-black tracking-tight text-slate-900 dark:text-white">KS</span>
@@ -589,7 +589,7 @@ function App() {
         {role === 'user' ? (
           <BorrowerJourneyTracker currentPhaseName={activePhases[currentIndex]?.name || null} messages={visibleMessages} />
         ) : activePhases.length > 0 && conversation?.currentPhaseId ? (
-          <div data-testid="phase-progress-tracker" className="glass-header relative z-10 border-b border-slate-200/40 dark:border-white/[0.04] bg-white/50 dark:bg-white/[0.02] backdrop-blur-sm">
+          <div data-testid="phase-progress-tracker" className="glass-header relative z-30 shrink-0 border-b border-slate-200/40 dark:border-white/[0.04] bg-white/50 dark:bg-white/[0.02] backdrop-blur-sm">
             <div className="max-w-3xl mx-auto px-4 py-3">
               <div className="flex items-center gap-1.5 mb-2.5">
                 <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Your Loan Journey</span>

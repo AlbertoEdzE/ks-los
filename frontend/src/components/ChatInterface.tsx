@@ -123,6 +123,15 @@ const DisbursementConfirmationCard: React.FC<{ loanApplication: V2LoanApplicatio
   const d = loanApplication.disbursement;
   if (!d || !loanApplication.stpCompleted) return null;
   const a = loanApplication.approval;
+  const showTerm = (v: unknown) => {
+    if (typeof v === 'number') return v > 0 ? String(v) : 'N/A';
+    if (typeof v !== 'string') return 'N/A';
+    const t = v.trim();
+    if (!t) return 'N/A';
+    const digits = t.replace(/[^\d.]/g, '');
+    if (digits && Number(digits) === 0) return 'N/A';
+    return t;
+  };
   return (
     <div className="w-full mt-2" data-testid="disbursement-confirmation-card">
       <div className="rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/10 dark:shadow-emerald-500/5 border border-emerald-200/50 dark:border-emerald-500/10 bg-white dark:bg-[#111113]">
@@ -167,15 +176,15 @@ const DisbursementConfirmationCard: React.FC<{ loanApplication: V2LoanApplicatio
             <div className="grid grid-cols-3 divide-x divide-slate-100 dark:divide-white/[0.04]">
               <div className="p-3 text-center">
                 <div className="text-[9px] text-slate-500 dark:text-slate-400">Rate</div>
-                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{a.rate || 'N/A'}</div>
+                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{showTerm(a.rate)}</div>
               </div>
               <div className="p-3 text-center">
                 <div className="text-[9px] text-slate-500 dark:text-slate-400">Tenure</div>
-                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{a.tenure || 'N/A'}</div>
+                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{showTerm(a.tenure)}</div>
               </div>
               <div className="p-3 text-center">
                 <div className="text-[9px] text-slate-500 dark:text-slate-400">Monthly EMI</div>
-                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{a.emi || 'N/A'}</div>
+                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{showTerm(a.emi)}</div>
               </div>
             </div>
           </div>
@@ -220,6 +229,16 @@ const StpOfferCard: React.FC<{
   ].slice(0, 6);
 
   if (!loanApplication.awaitingAcceptance || !a) return null;
+
+  const showTerm = (v: unknown) => {
+    if (typeof v === 'number') return v > 0 ? String(v) : '—';
+    if (typeof v !== 'string') return '—';
+    const t = v.trim();
+    if (!t) return '—';
+    const digits = t.replace(/[^\d.]/g, '');
+    if (digits && Number(digits) === 0) return '—';
+    return t;
+  };
 
   const clearSignature = () => {
     const c = sigCanvasRef.current;
@@ -273,19 +292,19 @@ const StpOfferCard: React.FC<{
             <div className="rounded-xl bg-white/[0.08] px-3 py-2 text-center">
               <div className="text-[9px] text-white/45 uppercase tracking-wider">Rate</div>
               <div className="mt-0.5 text-xs font-extrabold text-white" data-testid="text-offer-rate">
-                {a.rate || 'N/A'}
+                {showTerm(a.rate)}
               </div>
             </div>
             <div className="rounded-xl bg-white/[0.08] px-3 py-2 text-center">
               <div className="text-[9px] text-white/45 uppercase tracking-wider">Tenure</div>
               <div className="mt-0.5 text-xs font-extrabold text-white" data-testid="text-offer-tenure">
-                {a.tenure || 'N/A'}
+                {showTerm(a.tenure)}
               </div>
             </div>
             <div className="rounded-xl bg-white/[0.08] px-3 py-2 text-center">
               <div className="text-[9px] text-white/45 uppercase tracking-wider">Monthly EMI</div>
               <div className="mt-0.5 text-xs font-extrabold text-white" data-testid="text-offer-emi">
-                {a.emi || 'N/A'}
+                {showTerm(a.emi)}
               </div>
             </div>
           </div>
@@ -550,6 +569,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const [ui2DocsError, setUi2DocsError] = useState<string | null>(null);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [docsOpen, setDocsOpen] = useState(false);
+  const [docsUserOverride, setDocsUserOverride] = useState<boolean | null>(null);
   const [uploadingType, setUploadingType] = useState<string | null>(null);
   const [stpBusy, setStpBusy] = useState(false);
   const [stpError, setStpError] = useState<string | null>(null);
@@ -559,7 +579,8 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const requestGenRef = useRef(0);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const docsPanelRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const ui2FileInputRef = useRef<HTMLInputElement>(null);
+  const ocrFileInputRef = useRef<HTMLInputElement>(null);
   const pendingUploadRef = useRef<{ category: string; documentType: string } | null>(null);
 
   const greeting = useMemo(() => {
@@ -633,16 +654,18 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   useEffect(() => {
     if (!loan) return;
     const st = (loan.stpProcessingStatus || '').toLowerCase();
+    if (docsUserOverride !== null) return;
     if (st && ['awaiting_documents', 'processing', 'awaiting_acceptance', 'completed'].includes(st)) setDocsOpen(true);
-  }, [loan]);
+  }, [loan, docsUserOverride]);
 
   useEffect(() => {
+    if (docsUserOverride !== null) return;
     if (ui2Docs.length > 0) setDocsOpen(true);
-  }, [ui2Docs.length]);
+  }, [ui2Docs.length, docsUserOverride]);
 
   const triggerUi2Upload = (category: string, documentType: string) => {
     pendingUploadRef.current = { category, documentType };
-    fileInputRef.current?.click();
+    ui2FileInputRef.current?.click();
   };
 
   const uploadUi2Document = async (file: File) => {
@@ -735,6 +758,11 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
 
     const bootstrap = async () => {
       setBootstrapping(true);
+      setDocsOpen(false);
+      setDocsUserOverride(null);
+      setExpandedCategory(null);
+      setUi2Docs([]);
+      setUi2DocsError(null);
       if (typeof resetSignal === 'number') {
         window.localStorage.removeItem(STORAGE_KEY);
       }
@@ -747,6 +775,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         setConversation(null);
         setMessages([]);
         setLoan(null);
+        setUi2Docs([]);
         setViewState('welcome');
         setBootstrapping(false);
         return;
@@ -763,6 +792,8 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         setConversationId(null);
         setConversation(null);
         setMessages([]);
+        setLoan(null);
+        setUi2Docs([]);
         setViewState('welcome');
         setBootstrapping(false);
         return;
@@ -1148,7 +1179,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
           key="documents"
           checklist={metadata.documentsChecklist}
           onUpload={(docName) => {
-            const el = fileInputRef.current;
+            const el = ocrFileInputRef.current;
             if (el) {
               el.dataset.docName = docName;
               el.click();
@@ -1422,10 +1453,23 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="text-xs font-extrabold tracking-tight text-slate-800 dark:text-slate-200">Your Documents</div>
-                <div className="text-[10px] text-slate-400 dark:text-slate-500">{loan?.catalogProductCode ? `Product: ${loan.catalogProductCode}` : ' '}</div>
+                <div className="flex items-center gap-3">
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500">{loan?.catalogProductCode ? `Product: ${loan.catalogProductCode}` : ' '}</div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDocsOpen(false);
+                      setDocsUserOverride(false);
+                    }}
+                    className="text-[10px] font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    aria-label="Hide documents panel"
+                  >
+                    Hide
+                  </button>
+                </div>
               </div>
               <input
-                ref={fileInputRef}
+                ref={ui2FileInputRef}
                 type="file"
                 className="hidden"
                 accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
@@ -1595,7 +1639,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                 }}
               />
               <input
-                ref={fileInputRef}
+                ref={ocrFileInputRef}
                 type="file"
                 accept=".png,.jpg,.jpeg,.pdf"
                 className="hidden"
@@ -1664,25 +1708,21 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
             </div>
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={loading || bootstrapping}
-              className="rounded-2xl h-12 w-12 bg-white/80 dark:bg-white/[0.06] border border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 shadow-sm flex items-center justify-center hover:bg-slate-50 dark:hover:bg-white/[0.08] transition-colors disabled:opacity-30"
-              aria-label="Attach"
-              title="Attach document"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 1 1 5.66 5.66L9.88 17.05a2 2 0 1 1-2.83-2.83l8.49-8.49" />
-              </svg>
-            </button>
-            <button
-              type="button"
               onClick={() => {
-                setDocsOpen(true);
-                setTimeout(() => docsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+                if (viewState !== 'chat' || !conversationId || !loan?.id) return;
+                const next = !docsOpen;
+                setDocsOpen(next);
+                setDocsUserOverride(next);
+                if (next) setTimeout(() => docsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
               }}
-              disabled={viewState !== 'chat' || bootstrapping}
-              className="rounded-2xl h-12 w-12 bg-white/90 dark:bg-white/[0.06] hover:bg-slate-50 dark:hover:bg-white/[0.09] text-slate-700 dark:text-slate-200 shadow-sm transition-all duration-200 border border-slate-200/60 dark:border-white/[0.06] disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
+              disabled={viewState !== 'chat' || bootstrapping || !conversationId || !loan?.id}
+              className={`rounded-2xl h-12 w-12 shadow-sm transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center ${
+                docsOpen
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white border border-blue-600/60'
+                  : 'bg-white/90 dark:bg-white/[0.06] hover:bg-slate-50 dark:hover:bg-white/[0.09] text-slate-700 dark:text-slate-200 border border-slate-200/60 dark:border-white/[0.06]'
+              }`}
               aria-label="Attachments"
+              aria-pressed={docsOpen}
               data-testid="button-attachments"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
