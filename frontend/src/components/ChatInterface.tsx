@@ -889,7 +889,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         onPhasesUpdated?.(phasesRes.value);
       }
 
-      const existing = await fetchJson<V2Conversation>(`${API_BASE_URL}/api/conversations/${activeConversationId}`);
+      const existing = await fetchJson<V2Conversation>(`${API_BASE_URL}/api/v3/conversations/${activeConversationId}`);
       if (!existing.ok) {
         window.localStorage.removeItem(STORAGE_KEY);
         setConversationId(null);
@@ -908,7 +908,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       setViewState('chat');
       void refreshLoan(activeConversationId);
 
-      const msgsRes = await fetchJson<V2Message[]>(`${API_BASE_URL}/api/conversations/${activeConversationId}/messages`);
+      const msgsRes = await fetchJson<V2Message[]>(`${API_BASE_URL}/api/v3/conversations/${activeConversationId}/messages`);
       if (msgsRes.ok) {
         setMessages(msgsRes.value.filter((m) => !isOfficerOnlyMessage(m)));
       } else {
@@ -953,7 +953,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/conversations/${activeConversationId}/messages`, {
+      const res = await fetch(`${API_BASE_URL}/api/v3/conversations/${activeConversationId}/messages`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ content, session_id: activeConversationId }),
@@ -997,7 +997,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         ]);
       }
 
-      const refreshed = await fetch(`${API_BASE_URL}/api/conversations/${activeConversationId}`);
+      const refreshed = await fetch(`${API_BASE_URL}/api/v3/conversations/${activeConversationId}`);
       if (refreshed.ok) {
         const nextConversation = (await refreshed.json()) as V2Conversation;
         onConversationUpdated?.(nextConversation);
@@ -1026,7 +1026,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     transitionToChat();
     setLoading(true);
     try {
-      const createRes = await fetch(`${API_BASE_URL}/api/conversations`, {
+      const createRes = await fetch(`${API_BASE_URL}/api/v3/conversations`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({}),

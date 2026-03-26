@@ -74,23 +74,30 @@ def get_or_create_state(session_id: str, borrower_name: Optional[str] = None) ->
     return STATE_STORE[session_id]
 
 
-@router.post("/", response_model=V3MessageResponse)
+@router.post("/", response_model=Dict[str, Any])
 async def create_conversation(request: V3ConversationRequest):
-    """Create a new agentic conversation"""
+    """Create a new agentic conversation - returns v2-compatible format"""
     session_id = request.session_id or str(uuid.uuid4())
     state = get_or_create_state(session_id, request.borrower_name)
     
-    # Save to DB (optional, for audit)
-    # db_conversation = Conversation(session_id=session_id, ...)
+    # Return v2-compatible conversation object
+    conversation = {
+        "id": session_id,
+        "borrowerName": request.borrower_name,
+        "status": "active",
+        "chatRole": "borrower",
+        "currentPhaseId": None,
+        "seriousnessScore": None,
+        "fitScore": None,
+        "intentSummary": None,
+        "recommendedProducts": None,
+        "nextConversationAngle": "Ask about loan purpose",
+        "assignedOfficer": None,
+        "userId": None,
+        "createdAt": datetime.now().isoformat(),
+    }
     
-    return V3MessageResponse(
-        response=f"Welcome! I'm your AI loan assistant. How can I help you today?",
-        session_id=session_id,
-        mode=state.mode.value,
-        stage=state.current_stage,
-        confidence=state.get_average_confidence(),
-        metadata={"created": True}
-    )
+    return {"conversation": conversation}
 
 
 @router.post("/messages", response_model=V3MessageResponse)
