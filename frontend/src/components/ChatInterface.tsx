@@ -1221,6 +1221,20 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     return true;
   };
 
+  // Parse LNAI-style document_request XML tags from message content
+  const parseDocumentRequests = (content: string): Array<{ type: string; label: string }> => {
+    const requests: Array<{ type: string; label: string }> = [];
+    const pattern = /<document_request\s+type=["']([^"']+)["']>([^<]+)<\/document_request>/gi;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(content)) !== null) {
+      requests.push({
+        type: match[1].trim(),
+        label: match[2].trim(),
+      });
+    }
+    return requests;
+  };
+
   const borrowerReadyForRecommendations = (metadata: Record<string, unknown>): boolean => {
     const intentAnalysis = asRecord(metadata.intentAnalysis);
     const intent = intentAnalysis ? asRecord(intentAnalysis.intentSummary) : null;
@@ -1300,6 +1314,53 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
           disableUpload={bootstrapping || loading || uploadingChecklistName !== null}
           onUpload={(docName) => triggerChecklistUpload(docName)}
         />
+      );
+    }
+
+    // LNAI-style Document Request Cards (from XML tags)
+    const docRequests = parseDocumentRequests(msg.content || '');
+    if (docRequests.length > 0 && msg.role === 'assistant') {
+      cards.push(
+        <div key={`doc-requests-${msg.id}`} className="my-3 space-y-2">
+          {docRequests.map((req, idx) => (
+            <div
+              key={`${msg.id}-doc-req-${idx}`}
+              data-testid={`lnai-document-request-${req.type}`}
+              className="rounded-2xl border border-blue-200/60 dark:border-blue-500/20 bg-blue-50/80 dark:bg-blue-900/20 p-4 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-blue-600 dark:bg-blue-500 flex items-center justify-center shrink-0">
+                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="text-xs font-extrabold tracking-tight text-blue-900 dark:text-blue-200">Document Request</div>
+                      <div className="text-sm font-semibold text-blue-950 dark:text-white truncate">{req.label}</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-[11px] text-blue-800/80 dark:text-blue-300/80">
+                    Upload this document using the paperclip button below, or click Upload to select it now.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={bootstrapping || loading || uploadingType !== null}
+                  onClick={() => {
+                    const category = req.type === 'national_id' || req.type === 'passport' || req.type === 'id' ? 'identity' : 'income';
+                    triggerInlineUi2Upload(category, req.type);
+                  }}
+                  className="shrink-0 rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 text-[11px] font-extrabold disabled:opacity-40 disabled:cursor-not-allowed"
+                  data-testid={`button-lnai-upload-${req.type}`}
+                >
+                  Upload
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       );
     }
 

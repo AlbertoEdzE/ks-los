@@ -7,8 +7,8 @@ import json
 import urllib.request
 import urllib.error
 
-# Default to Qwen3 latest unless overridden
-MODEL_NAME = os.getenv("OLLAMA_MODEL", "qwen3:latest")
+# Default to Qwen 2.5 7B - best balance of instruction following and performance
+MODEL_NAME = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 
@@ -214,6 +214,5 @@ def get_llm(temperature: float = 0.7, model: str | None = None):
         base_url=OLLAMA_BASE_URL,
         model=(model or MODEL_NAME),
         temperature=temperature,
-        callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
         keep_alive="5m"
     )

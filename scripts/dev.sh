@@ -15,7 +15,7 @@ sleep 2
 
 # Start backend
 echo "🔧 Starting Backend on port 8001..."
-export OLLAMA_MODEL=qwen3:latest
+export OLLAMA_MODEL=qwen2.5:7b
 python -m uvicorn src.main:app --port 8001 > backend.log 2>&1 &
 BACKEND_PID=$!
 echo "   Backend PID: $BACKEND_PID"

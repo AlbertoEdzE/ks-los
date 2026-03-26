@@ -211,25 +211,23 @@ class LNAIOrchestrator:
             # Ask follow-up questions based on what's missing
             if not self.state.captured_context.property_value and self.state.captured_context.purpose == "home_purchase":
                 response = (
-                    f"Great! A {self.state.captured_context.purpose.replace('_', ' ')} loan is a significant step. "
-                    "To help you better:\n\n"
-                    "1. What's the property value or purchase price?\n"
-                    "2. How much do you have available for a down payment?"
+                    f"That's a wonderful goal! A {self.state.captured_context.purpose.replace('_', ' ')} is a major milestone. "
+                    "To help me structure the best path for you, could you share what the property value or purchase price is? "
+                    "And I'd also love to know what you're planning for a down payment so we can find the most affordable option."
                 )
             else:
                 # Move to next stage
                 self.state.stage = ConversationStage.FINANCIAL_CONTEXT
                 response = (
-                    f"Perfect! I'm here to help you with your {self.state.captured_context.purpose.replace('_', ' ')} loan.\n\n"
-                    "To structure the best options for you, I need to understand your financial situation:\n\n"
-                    "1. Are you salaried, self-employed, or a contractor?\n"
-                    "2. What is your monthly income before deductions?"
+                    f"Perfect! I'm excited to help you navigate this {self.state.captured_context.purpose.replace('_', ' ')} loan. "
+                    "To tailor a borrowing strategy that really fits your life, I'd like to understand your current financial context. "
+                    "Are you currently salaried, self-employed, or working as a contractor? And what does your typical monthly income look like before deductions?"
                 )
         else:
             response = (
-                "I'm here to help you find the right loan. Could you tell me:\n\n"
-                "What is the primary purpose of the loan you're looking for?\n\n"
-                "For example: home purchase, car loan, personal loan, business loan, education, or medical expenses."
+                "Hello! I'm your Loan Navigator. I'm here to help you find the most efficient path to the funding you need. "
+                "To get us started, could you tell me a bit about what you're looking to achieve? "
+                "Are you thinking about a new home, a car, starting a business, or perhaps a personal loan?"
             )
         
         return self._build_response(response)
@@ -295,14 +293,14 @@ class LNAIOrchestrator:
             # Ask for missing information
             missing = []
             if not has_employment:
-                missing.append("Are you salaried, self-employed, or a contractor?")
+                missing.append("I'd love to know your employment type—are you salaried, self-employed, or a contractor?")
             if not has_income:
-                missing.append("What is your monthly income before deductions?")
+                missing.append("What is your approximate monthly income? This helps me understand what's comfortable for you.")
             if not has_amount:
                 if self.state.captured_context.purpose == "home_purchase":
-                    missing.append("What's the property value and how much do you have for down payment?")
+                    missing.append("Could you tell me the property value and how much you have set aside for a down payment?")
                 else:
-                    missing.append("How much are you looking to borrow?")
+                    missing.append("Roughly how much are you looking to borrow today?")
             
             response = "\n\n".join(missing)
             return self._build_response(response)
@@ -437,8 +435,8 @@ class LNAIOrchestrator:
         if self.state.selected_recommendation:
             self.state.stage = ConversationStage.APPLICANT_IDENTITY
             response = (
-                f"Excellent choice! The {self.state.selected_recommendation.name} suits your profile well.\n\n"
-                f"To move forward with this option, I'll need your contact information:\n\n"
+                f"Excellent choice! The {self.state.selected_recommendation.name} is a smart strategy for your profile. "
+                f"To get the formal process moving, I just need a couple of contact details: "
                 f"1. Your email address\n"
                 f"2. Your phone number\n\n"
                 f"This will help us keep you updated on your application progress."
@@ -471,14 +469,12 @@ class LNAIOrchestrator:
         if self.state.captured_context.email and self.state.captured_context.phone:
             return self._submit_application()
         elif self.state.captured_context.email and not self.state.captured_context.phone:
-            response = "Got your email! Now, what's your phone number?"
+            response = "Perfect, I've got your email! And just to make sure we can reach you quickly, what's your phone number?"
         elif self.state.captured_context.phone and not self.state.captured_context.email:
-            response = "Got your phone number! Now, what's your email address?"
+            response = "Thank you! I've noted your phone number. Now, what's the best email address to send your loan updates to?"
         else:
             response = (
-                "To proceed with your loan application, I need:\n\n"
-                "1. Your email address\n"
-                "2. Your phone number"
+                "We're almost there! To finalize your submission, I just need your email and phone number so we can keep you posted on your approval progress."
             )
         
         return self._build_response(response)
@@ -544,21 +540,19 @@ class LNAIOrchestrator:
         income_text = "\n".join(income_lines)
         
         response = (
+            f"### Success! Your application is in motion.\n\n"
             f"<loan_application id='{self.state.application_id}'>\n"
-            f"Application Submitted Successfully!\n\n"
-            f"Thank you, {self.state.captured_context.email}! Your application has been submitted.\n\n"
-            f"Application ID: {self.state.application_id}\n"
-            f"Loan Amount: ${self.state.loan_snapshot.loan_amount:,.0f}\n"
-            f"Selected Option: {self.state.selected_recommendation.name}\n"
+            f"I've officially submitted your request for a ${self.state.loan_snapshot.loan_amount:,.0f} loan. "
+            f"Your application reference is **{self.state.application_id}**.\n"
             f"</loan_application>\n\n"
+            f"To complete the verification, please upload the following documents directly here. Our system will use OCR to process them instantly:\n\n"
             f"<documents_checklist>\n"
-            f"Here are the documents we'll need from you:\n\n"
-            f"**Identity Documents:**\n"
+            f"**Proof of Identity**\n"
             f"{identity_text}\n\n"
-            f"**Income Documents:**\n"
+            f"**Income Verification**\n"
             f"{income_text}\n"
             f"</documents_checklist>\n\n"
-            f"I'm now processing your application through our automated underwriting system. This will take just a moment..."
+            f"I'm initiating the automated underwriting checks now. You'll see the progress in real-time."
         )
         
         return self._build_response(

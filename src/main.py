@@ -30,7 +30,8 @@ from src.api.routers.v2_loans_router import router as v2_loans_router
 from src.api.routers.v2_catalog_products_router import router as v2_catalog_products_router
 from src.api.routers.v2_documents_router import router as v2_documents_router
 from src.api.routers.v2_loan_acceptance_router import router as v2_loan_acceptance_router
-from src.api.routers.lnai_orchestrator_router import router as lnai_orchestrator_router
+# LNAI orchestrator is a separate reference implementation - not used in LOS production
+# from src.api.routers.lnai_orchestrator_router import router as lnai_orchestrator_router
 
 # Configure logging
 if os.getenv("LOG_JSON", "1") == "1":
@@ -120,7 +121,8 @@ app.include_router(v2_loans_router)
 app.include_router(v2_catalog_products_router)
 app.include_router(v2_documents_router)
 app.include_router(v2_loan_acceptance_router)
-app.include_router(lnai_orchestrator_router)
+# LNAI orchestrator disabled - LOS uses its own conversation flow via v2_conversations_router
+# app.include_router(lnai_orchestrator_router)
 
 
 @app.exception_handler(HTTPException)

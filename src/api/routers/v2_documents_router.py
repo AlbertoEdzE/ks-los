@@ -53,48 +53,85 @@ def _sanitize_document(doc: LoanDocument) -> dict[str, Any]:
 
 
 def _extract_text(raw: bytes, mime_type: str | None) -> tuple[str | None, str | None]:
+    """Extract text from PDF or image files using OCR when needed."""
     mt = (mime_type or "").lower()
+    import logging
+    logger = logging.getLogger(__name__)
+
     try:
+        # PDF handling
         if mt == "application/pdf" or raw[:4] == b"%PDF":
             try:
                 from pypdf import PdfReader  # type: ignore[import-not-found]
             except Exception as e:
+                logger.warning(f"pypdf not available: {e}")
                 return None, f"pypdf_unavailable:{type(e).__name__}"
 
-            reader = PdfReader(BytesIO(raw))
-            chunks: list[str] = []
-            for p in getattr(reader, "pages", [])[:25]:
-                try:
-                    txt = p.extract_text() or ""
-                except Exception:
-                    txt = ""
-                if txt.strip():
-                    chunks.append(txt)
-                if sum(len(c) for c in chunks) > 20000:
-                    break
-            text = "\n\n".join(chunks).strip()
-            return (text if text else None), None
+            try:
+                reader = PdfReader(BytesIO(raw))
+                chunks: list[str] = []
+                for p in getattr(reader, "pages", [])[:25]:
+                    try:
+                        txt = p.extract_text() or ""
+                    except Exception:
+                        txt = ""
+                    if txt.strip():
+                        chunks.append(txt)
+                    if sum(len(c) for c in chunks) > 20000:
+                        break
+                text = "\n\n".join(chunks).strip()
+                if text:
+                    logger.info(f"PDF text extracted: {len(text)} chars")
+                    return text, None
+                else:
+                    logger.warning("PDF extracted but no text found (may be scanned)")
+                    return None, "pdf_no_text_extractable"
+            except Exception as e:
+                logger.error(f"PDF extraction failed: {e}")
+                return None, f"pdf_extract_failed:{type(e).__name__}"
 
+        # Image handling with OCR
         if mt.startswith("image/") or raw[:3] == b"\xff\xd8\xff" or raw[:8] == b"\x89PNG\r\n\x1a\n":
+            # Try PIL first
             try:
                 from PIL import Image, ImageOps  # type: ignore[import-not-found]
+            except Exception as e:
+                logger.warning(f"PIL not available: {e}")
+                return None, f"pil_unavailable:{type(e).__name__}"
+
+            # Try pytesseract
+            try:
                 import pytesseract  # type: ignore[import-not-found]
             except Exception as e:
-                return None, f"ocr_unavailable:{type(e).__name__}"
+                logger.warning(f"pytesseract not available: {e}")
+                return None, f"pytesseract_unavailable:{type(e).__name__}"
 
+            # Check if tesseract binary is available
             try:
                 _ = pytesseract.get_tesseract_version()
             except Exception as e:
-                return None, f"ocr_unavailable:{type(e).__name__}"
+                logger.warning(f"Tesseract binary not found: {e}")
+                return None, f"tesseract_not_installed:{type(e).__name__}"
 
-            img = Image.open(BytesIO(raw))
-            img = ImageOps.exif_transpose(img)
-            if img.mode not in {"RGB", "L"}:
-                img = img.convert("RGB")
-            txt = pytesseract.image_to_string(img, config="--psm 6") or ""
-            out = txt.strip()
-            return (out if out else None), None
+            try:
+                img = Image.open(BytesIO(raw))
+                img = ImageOps.exif_transpose(img)
+                if img.mode not in {"RGB", "L"}:
+                    img = img.convert("RGB")
+                txt = pytesseract.image_to_string(img, config="--psm 6") or ""
+                out = txt.strip()
+                if out:
+                    logger.info(f"OCR text extracted: {len(out)} chars")
+                    return out, None
+                else:
+                    logger.warning("OCR ran but no text found")
+                    return None, "ocr_no_text_found"
+            except Exception as e:
+                logger.error(f"OCR processing failed: {e}")
+                return None, f"ocr_processing_failed:{type(e).__name__}"
+
     except Exception as e:
+        logger.error(f"Unexpected extraction error: {e}")
         return None, f"extract_failed:{type(e).__name__}"
 
     return None, None
