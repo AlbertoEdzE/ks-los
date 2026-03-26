@@ -9,6 +9,8 @@ from langchain.tools import BaseTool
 from langchain_community.chat_models import ChatOllama
 from pydantic import BaseModel, Field
 import json
+import re
+import asyncio
 
 from src.agents.prompts import INTENT_EXTRACTION_PROMPT
 from src.agents.structured_parser import IntentAnalysis
@@ -75,6 +77,7 @@ class IntentExtractorTool(BaseTool):
     model_name: str = "qwen2.5:7b"
     ollama_base_url: str = "http://localhost:11434"
     temperature: float = 0.1  # Low temperature for extraction tasks
+    timeout_seconds: int = 30  # Timeout for LLM calls
     
     def __init__(self, **kwargs):
         """Initialize with optional configuration"""
@@ -121,8 +124,13 @@ class IntentExtractorTool(BaseTool):
             return error_result.model_dump_json()
     
     async def _arun(self, conversation_history: List[Dict[str, str]]) -> str:
-        """Async version - not implemented, falls back to sync"""
-        return self._run(conversation_history)
+        """
+        Async version of intent extraction.
+        
+        Uses asyncio.to_thread to run sync _run in thread pool,
+        preventing blocking of async event loop.
+        """
+        return await asyncio.to_thread(self._run, conversation_history)
     
     def _build_messages(self, conversation_history: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """
@@ -167,26 +175,34 @@ class IntentExtractorTool(BaseTool):
     def _call_llm(self, messages: List[Dict[str, str]]) -> str:
         """
         Call Ollama LLM for extraction.
-        
+
         Args:
             messages: Formatted messages for LLM
-            
+
         Returns:
             Raw LLM response text
+
+        Raises:
+            RuntimeError: If LLM call fails or times out
         """
         try:
             # Initialize ChatOllama
             llm = ChatOllama(
                 model=self.model_name,
                 base_url=self.ollama_base_url,
-                temperature=self.temperature
+                temperature=self.temperature,
+                num_predict=1024,  # Limit response length
             )
-            
-            # Call LLM
-            response = llm.invoke(messages)
-            
+
+            # Call LLM with timeout
+            response = llm.invoke(messages, {"timeout": self.timeout_seconds})
+
             return response.content
-            
+
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                f"LLM call timed out after {self.timeout_seconds} seconds"
+            )
         except Exception as e:
             raise RuntimeError(f"LLM call failed: {str(e)}")
     
@@ -229,15 +245,13 @@ class IntentExtractorTool(BaseTool):
     def _extract_json(self, text: str) -> str:
         """
         Extract JSON from LLM response (may contain markdown).
-        
+
         Args:
             text: Raw LLM response
-            
+
         Returns:
             Clean JSON string
         """
-        import re
-        
         # Remove markdown code blocks
         text = re.sub(r"```json\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"```\s*$", "", text)
