@@ -1,7 +1,8 @@
 import json
 import logging
-from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AIMessage
-from langgraph.prebuilt import ToolNode
+# TEMPORARILY DISABLED - Old LangGraph workflow being phased out
+# from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AIMessage
+# from langgraph.prebuilt import ToolNode
 
 from src.config.llm import get_llm
 from src.agents.state import AgentState

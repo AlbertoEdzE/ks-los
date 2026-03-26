@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import ToolMessage
 from src.agents.state import AgentState
-from src.agents.nodes import (
+from src.agents.nodes_legacy import (
     journey_coach_node,
     tool_node,
     risk_engine_node,
