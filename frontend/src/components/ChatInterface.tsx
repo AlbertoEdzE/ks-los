@@ -644,7 +644,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
 
   const refreshLoan = async (activeConversationId: string): Promise<V2Loan | null> => {
     try {
-      const res = await fetch(`http://localhost:8000/api/conversations/${activeConversationId}/loan`);
+      const res = await fetch(`http://localhost:8000/api/v3/conversations/${activeConversationId}/loan`);
       if (!res.ok) {
         if (res.status === 404) setLoan(null);
         return null;
@@ -659,7 +659,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
 
   const refreshMessages = async (activeConversationId: string) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/conversations/${activeConversationId}/messages`);
+      const res = await fetch(`http://localhost:8000/api/v3/conversations/${activeConversationId}/messages`);
       if (!res.ok) return;
       const next = (await res.json()) as V2Message[];
       setMessages(next.filter((m) => !isOfficerOnlyMessage(m)));
@@ -956,7 +956,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       const res = await fetch(`${API_BASE_URL}/api/conversations/${activeConversationId}/messages`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, session_id: activeConversationId }),
       });
 
       if (!res.ok) {

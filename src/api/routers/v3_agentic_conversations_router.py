@@ -50,13 +50,15 @@ class V3MessageRequest(BaseModel):
 
 
 class V3MessageResponse(BaseModel):
-    """Response with message and metadata"""
+    """Response with message and metadata - compatible with both v2 and v3"""
     response: str
     session_id: str
     mode: str
     stage: str
     confidence: float
     metadata: Dict[str, Any] = {}
+    # V2 compatibility fields
+    message: Optional[Dict[str, Any]] = None
 
 
 # In-memory state store (replace with Redis/DB in production)
@@ -148,6 +150,22 @@ async def send_message(request: V3MessageRequest):
     # Track metrics
     v2_messages_sent_total.labels(role="borrower", status="success").inc()
     
+    # Create v2-compatible message object for frontend compatibility
+    assistant_message = {
+        "id": f"msg-{datetime.now().timestamp()}",
+        "conversationId": session_id,
+        "role": "assistant",
+        "content": response_text,
+        "metadata": {
+            "loan_snapshot": state.loan_snapshot.model_dump() if state.loan_snapshot else None,
+            "recommendations": [r.model_dump() for r in state.recommendations] if state.recommendations else None,
+            "documents_checklist": state.documents_checklist.model_dump() if state.documents_checklist else None,
+            "application_id": state.application_id,
+            "stp_status": state.stp_status,
+        },
+        "createdAt": datetime.now().isoformat(),
+    }
+    
     return V3MessageResponse(
         response=response_text,
         session_id=session_id,
@@ -161,7 +179,8 @@ async def send_message(request: V3MessageRequest):
             "application_id": state.application_id,
             "stp_status": state.stp_status,
             "escalation_needed": state.escalation_needed,
-        }
+        },
+        message=assistant_message,  # V2 compatibility
     )
 
 
