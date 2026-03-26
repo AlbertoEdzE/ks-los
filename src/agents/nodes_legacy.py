@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 llm = None
 tools = [GenerateProfileTool()]
-tool_node = ToolNode(tools)
+# tool_node = ToolNode(tools)  # DISABLED
 
 # Lazy initialization of KB to avoid import-time DB connection issues
 kb = None
