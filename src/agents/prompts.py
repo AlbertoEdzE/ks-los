@@ -751,7 +751,32 @@ Based on the context above, generate your response now.
 # ─────────────────────────────────────────────────────────────────────────────
 
 __all__ = [
+    # LNAI-style prompts (new)
     "BORROWER_SYSTEM_PROMPT",
     "INTENT_EXTRACTION_PROMPT",
     "RESPONSE_GENERATION_PROMPT",
+    
+    # Backward compatibility shims (old graph.py)
+    "JOURNEY_COACH_SYSTEM_PROMPT",
+    "ADVISORY_SYSTEM_PROMPT",
+    "RISK_ENGINE_SYSTEM_PROMPT",
+    "build_risk_engine_user_prompt",
 ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Backward Compatibility Shims (for old graph.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# These are temporary shims to maintain compatibility with the old LangGraph workflow
+# during the transition period. They will be removed in v3.1.0.
+
+JOURNEY_COACH_SYSTEM_PROMPT = """You are a helpful loan assistant. Help the borrower with their questions."""
+
+ADVISORY_SYSTEM_PROMPT = """You are an advisory assistant. Provide loan recommendations."""
+
+RISK_ENGINE_SYSTEM_PROMPT = """You are a risk assessment engine. Evaluate credit risk."""
+
+def build_risk_engine_user_prompt(context: dict) -> str:
+    """Build risk engine user prompt (compatibility shim)"""
+    return f"Assess risk for: {context}"

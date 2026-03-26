@@ -16,7 +16,7 @@ Usage:
     )
 """
 
-from typing import List, Dict, Any, Optional, Type
+from typing import List, Dict, Any, Optional, Type, ClassVar
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 
@@ -69,8 +69,8 @@ class DocumentRequirementsTool(BaseTool):
     )
     args_schema: Type[BaseModel] = DocumentRequirementsInput
     
-    # Caribbean-specific document knowledge
-    CARIBBEAN_DOCUMENTS = {
+    # Caribbean-specific document knowledge (ClassVar for Pydantic compatibility)
+    CARIBBEAN_DOCUMENTS: ClassVar[Dict[str, Any]] = {
         "identity": [
             {"name": "Valid National ID or Passport", "description": "Government-issued photo ID", "required": True},
             {"name": "Proof of Address", "description": "Utility bill or bank statement (last 3 months)", "required": True},
