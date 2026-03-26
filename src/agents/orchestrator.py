@@ -36,7 +36,12 @@ class ConversationStage(str):
 
 
 class CapturedContext(BaseModel):
-    """Extracted loan context from conversation"""
+    """Extracted loan context from conversation
+    
+    Enhanced with LNAI-style fields for comprehensive intent capture.
+    Supports confidence scoring for LLM-based extraction reliability.
+    """
+    # Original fields
     purpose: Optional[str] = None
     property_value: Optional[float] = None
     property_currency: str = "USD"
@@ -56,6 +61,42 @@ class CapturedContext(BaseModel):
     borrower_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    
+    # NEW: LNAI-inspired fields for richer intent capture
+    urgency: Optional[Literal["low", "medium", "high", "critical"]] = None
+    affordability: Optional[str] = None  # Text description of affordability
+    preferred_tenure: Optional[str] = None  # User's stated tenure preference
+    collateral_available: Optional[str] = None  # What collateral they can provide
+    
+    # NEW: Conversation metadata
+    seriousness_score: Optional[int] = Field(default=None, ge=0, le=100)
+    fit_score: Optional[int] = Field(default=None, ge=0, le=100)
+    next_conversation_angle: Optional[str] = None
+    
+    # NEW: Confidence scores for LLM-extracted fields (0-1)
+    # Higher score = more confident the extraction is correct
+    field_confidence: Dict[str, float] = Field(default_factory=dict)
+    
+    # NEW: Currency tracking (unified)
+    currency: str = "USD"
+    currency_symbol: str = "$"
+    
+    def get_confidence(self, field_name: str) -> float:
+        """Get confidence score for a specific field"""
+        return self.field_confidence.get(field_name, 0.5)
+    
+    def get_average_confidence(self) -> float:
+        """Get average confidence across all populated fields"""
+        if not self.field_confidence:
+            return 0.5
+        return sum(self.field_confidence.values()) / len(self.field_confidence)
+    
+    def is_field_reliable(self, field_name: str, threshold: float = 0.7) -> bool:
+        """Check if a field extraction is reliable (above threshold)"""
+        return self.get_confidence(field_name) >= threshold
+    
+    class Config:
+        extra = "allow"  # Allow additional fields from LLM extraction
 
 
 class LoanSnapshot(BaseModel):
