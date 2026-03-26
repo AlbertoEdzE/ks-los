@@ -630,10 +630,17 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const scrollToBottom = () => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    // Only scroll if user is already near bottom (within 100px)
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    if (isNearBottom || loading) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }
   };
 
-  useEffect(scrollToBottom, [messages, loading, viewState]);
+  // Scroll only on new messages, not on every update
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages.length]);
 
   const refreshLoan = async (activeConversationId: string): Promise<V2Loan | null> => {
     try {
@@ -1235,6 +1242,23 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     return requests;
   };
 
+  // Strip XML tags from message content for clean display
+  const stripXmlTags = (content: string): string => {
+    if (!content) return content;
+    // Remove XML tags with their content
+    let cleaned = content.replace(/<loan_snapshot>[\s\S]*?<\/loan_snapshot>/gi, '');
+    cleaned = cleaned.replace(/<loan_recommendation[^>]*>[\s\S]*?<\/loan_recommendation>/gi, '');
+    cleaned = cleaned.replace(/<document_request[^>]*>[\s\S]*?<\/document_request>/gi, '');
+    cleaned = cleaned.replace(/<documents_checklist>[\s\S]*?<\/documents_checklist>/gi, '');
+    cleaned = cleaned.replace(/<stp_processing>[\s\S]*?<\/stp_processing>/gi, '');
+    cleaned = cleaned.replace(/<terms_acceptance>[\s\S]*?<\/terms_acceptance>/gi, '');
+    // Remove any remaining standalone XML tags
+    cleaned = cleaned.replace(/<\/?[a-z][a-z0-9_-]*[^>]*\s*\/?>/gi, '');
+    // Clean up extra whitespace and newlines
+    cleaned = cleaned.replace(/\n\s*\n/g, '\n').replace(/\s+/g, ' ').trim();
+    return cleaned;
+  };
+
   const borrowerReadyForRecommendations = (metadata: Record<string, unknown>): boolean => {
     const intentAnalysis = asRecord(metadata.intentAnalysis);
     const intent = intentAnalysis ? asRecord(intentAnalysis.intentSummary) : null;
@@ -1262,27 +1286,53 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     if (!metadata) return null;
     const cards: React.ReactNode[] = [];
 
-    // Loan Snapshot Card (show only at the earliest occurrence)
-    if (
-      earliestSnapshotMsgId &&
-      msg.id === earliestSnapshotMsgId &&
-      isLoanRecommendation(metadata.selectedRecommendation) &&
-      isLoanSnapshot(metadata.loanSnapshot)
-    ) {
+    // Check for loan recommendations in multiple possible locations
+    let loanRecommendations = Array.isArray(metadata.loanRecommendations) ? metadata.loanRecommendations : null;
+    
+    // Also check intentAnalysis for recommendations (LOS structure)
+    if (!loanRecommendations) {
+      const intentAnalysis = asRecord(metadata.intentAnalysis);
+      if (intentAnalysis) {
+        const intentSummary = asRecord(intentAnalysis.intentSummary);
+        if (intentSummary && Array.isArray(intentSummary.recommendedProducts)) {
+          loanRecommendations = intentSummary.recommendedProducts;
+        }
+      }
+    }
+
+    // Loan Snapshot Card - Show when we have snapshot data
+    if (isLoanSnapshot(metadata.loanSnapshot)) {
       cards.push(<LoanSnapshotCard key="snapshot" snapshot={metadata.loanSnapshot} />);
     }
 
-    // Loan Recommendations Cards
-    if (Array.isArray(metadata.loanRecommendations) && !isLoanRecommendation(metadata.selectedRecommendation)) {
-      const recs = metadata.loanRecommendations
-        .map((rec) => (isLoanRecommendation(rec) ? rec : null))
+    // Loan Recommendations Cards - ALWAYS show when we have recommendations
+    // Don't wait for user to be "ready" - show them as soon as data exists
+    if (Array.isArray(loanRecommendations) && loanRecommendations.length > 0 && !metadata.selectedRecommendation) {
+      const recs = loanRecommendations
+        .map((rec) => {
+          const r = asRecord(rec);
+          if (!r) return null;
+          // Normalize LOS backend structure to expected format
+          return {
+            name: String(r.name || r.estimatedRate || 'Option'),
+            type: String(r.type || r.category || 'balanced'),
+            interest_rate: Number(r.interest_rate || r.baseInterestRate || 8.4),
+            tenure_years: Number(r.tenure_years || r.maxTenureMonths || 240) / 12,
+            monthly_emi: Number(r.monthly_emi || r.estimatedEmi || 0),
+            total_interest: Number(r.total_interest || 0),
+            total_repayment: Number(r.total_repayment || 0),
+            pros: Array.isArray(r.pros) ? r.pros : [String(r.approvalSpeed || 'Standard')],
+            cons: Array.isArray(r.cons) ? r.cons : [String(r.prepaymentPenalty || 'Varies')],
+            recommended: Boolean(r.recommended || false),
+          };
+        })
         .filter((rec): rec is NonNullable<typeof rec> => rec !== null);
 
-      if (recs.length > 0 && borrowerReadyForRecommendations(metadata)) {
+      if (recs.length > 0) {
         cards.push(
           <div key="recs" className="w-full space-y-3 mt-1">
             <div className="flex items-center gap-2 text-xs font-medium text-[#0078D4] pl-1">
-              <span>Recommended Borrowing Paths</span>
+              <span>Recommended Options</span>
               <div className="flex-1 h-px bg-gradient-to-r from-[#0078D4]/30 to-transparent" />
             </div>
             <p className="text-[11px] text-[#1B2A4A]/50 dark:text-white/45 pl-1">Tap a card to select your preferred option</p>
@@ -1643,7 +1693,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                 <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div className="w-full max-w-2xl">
                     <div data-testid={`chat-message-${msg.role}`} className={`chat-message-content ${msg.role === 'user' ? bubbleClassForRole.user : bubbleClassForRole.assistant}`}>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripXmlTags(msg.content)}</ReactMarkdown>
                     </div>
                     {msg.role === 'assistant' && renderCardsForMessage(msg)}
                     {msg.role === 'assistant'

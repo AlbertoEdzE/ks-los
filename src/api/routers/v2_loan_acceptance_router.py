@@ -451,6 +451,7 @@ def accept_terms(
             "success": True,
             "loanId": loan.id,
             "stpCompleted": True,
+            "disbursementCompleted": True,
             "disbursement": disbursement,
             "approval": approval,
         }
@@ -458,19 +459,21 @@ def accept_terms(
             conversation_id=loan.conversation_id,
             role="assistant",
             content=(
-                "Your loan terms have been accepted and funds have been credited to your account!\n\n"
-                f"• **Amount**: {disbursement['amount']} ({disbursement['currency']})\n"
+                "🎉 Congratulations! Your loan has been approved and funds have been credited to your account!\n\n"
+                f"• **Amount Credited**: {disbursement['amount']} ({disbursement['currency']})\n"
                 f"• **Interest Rate**: {approval.get('rate') or 'N/A'}\n"
                 f"• **Tenure**: {approval.get('tenure') or 'N/A'}\n"
                 f"• **Monthly EMI**: {approval.get('emi') or 'N/A'}\n"
                 f"• **Transaction Reference**: {disbursement_ref}\n\n"
-                "You'll receive confirmations shortly."
+                "You'll receive email and SMS confirmations shortly."
             ),
             metadata_json={
                 "loanApplication": loan_application,
                 "type": "disbursement_confirmation",
                 "disbursement": disbursement,
                 "loanId": loan.id,
+                "disbursementCompleted": True,
+                "celebration": True,
             },
         )
         db.add(msg)

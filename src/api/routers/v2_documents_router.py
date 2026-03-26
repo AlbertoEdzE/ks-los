@@ -304,20 +304,42 @@ async def upload_document(
                     from src.shared.db import Message
 
                     approval = loan.stp_payload.get("approval") if isinstance(loan.stp_payload.get("approval"), dict) else {}
+                    affordability = loan.stp_payload.get("affordability") if isinstance(loan.stp_payload.get("affordability"), dict) else {}
+                    stp_steps = loan.stp_payload.get("stpSteps") if isinstance(loan.stp_payload.get("stpSteps"), list) else []
+                    
+                    # Build metadata for UI cards
+                    loan_app_meta = {
+                        "success": True,
+                        "loanId": loan.id,
+                        "stpApproved": True,
+                        "stpCompleted": True,
+                        "awaitingAcceptance": True,
+                        "approval": {
+                            "rate": approval.get("rate"),
+                            "tenure": approval.get("tenure"),
+                            "emi": approval.get("emi"),
+                            "conditions": approval.get("conditions", []),
+                        },
+                        "affordability": affordability,
+                        "stpSteps": stp_steps,
+                        "bureauReport": loan.stp_payload.get("bureau"),
+                    }
+                    
                     msg = Message(
                         conversation_id=loan.conversation_id,
                         role="assistant",
                         content=(
-                            "Automated checks are complete. Your indicative offer is ready.\n\n"
+                            "Great news! Automated checks are complete and your indicative offer is ready.\n\n"
                             f"• **Interest Rate**: {approval.get('rate') or 'N/A'}\n"
                             f"• **Tenure**: {approval.get('tenure') or 'N/A'}\n"
                             f"• **Monthly EMI**: {approval.get('emi') or 'N/A'}\n\n"
-                            "If you agree, please accept the terms to authorize disbursement."
+                            "Please review the terms below and provide your electronic signature to proceed with disbursement."
                         ),
                         metadata_json={
                             "type": "stp_offer",
                             "loanId": loan.id,
-                            "loanApplication": loan.stp_payload,
+                            "loanApplication": loan_app_meta,
+                            "awaitingAcceptance": True,
                         },
                     )
                     db.add(msg)

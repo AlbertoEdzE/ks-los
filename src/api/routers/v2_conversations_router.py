@@ -837,25 +837,32 @@ def _build_borrower_system_prompt(
         "5. THEN: Ask about monthly income\n"
         "6. THEN: Ask about credit history\n"
         "NEVER skip ahead. NEVER combine questions.\n\n"
-        "INFORMATION GATHERING (natural, not robotic):\n"
-        "- Home loans: purpose → name/territory → property value → down payment → employment → income → credit\n"
-        "- Personal loans: purpose → name/territory → amount → timeline → employment → income → credit\n"
-        "- Business loans: purpose → name/territory → amount → revenue → vintage → collateral\n"
-        "- Education: purpose → name/territory → institution → cost → co-applicant\n"
-        "- NEVER ask the same question twice — you have memory\n\n"
-        "DOCUMENT REQUESTS (LNAI Style — CRITICAL):\n"
-        "- NEVER ask for sensitive numbers to be typed (ID numbers, account numbers, etc.)\n"
-        "- Use XML tags for upload prompts:\n"
+        "INFORMATION GATHERING (STRICT ORDER - DO NOT SKIP):\n"
+        "1. FIRST: Name and Territory (island)\n"
+        "2. THEN: Property value OR loan amount\n"
+        "3. THEN: Down payment (if home loan) or timeline (if personal)\n"
+        "4. THEN: Employment type\n"
+        "5. THEN: Monthly income\n"
+        "6. THEN: Credit history/score - MUST ASK BEFORE DOCUMENTS\n"
+        "7. THEN: Documents (only AFTER all above info collected)\n"
+        "NEVER skip ahead. NEVER ask for documents before credit score. NEVER combine questions.\n\n"
+        "DOCUMENT REQUESTS (CRITICAL FORMAT):\n"
+        "- When asking for a document, you MUST use this exact XML format:\n"
         '  `<document_request type="national_id">Your National ID or Passport</document_request>`\n'
         '  `<document_request type="job_letter">Employment Confirmation Letter</document_request>`\n'
-        '  `<document_request type="bank_statements">Last 6 Months Bank Statements</document_request>`\n'
-        "- Request ONE document at a time, not a list\n"
-        "- Explain the benefit: \"Our OCR processes this instantly — just use the paperclip button\"\n"
-        "- After using the tag, add a brief sentence: \"You can upload this using the paperclip button below.\"\n\n"
+        "- DO NOT just write text like 'please upload your ID' - USE THE XML TAG\n"
+        "- The XML tag triggers a UI card with an Upload button\n"
+        "- After the tag, add one sentence: 'You can upload this using the button above.'\n"
+        "- Request ONE document at a time, not multiple\n"
+        "- NEVER ask for documents BEFORE collecting credit score\n\n"
         "RECOMMENDATIONS:\n"
-        "- Provide options as trade-offs, not jargon\n"
-        "- Use `<loan_snapshot>` and `<loan_recommendation>` tags for UI cards\n"
-        "- Example: \"Based on what you've shared, here are three paths. The Balanced option gives you moderate payments with decent savings.\"\n\n"
+        "- ONLY show loan recommendation cards AFTER you have ALL of: purpose, loan amount (or property value), employment type, and monthly income\n"
+        "- When showing loan options, DO NOT write numbered lists like '1. Option A, 2. Option B' in your text\n"
+        "- Instead, mention that options are available and the UI will show them as cards\n"
+        "- Use `<loan_recommendations>` XML tag with JSON array for UI cards\n"
+        "- Example (ONLY when you have all required info): \"Based on your profile, I've prepared three loan paths for you. You'll see them as cards below - tap one to select.\"\n"
+        "- If user asks for options but you're missing loan amount or property value, ask for that FIRST before showing cards\n"
+        "- When user selects (says 'option 1', 'balanced', etc.), show `<loan_snapshot>` with selected details\n\n"
         "LOAN PRODUCTS CATALOG:\n"
         "Use these products when making recommendations. If none fit, explain why and ask ONE clarifying question.\n"
         f"{catalog_json}\n\n"
@@ -2265,11 +2272,23 @@ def send_message(
         intent_dict = analysis.get("intentSummary") if isinstance(analysis, dict) else {}
         intent_dict = intent_dict if isinstance(intent_dict, dict) else {}
         assistant_text = _strip_emojis(assistant_text)
-        assistant_text = _maybe_append_credit_score_question(assistant_text, intent_dict, approval_probability)
+        
+        # CRITICAL: Remove document requests if credit score not yet collected
+        # This ensures proper conversation order
+        has_credit = bool(intent_dict.get("creditHistory"))
+        if not has_credit:
+            # Strip document_request tags from response if credit not collected
+            assistant_text = re.sub(r'<document_request[^>]*>[^<]*</document_request>', '', assistant_text, flags=re.IGNORECASE)
+            assistant_text = re.sub(r'\n\s*You can upload.*paperclip.*\n?', '', assistant_text, flags=re.IGNORECASE)
+            assistant_text = assistant_text.strip()
+
         assistant_text = _dedupe_assistant_text(_limit_questions_in_text(_strip_think_blocks(assistant_text), max_questions=2))
     loan_recommendation_cards: Optional[list[dict[str, Any]]] = None
     selected_recommendation: Optional[dict[str, Any]] = None
     loan_snapshot: Optional[dict[str, Any]] = None
+    # CRITICAL: When showing recommendations, REMOVE credit score questions
+    # Credit should be collected AFTER user selects a loan option
+    # Note: loan_recommendation_cards is computed below, but we check it here after it's set
     try:
         intent_obj = analysis.get("intentSummary") if isinstance(analysis, dict) else {}
         intent_dict = intent_obj if isinstance(intent_obj, dict) else {}
@@ -2313,7 +2332,9 @@ def send_message(
         if rate_pct is None:
             rate_pct = 8.4
 
-        ready_for_recommendations = bool(purpose) and la is not None and la > 0 and has_income and has_employment and has_credit and home_ok
+        # Show recommendations when we have basic financial info (credit can come after)
+        # For home loans, property value and down payment are optional - we can estimate with just loan amount
+        ready_for_recommendations = bool(purpose) and la is not None and la > 0 and has_income and has_employment
         if ready_for_recommendations and rate_pct is not None:
             def _calc(amount: float, annual_rate_pct: float, tenure_years: int) -> tuple[float, float, float]:
                 n = max(1, tenure_years * 12)
@@ -2346,6 +2367,23 @@ def send_message(
                     }
                 )
             loan_recommendation_cards = cards
+
+            # CRITICAL: When showing recommendations, REMOVE credit score questions
+            # Credit should be collected AFTER user selects a loan option
+            if loan_recommendation_cards and not selected_recommendation:
+                # Remove credit score questions from recommendation messages
+                assistant_text = re.sub(r'\s*Do you know your credit score.*$', '', assistant_text, flags=re.IGNORECASE | re.MULTILINE)
+                assistant_text = re.sub(r'\s*If not, say.*unknown.*$', '', assistant_text, flags=re.IGNORECASE | re.MULTILINE)
+                assistant_text = re.sub(r'\s*Would you like to start by looking.*$', '', assistant_text, flags=re.IGNORECASE | re.MULTILINE)
+                assistant_text = assistant_text.strip()
+                
+                # If using heuristic mode, add a message about the cards being shown
+                if assistant_engine == "heuristic_only":
+                    assistant_text = assistant_text.rstrip('.')
+                    if assistant_text:
+                        assistant_text = f"{assistant_text}. Based on your profile, I've prepared three loan paths for you. You'll see them as cards below — tap one to select."
+                    else:
+                        assistant_text = "Based on your profile, I've prepared three loan paths for you. You'll see them as cards below — tap one to select."
 
         selection_key = ""
         if isinstance(req.content, str):
@@ -2411,7 +2449,7 @@ def send_message(
         "actorRole": "officer_assistant" if actor_is_officer else None,
         "assistantEngine": assistant_engine,
         "intentAnalysis": analysis,
-        "loanRecommendations": loan_recommendation_cards if (conv.chat_role == "borrower" and not actor_is_officer and selected_recommendation is None) else None,
+        "loanRecommendations": loan_recommendation_cards if loan_recommendation_cards else None,
         "selectedRecommendation": selected_recommendation,
         "loanSnapshot": loan_snapshot,
         "approvalProbability": approval_probability,
