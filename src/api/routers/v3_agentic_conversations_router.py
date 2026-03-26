@@ -46,7 +46,7 @@ class V3ConversationRequest(BaseModel):
 class V3MessageRequest(BaseModel):
     """Request to send a message"""
     content: str
-    session_id: str
+    # session_id removed - now comes from URL path parameter
 
 
 class V3MessageResponse(BaseModel):
