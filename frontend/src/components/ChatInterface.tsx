@@ -956,7 +956,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       const res = await fetch(`${API_BASE_URL}/api/v3/conversations/${activeConversationId}/messages`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ content, session_id: activeConversationId }),
+        body: JSON.stringify({ content }),
       });
 
       if (!res.ok) {

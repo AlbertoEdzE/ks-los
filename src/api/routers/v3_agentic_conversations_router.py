@@ -100,8 +100,8 @@ async def create_conversation(request: V3ConversationRequest):
     return {"conversation": conversation}
 
 
-@router.post("/messages", response_model=V3MessageResponse)
-async def send_message(request: V3MessageRequest):
+@router.post("/{session_id}/messages", response_model=V3MessageResponse)
+async def send_message(session_id: str, request: V3MessageRequest):
     """
     Send a message to the agentic conversation.
     
@@ -111,7 +111,7 @@ async def send_message(request: V3MessageRequest):
     3. Process through appropriate mode node (Advisory/Application/Completion)
     4. Process through EscalationNode (if needed)
     """
-    session_id = request.session_id
+    # session_id comes from path parameter now
     state = get_or_create_state(session_id)
     
     # Add user message to history
