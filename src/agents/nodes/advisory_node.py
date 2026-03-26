@@ -109,6 +109,9 @@ class AdvisoryNode:
         elif step == "financial_details":
             state = self._step3_financial_details(state)
         
+        elif step == "contact_capture":
+            state = self._step3b_contact_capture(state)
+        
         elif step == "snapshot_and_recommendations":
             state = self._step4_snapshot_and_recommendations(state)
         
@@ -130,10 +133,16 @@ class AdvisoryNode:
         """
         context = state.captured_context
         
-        # Step 4: Have all financial details
+        # Step 4: Have ALL required fields including contact info
+        if (context.purpose and context.loan_amount and 
+            context.monthly_income and context.employment_type and
+            context.email and context.phone):
+            return "snapshot_and_recommendations"
+        
+        # Step 3b: Have financials, need contact info
         if (context.purpose and context.loan_amount and 
             context.monthly_income and context.employment_type):
-            return "snapshot_and_recommendations"
+            return "contact_capture"
         
         # Step 3: Have employment/income, need loan amount
         if context.employment_type and context.monthly_income:
@@ -330,6 +339,69 @@ class AdvisoryNode:
         
         return state
     
+    
+    def _step3b_contact_capture(self, state: AgenticOrchestratorState) -> AgenticOrchestratorState:
+        """
+        Step 3b: Capture contact information (email, phone).
+        
+        This step comes after financial details but before showing recommendations.
+        We need contact info to proceed with application.
+        """
+        # Get last user message
+        if not state.conversation_history:
+            return state
+        
+        last_message = state.conversation_history[-1].content
+        
+        # Extract contact info using LLM
+        try:
+            conv_history = [
+                {"role": m.role, "content": m.content}
+                for m in state.conversation_history
+            ]
+            extraction = self.intent_extractor._run(conversation_history=conv_history)
+            
+            from src.agents.agent_tools.intent_extractor import IntentExtractionResult
+            result = IntentExtractionResult.model_validate_json(extraction)
+            
+            # Update context
+            if result.context.email:
+                state.captured_context.email = result.context.email
+            if result.context.phone:
+                state.captured_context.phone = result.context.phone
+            
+            # Update confidence scores
+            state.confidence_scores.update(result.field_confidence)
+            
+        except Exception as e:
+            self.logger.warning(f"Contact extraction failed: {str(e)}")
+        
+        # Check if we have contact info
+        context = state.captured_context
+        has_email = bool(context.email)
+        has_phone = bool(context.phone)
+        
+        if has_email and has_phone:
+            # Have contact info, proceed to recommendations
+            return self._step4_snapshot_and_recommendations(state)
+        else:
+            # Ask for missing contact info
+            missing = []
+            if not has_email:
+                missing.append("email address")
+            if not has_phone:
+                missing.append("phone number")
+            
+            response_text = (
+                f"Great! Now I just need your {', '.join(missing)} so I can keep you updated on your application. "
+                f"{'What is your email address?' if not has_email else ''}"
+                f"{' And what is your phone number?' if not has_phone else ''}"
+            )
+            
+            state.add_message("assistant", response_text)
+        
+        return state
+
     def _step4_snapshot_and_recommendations(self, state: AgenticOrchestratorState) -> AgenticOrchestratorState:
         """
         Step 4: Compute loan snapshot and present 3 recommendations.

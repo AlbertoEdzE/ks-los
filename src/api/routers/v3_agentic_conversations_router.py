@@ -154,6 +154,33 @@ async def send_message(request: V3MessageRequest):
         pass  # Metrics are optional, don't fail the request
     
     # Create v2-compatible message object for frontend compatibility
+    # Frontend expects specific format for documents checklist
+    docs_checklist_v2 = None
+    if state.documents_checklist:
+        # Convert from v3 format to v2 frontend format
+        docs_checklist_v2 = {
+            "identity": [
+                {"name": doc["name"], "status": "required" if doc.get("required") else "optional", "description": doc.get("description", "")}
+                for doc in state.documents_checklist.identity
+            ] if state.documents_checklist.identity else [],
+            "income": [
+                {"name": doc["name"], "status": "required" if doc.get("required") else "optional", "description": doc.get("description", "")}
+                for doc in state.documents_checklist.income
+            ] if state.documents_checklist.income else [],
+            "business": [
+                {"name": doc["name"], "status": "required" if doc.get("required") else "optional", "description": doc.get("description", "")}
+                for doc in state.documents_checklist.business
+            ] if hasattr(state.documents_checklist, 'business') and state.documents_checklist.business else [],
+            "property": [
+                {"name": doc["name"], "status": "required" if doc.get("required") else "optional", "description": doc.get("description", "")}
+                for doc in state.documents_checklist.property
+            ] if hasattr(state.documents_checklist, 'property') and state.documents_checklist.property else [],
+            "vehicle": [
+                {"name": doc["name"], "status": "required" if doc.get("required") else "optional", "description": doc.get("description", "")}
+                for doc in state.documents_checklist.vehicle
+            ] if hasattr(state.documents_checklist, 'vehicle') and state.documents_checklist.vehicle else [],
+        }
+    
     assistant_message = {
         "id": f"msg-{datetime.now().timestamp()}",
         "conversationId": session_id,
@@ -162,7 +189,7 @@ async def send_message(request: V3MessageRequest):
         "metadata": {
             "loan_snapshot": state.loan_snapshot.model_dump() if state.loan_snapshot else None,
             "recommendations": [r.model_dump() for r in state.recommendations] if state.recommendations else None,
-            "documents_checklist": state.documents_checklist.model_dump() if state.documents_checklist else None,
+            "documentsChecklist": docs_checklist_v2,  # V2 format for frontend
             "application_id": state.application_id,
             "stp_status": state.stp_status,
         },
@@ -178,7 +205,7 @@ async def send_message(request: V3MessageRequest):
         metadata={
             "loan_snapshot": state.loan_snapshot.model_dump() if state.loan_snapshot else None,
             "recommendations": [r.model_dump() for r in state.recommendations] if state.recommendations else None,
-            "documents_checklist": state.documents_checklist.model_dump() if state.documents_checklist else None,
+            "documentsChecklist": docs_checklist_v2,  # V2 format for frontend
             "application_id": state.application_id,
             "stp_status": state.stp_status,
             "escalation_needed": state.escalation_needed,
