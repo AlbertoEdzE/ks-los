@@ -1,5 +1,5 @@
 """
-LNAI-Style Orchestrator Agent for KS-LOS v2.0
+Orchestrator Agent for KS-LOS v2.0
 
 This orchestrator manages the complete borrower conversation flow,
 mimicking the Loan-Navigator-AI approach with structured XML tags

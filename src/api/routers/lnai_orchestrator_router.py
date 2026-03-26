@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.agents.lnai_orchestrator import get_orchestrator
+from src.agents.orchestrator import get_orchestrator
 from src.shared.db import Conversation, Message, get_db
 from src.shared.metrics import request_counter, request_errors_total
 
