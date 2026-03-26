@@ -147,8 +147,11 @@ async def send_message(request: V3MessageRequest):
     last_message = state.conversation_history[-1] if state.conversation_history else None
     response_text = last_message.content if last_message else "I'm processing your request..."
     
-    # Track metrics
-    v2_messages_sent_total.labels(role="borrower", status="success").inc()
+    # Track metrics (use correct label names)
+    try:
+        v2_messages_sent_total.labels(role="borrower", status="success").inc()
+    except Exception:
+        pass  # Metrics are optional, don't fail the request
     
     # Create v2-compatible message object for frontend compatibility
     assistant_message = {

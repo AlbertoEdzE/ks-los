@@ -183,7 +183,7 @@ class ApplicationNode:
         
         # Extract contact info using LLM
         try:
-            extraction = self.intent_extractor.run(
+            extraction = self.intent_extractor._run(
                 conversation_history=[
                     {"role": m.role, "content": m.content}
                     for m in state.conversation_history

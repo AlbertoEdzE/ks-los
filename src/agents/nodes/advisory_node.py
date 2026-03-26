@@ -173,12 +173,11 @@ class AdvisoryNode:
         
         try:
             # Use LLM to extract intent
-            extraction = self.intent_extractor.run(
-                conversation_history=[
-                    {"role": m.role, "content": m.content}
-                    for m in state.conversation_history
-                ]
-            )
+            conv_history = [
+                {"role": m.role, "content": m.content}
+                for m in state.conversation_history
+            ]
+            extraction = self.intent_extractor._run(conversation_history=conv_history)
             
             # Parse extraction result
             from src.agents.agent_tools.intent_extractor import IntentExtractionResult
@@ -231,7 +230,7 @@ class AdvisoryNode:
         
         # Extract employment and income using LLM
         try:
-            extraction = self.intent_extractor.run(
+            extraction = self.intent_extractor._run(
                 conversation_history=[
                     {"role": m.role, "content": m.content}
                     for m in state.conversation_history
@@ -285,7 +284,7 @@ class AdvisoryNode:
         
         # Extract financial details using LLM
         try:
-            extraction = self.intent_extractor.run(
+            extraction = self.intent_extractor._run(
                 conversation_history=[
                     {"role": m.role, "content": m.content}
                     for m in state.conversation_history
