@@ -209,6 +209,7 @@ class DocumentClassifier:
     """
     
     # Classification patterns (keywords per document type)
+    # Optimized for OCR noise - use multiple variations
     PATTERNS = {
         DocumentType.NATIONAL_ID: [
             r"national\s*(?:id|identification)",
@@ -217,32 +218,44 @@ class DocumentClassifier:
             r"card\s*number",
             r"trinidad\s*and\s*tobago",  # Caribbean context
             r"caricom",
+            r"republic\s*of",  # Common in Caribbean IDs
+            r"citizen\s*(?:of|card)",
+            r"(?:id|card)\s*no\.?",  # ID number variations
         ],
         DocumentType.PASSPORT: [
             r"passport",
-            r"passport\s*number",
+            r"passport\s*(?:number|no\.?|#)?",
             r"nationality",
-            r"country\s*of\s*issue",
-            r"place\s*of\s*birth",
+            r"country\s*(?:of\s*)?(?:issue|code)",
+            r"place\s*(?:of\s*)?birth",
+            r"united\s*states",  # US passports common in Caribbean
+            r"type\s*[:\s]*[pc]",  # Passport type codes
+            r"issuing\s*authority",
+            r"date\s*(?:of\s*)?issue",
         ],
         DocumentType.PAY_SLIP: [
             r"pay\s*slip",
             r"pay\s*stub",
             r"payslip",
             r"earnings?\s*statement",
-            r"gross\s*pay",
-            r"net\s*pay",
+            r"gross\s*(?:pay|salary|earnings?)",
+            r"net\s*(?:pay|salary)",
             r"deductions?",
             r"pay\s*period",
+            r"employer",
+            r"employee",
         ],
         DocumentType.BANK_STATEMENT: [
-            r"bank\s*statement",
+            r"bank\s*(?:statement|limited)?",
             r"account\s*statement",
             r"transaction(?:s)?",
             r"opening\s*balance",
             r"closing\s*balance",
-            r"account\s*number",
+            r"account\s*(?:number|no\.?)?",
             r"statement\s*period",
+            r"deposits?",
+            r"withdrawals?",
+            r"limited",  # Common in bank names (Republic Bank Limited)
         ],
         DocumentType.TAX_RETURN: [
             r"tax\s*return",
@@ -252,16 +265,24 @@ class DocumentClassifier:
             r"declared\s*income",
             r"tax\s*year",
             r"assessment\s*notice",
+            r"permanent\s*account\s*number",  # PAN
+            r"pan\s*card",
         ],
         DocumentType.JOB_LETTER: [
             r"employment\s*letter",
-            r"job\s*letter",
+            r"job\s*(?:letter|offer)",
             r"letter\s*of\s*employment",
             r"to\s*whom\s*it\s*may\s*concern",
             r"we\s*hereby\s*confirm",
             r"is\s*employed\s*by",
-            r"position",
-            r"salary",
+            r"position[:\s]",
+            r"salary[:\s]",
+            r"hr\s*department",
+            r"human\s*resources",
+            r"joining\s*date",
+            r"probation\s*period",
+            r"annual\s*ctc",  # Common in Indian subcontinent
+            r"monthly\s*ctc",
         ],
         DocumentType.BUSINESS_REGISTRATION: [
             r"certificate\s*of\s*incorporation",
@@ -269,6 +290,9 @@ class DocumentClassifier:
             r"company\s*number",
             r"registered\s*office",
             r"articles\s*of\s*incorporation",
+            r"incorporated",
+            r"ltd\.?",  # Limited
+            r"limited",
         ],
         DocumentType.UTILITY_BILL: [
             r"utility\s*bill",
@@ -278,6 +302,8 @@ class DocumentClassifier:
             r"account\s*due",
             r"meter\s*reading",
             r"service\s*address",
+            r"billing\s*period",
+            r"amount\s*due",
         ],
     }
     
@@ -332,15 +358,19 @@ class FieldExtractor:
 
 
 class IDFieldExtractor(FieldExtractor):
-    """Extract fields from ID/Passport"""
+    """Extract fields from ID/Passport - optimized for OCR noise"""
     
     def extract(self, text: str) -> IDFields:
         fields = IDFields()
         
-        # Extract ID number (various formats)
+        # Clean text for better extraction
+        text_clean = re.sub(r'[^\w\s:/\-\.]', ' ', text)
+        
+        # Extract ID/Passport number (multiple patterns for OCR noise)
         id_patterns = [
-            r"(?:id|card|passport)\s*(?:number|no\.?|#)?[:\s]*([A-Z0-9]{6,12})",
+            r"(?:passport|id|card|license|licence)\s*(?:number|no\.?|#)?[:\s]*([A-Z0-9]{6,12})",
             r"([A-Z]{1,2}\d{6,8})",  # Caribbean ID formats
+            r"(?:no\.?|number)\s*[:\s]*([A-Z0-9]{7,10})",  # Generic
         ]
         for pattern in id_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -348,13 +378,14 @@ class IDFieldExtractor(FieldExtractor):
                 fields.id_number = match.group(1).strip()
                 break
         
-        # Extract name
+        # Extract name (handle various formats)
         name_patterns = [
-            r"(?:name|full\s*name|surname)[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)",
-            r"([A-Z]{2,}\s*,?\s*[A-Z][a-z]+)",  # LAST, First format
+            r"(?:name|full\s*name|surname|given\s*names)[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)",
+            r"([A-Z]{2,}\s*,?\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",  # LAST, First format
+            r"^([A-Z][a-z]+\s+[A-Z][a-z]+)",  # Simple First Last at line start
         ]
         for pattern in name_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+            match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
             if match:
                 fields.full_name = match.group(1).strip()
                 break
@@ -368,33 +399,46 @@ class IDFieldExtractor(FieldExtractor):
         if nationality_match:
             fields.nationality = nationality_match.group(1).strip()
         
-        # Extract dates (expiry, birth, issue)
+        # Extract dates with multiple format support
         date_patterns = {
-            "expiry_date": r"expir(?:y|ed|ation)?\s*(?:date)?[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})",
-            "date_of_birth": r"(?:birth|born|dob)[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})",
-            "issue_date": r"issued?[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})",
+            "expiry_date": [
+                r"expir(?:y|ed|ation)?\s*(?:date)?[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})",
+                r"(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\s*(?:expiry|exp)",
+            ],
+            "date_of_birth": [
+                r"(?:birth|born|dob|date\s*of\s*birth)[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})",
+                r"(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\s*(?:birth|dob)",
+            ],
+            "issue_date": [
+                r"issued?[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})",
+                r"date\s*of\s*issue[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})",
+            ],
         }
         
-        for field_name, pattern in date_patterns.items():
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                setattr(fields, field_name, match.group(1).strip())
+        for field_name, patterns in date_patterns.items():
+            for pattern in patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    setattr(fields, field_name, match.group(1).strip())
+                    break
         
         return fields
     
     def compute_confidence(self, fields: IDFields) -> Dict[str, float]:
         confidence = {}
         
-        # ID number confidence
-        if fields.id_number and len(fields.id_number) >= 6:
+        # ID number confidence (stricter for short numbers)
+        if fields.id_number and len(fields.id_number) >= 8:
             confidence["id_number"] = 0.9
+        elif fields.id_number and len(fields.id_number) >= 6:
+            confidence["id_number"] = 0.7
         elif fields.id_number:
             confidence["id_number"] = 0.5
         else:
             confidence["id_number"] = 0.0
         
         # Name confidence
-        if fields.full_name and " " in fields.full_name:
+        if fields.full_name and " " in fields.full_name and len(fields.full_name) > 5:
             confidence["full_name"] = 0.85
         elif fields.full_name:
             confidence["full_name"] = 0.5
