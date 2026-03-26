@@ -261,7 +261,7 @@ class FinancialContextStrategy(ResponseStrategy):
         intent = IntentAnalysis(
             purpose=context.purpose,
             employment_type=context.employment_type,
-            monthly_income=f"${context.monthly_income:,}" if context.monthly_income else None,
+            monthly_income=f"${float(context.monthly_income):,}" if isinstance(context.monthly_income, (int, float)) else str(context.monthly_income) if context.monthly_income else None,
             existing_debts=f"${context.existing_debts:,}" if context.existing_debts else None,
             seriousness_score=context.seriousness_score,
             fit_score=context.fit_score,
@@ -295,7 +295,7 @@ class RecommendationStrategy(ResponseStrategy):
         intent = IntentAnalysis(
             purpose=context.purpose,
             loan_amount=f"${context.loan_amount:,}" if context.loan_amount else None,
-            monthly_income=f"${context.monthly_income:,}" if context.monthly_income else None,
+            monthly_income=f"${float(context.monthly_income):,}" if isinstance(context.monthly_income, (int, float)) else str(context.monthly_income) if context.monthly_income else None,
             seriousness_score=context.seriousness_score,
             fit_score=context.fit_score,
             next_conversation_angle="Wait for borrower to select recommendation",
