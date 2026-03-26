@@ -1,0 +1,200 @@
+"""
+V3 Agentic Conversations Router
+
+This router uses the NEW LangGraph-based agentic workflow with:
+- AdvisoryNode (Mode 1): Understanding & estimation
+- ApplicationNode (Mode 2): Collection & submission  
+- CompletionNode (Mode 3): STP, acceptance, disbursement
+- RepairNode: Conversation repair
+- RAGNode: Policy-grounded responses
+- EscalationNode: Human handoff
+
+This replaces the old LNAI-style hardcoded flow.
+"""
+
+import uuid
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Header
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from src.shared.db import get_db, Conversation, Message as DBMessage
+from src.agents.graph_state import (
+    AgenticOrchestratorState,
+    ConversationMode,
+    create_initial_state,
+    Message,
+)
+from src.agents.nodes.advisory_node import AdvisoryNode
+from src.agents.nodes.application_node import ApplicationNode
+from src.agents.nodes.completion_node import CompletionNode
+from src.agents.nodes.repair_node import RepairNode
+from src.agents.nodes.rag_node import RAGNode
+from src.agents.nodes.escalation_node import EscalationNode
+from src.shared.metrics import v2_messages_sent_total
+
+router = APIRouter(prefix="/api/v3/conversations", tags=["v3_agentic_conversations"])
+
+
+class V3ConversationRequest(BaseModel):
+    """Request to create or get a conversation"""
+    session_id: Optional[str] = None
+    borrower_name: Optional[str] = None
+
+
+class V3MessageRequest(BaseModel):
+    """Request to send a message"""
+    content: str
+    session_id: str
+
+
+class V3MessageResponse(BaseModel):
+    """Response with message and metadata"""
+    response: str
+    session_id: str
+    mode: str
+    stage: str
+    confidence: float
+    metadata: Dict[str, Any] = {}
+
+
+# In-memory state store (replace with Redis/DB in production)
+STATE_STORE: Dict[str, AgenticOrchestratorState] = {}
+
+
+def get_or_create_state(session_id: str, borrower_name: Optional[str] = None) -> AgenticOrchestratorState:
+    """Get or create agentic state for session"""
+    if session_id not in STATE_STORE:
+        STATE_STORE[session_id] = create_initial_state(session_id)
+        if borrower_name:
+            STATE_STORE[session_id].captured_context.borrower_name = borrower_name
+    return STATE_STORE[session_id]
+
+
+@router.post("/", response_model=V3MessageResponse)
+async def create_conversation(request: V3ConversationRequest):
+    """Create a new agentic conversation"""
+    session_id = request.session_id or str(uuid.uuid4())
+    state = get_or_create_state(session_id, request.borrower_name)
+    
+    # Save to DB (optional, for audit)
+    # db_conversation = Conversation(session_id=session_id, ...)
+    
+    return V3MessageResponse(
+        response=f"Welcome! I'm your AI loan assistant. How can I help you today?",
+        session_id=session_id,
+        mode=state.mode.value,
+        stage=state.current_stage,
+        confidence=state.get_average_confidence(),
+        metadata={"created": True}
+    )
+
+
+@router.post("/messages", response_model=V3MessageResponse)
+async def send_message(request: V3MessageRequest):
+    """
+    Send a message to the agentic conversation.
+    
+    This uses the NEW agentic workflow:
+    1. Process through RepairNode (check for corrections/digressions)
+    2. Process through RAGNode (policy questions)
+    3. Process through appropriate mode node (Advisory/Application/Completion)
+    4. Process through EscalationNode (if needed)
+    """
+    session_id = request.session_id
+    state = get_or_create_state(session_id)
+    
+    # Add user message to history
+    state.add_message("user", request.content)
+    
+    # ──────────────────────────────────────────────────────────────────────
+    # Agentic Processing Pipeline
+    # ──────────────────────────────────────────────────────────────────────
+    
+    # Step 1: Repair Node (handle corrections, digressions)
+    repair_node = RepairNode()
+    state = repair_node.process(state)
+    
+    # Step 2: RAG Node (policy-grounded responses)
+    # Note: Pass knowledge_base if available
+    rag_node = RAGNode()
+    state = rag_node.process(state)
+    
+    # Step 3: Mode-specific processing
+    if state.mode == ConversationMode.ADVISORY:
+        advisory_node = AdvisoryNode()
+        state = advisory_node.process(state)
+        
+    elif state.mode == ConversationMode.APPLICATION:
+        application_node = ApplicationNode()
+        state = application_node.process(state)
+        
+    elif state.mode == ConversationMode.COMPLETION:
+        completion_node = CompletionNode()
+        state = completion_node.process(state)
+    
+    # Step 4: Escalation Node (check if human handoff needed)
+    escalation_node = EscalationNode()
+    state = escalation_node.process(state)
+    
+    # ──────────────────────────────────────────────────────────────────────
+    # Extract response
+    # ──────────────────────────────────────────────────────────────────────
+    
+    last_message = state.conversation_history[-1] if state.conversation_history else None
+    response_text = last_message.content if last_message else "I'm processing your request..."
+    
+    # Track metrics
+    v2_messages_sent_total.labels(role="borrower", status="success").inc()
+    
+    return V3MessageResponse(
+        response=response_text,
+        session_id=session_id,
+        mode=state.mode.value,
+        stage=state.current_stage,
+        confidence=state.get_average_confidence(),
+        metadata={
+            "loan_snapshot": state.loan_snapshot.model_dump() if state.loan_snapshot else None,
+            "recommendations": [r.model_dump() for r in state.recommendations] if state.recommendations else None,
+            "documents_checklist": state.documents_checklist.model_dump() if state.documents_checklist else None,
+            "application_id": state.application_id,
+            "stp_status": state.stp_status,
+            "escalation_needed": state.escalation_needed,
+        }
+    )
+
+
+@router.get("/{session_id}", response_model=Dict[str, Any])
+async def get_conversation(session_id: str):
+    """Get conversation state"""
+    if session_id not in STATE_STORE:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    state = STATE_STORE[session_id]
+    
+    return {
+        "session_id": session_id,
+        "mode": state.mode.value,
+        "stage": state.current_stage,
+        "captured_context": state.captured_context.model_dump(),
+        "confidence_scores": state.confidence_scores,
+        "application_id": state.application_id,
+        "stp_status": state.stp_status,
+        "message_count": len(state.conversation_history),
+    }
+
+
+@router.delete("/{session_id}")
+async def delete_conversation(session_id: str):
+    """Delete conversation"""
+    if session_id in STATE_STORE:
+        del STATE_STORE[session_id]
+    return {"deleted": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module Exports
+# ─────────────────────────────────────────────────────────────────────────────
+
+__all__ = ["router"]

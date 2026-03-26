@@ -15,14 +15,30 @@ export interface ChatResponse {
   advice?: string;
 }
 
+/**
+ * Send a message to the NEW v3 agentic conversation flow.
+ * 
+ * This uses the LangGraph-based agentic workflow with:
+ * - Advisory mode (understanding & estimation)
+ * - Application mode (collection & submission)
+ * - Completion mode (STP, acceptance, disbursement)
+ * - Conversation repair mechanisms
+ * - RAG policy-grounded responses
+ * - Human escalation when needed
+ */
 export const sendMessage = async (
-  message: string, 
+  message: string,
   history: ChatMessage[] = []
 ): Promise<ChatResponse> => {
-  const response = await axios.post<ChatResponse>(`${API_URL}/agent/chat`, {
-    message,
-    history,
+  // Use v3 agentic endpoint
+  const response = await axios.post<ChatResponse>(`${API_URL}/api/v3/conversations/messages`, {
+    content: message,
     session_id: 'default' // Can be dynamic later
   });
-  return response.data;
+  
+  // Map v3 response to legacy ChatResponse format
+  return {
+    response: response.data.response,
+    // Map other fields as needed
+  };
 };

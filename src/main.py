@@ -25,6 +25,7 @@ from src.api.routers.admin_config_router import router as admin_config_router
 from src.api.routers.admin_seed_router import router as admin_seed_router
 from src.api.routers.model_manage_router import router as model_manage_router
 from src.api.routers.v2_conversations_router import router as v2_conversations_router, borrower_router as v2_borrower_router
+from src.api.routers.v3_agentic_conversations_router import router as v3_agentic_router
 from src.api.routers.v2_phases_router import router as v2_phases_router
 from src.api.routers.v2_loans_router import router as v2_loans_router
 from src.api.routers.v2_catalog_products_router import router as v2_catalog_products_router
@@ -122,6 +123,9 @@ app.include_router(v2_catalog_products_router)
 app.include_router(v2_documents_router)
 app.include_router(v2_loan_acceptance_router)
 # LNAI orchestrator disabled - LOS uses its own conversation flow via v2_conversations_router
+
+# NEW: V3 Agentic Conversations Router (uses LangGraph agentic workflow)
+app.include_router(v3_agentic_router)
 # app.include_router(lnai_orchestrator_router)
 
 
