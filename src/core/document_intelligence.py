@@ -719,7 +719,7 @@ class DocumentIntelligence:
             self.logger.error(f"PDF processing failed: {str(e)}")
             return self._create_error_result(str(e))
     
-    def _preprocess_image(self, image: Image.Image) -> Image.Image:
+    def _preprocess_image(self, image: Any) -> Any:
         """
         Preprocess image for better OCR accuracy.
         
@@ -729,6 +729,9 @@ class DocumentIntelligence:
         - Deskew if needed
         - Denoise
         """
+        if not OCR_AVAILABLE or Image is None:
+            return image
+        
         from PIL import ImageOps, ImageFilter
         
         # Convert to grayscale
