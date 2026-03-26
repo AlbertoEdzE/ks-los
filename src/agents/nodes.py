@@ -11,7 +11,7 @@ from src.agents.prompts import (
     RISK_ENGINE_SYSTEM_PROMPT,
     build_risk_engine_user_prompt
 )
-from src.agents.tools import GenerateProfileTool
+from src.agents.tools import GenerateProfileTool  # This now works via importlib in __init__.py
 from src.shared.types import ApplicantCreditProfile
 from src.core.knowledge_base import KnowledgeBase
 from src.ml.inference import CreditRiskModel

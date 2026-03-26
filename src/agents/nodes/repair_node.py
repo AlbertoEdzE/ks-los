@@ -23,7 +23,7 @@ import re
 import logging
 
 from src.agents.graph_state import AgenticOrchestratorState, Message
-from src.agents.tools.intent_extractor import IntentExtractorTool
+from src.agents.agent_tools.intent_extractor import IntentExtractorTool
 
 
 class RepairNode:

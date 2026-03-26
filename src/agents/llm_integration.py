@@ -48,7 +48,7 @@ import logging
 import json
 
 from src.agents.orchestrator import LNAIOrchestrator, CapturedContext, ConversationStage
-from src.agents.tools.intent_extractor import (
+from src.agents.agent_tools.intent_extractor import (
     IntentExtractorTool,
     IntentExtractionResult,
     extract_intent_from_conversation,

@@ -22,9 +22,9 @@ import logging
 import re
 
 from src.agents.graph_state import AgenticOrchestratorState, ConversationMode, Message
-from src.agents.tools.intent_extractor import IntentExtractorTool
+from src.agents.agent_tools.intent_extractor import IntentExtractorTool
 from src.agents.response_generator import ApplicationSubmissionStrategy
-from src.agents.tools.document_requirements import DocumentRequirementsTool
+from src.agents.agent_tools.document_requirements import DocumentRequirementsTool
 
 
 class ApplicationNode:
@@ -190,7 +190,7 @@ class ApplicationNode:
                 ]
             )
             
-            from src.agents.tools.intent_extractor import IntentExtractionResult
+            from src.agents.agent_tools.intent_extractor import IntentExtractionResult
             result = IntentExtractionResult.model_validate_json(extraction)
             
             # Update context with extracted data

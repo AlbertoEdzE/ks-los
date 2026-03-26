@@ -25,7 +25,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from src.agents.graph_state import AgenticOrchestratorState, ConversationMode, Message
 from src.agents.prompts import BORROWER_SYSTEM_PROMPT, RESPONSE_GENERATION_PROMPT
 from src.agents.structured_parser import parse_llm_response, IntentAnalysis
-from src.agents.tools.intent_extractor import IntentExtractorTool
+from src.agents.agent_tools.intent_extractor import IntentExtractorTool
 from src.agents.response_generator import (
     XMLTagResponseGenerator,
     IntentCaptureStrategy,
@@ -181,7 +181,7 @@ class AdvisoryNode:
             )
             
             # Parse extraction result
-            from src.agents.tools.intent_extractor import IntentExtractionResult
+            from src.agents.agent_tools.intent_extractor import IntentExtractionResult
             result = IntentExtractionResult.model_validate_json(extraction)
             
             # Update context with extracted data
@@ -238,7 +238,7 @@ class AdvisoryNode:
                 ]
             )
             
-            from src.agents.tools.intent_extractor import IntentExtractionResult
+            from src.agents.agent_tools.intent_extractor import IntentExtractionResult
             result = IntentExtractionResult.model_validate_json(extraction)
             
             # Update context
@@ -292,7 +292,7 @@ class AdvisoryNode:
                 ]
             )
             
-            from src.agents.tools.intent_extractor import IntentExtractionResult
+            from src.agents.agent_tools.intent_extractor import IntentExtractionResult
             result = IntentExtractionResult.model_validate_json(extraction)
             
             # Update context
