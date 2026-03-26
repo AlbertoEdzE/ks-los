@@ -1,6 +1,23 @@
 """
 Orchestrator Agent for KS-LOS v2.0
 
+⚠️  DEPRECATION NOTICE ⚠️
+This orchestrator is DEPRECATED and will be removed in v3.0.
+Use the new LangGraph-based agentic workflow instead:
+- src/agents/graph.py - Main agentic workflow
+- src/agents/nodes/ - Agentic nodes (advisory, application, completion)
+- src/agents/graph_state.py - New agentic state schema
+
+This file is maintained for backward compatibility during the transition period.
+All new development should use the agentic workflow.
+
+Migration Guide:
+    OLD: from src.agents.orchestrator import LNAIOrchestrator
+    NEW: from src.agents.graph import run_agentic_workflow
+    
+    OLD: orchestrator.process_message(message)
+    NEW: state = run_agentic_workflow(session_id, message)
+
 This orchestrator manages the complete borrower conversation flow,
 mimicking the Loan-Navigator-AI approach with structured XML tags
 and sequential card revelations.
@@ -15,10 +32,25 @@ Conversation Flow:
 7. Disbursement (confirmation)
 """
 
+import warnings
 from typing import Dict, List, Any, Optional, Literal
 from pydantic import BaseModel, Field
 from datetime import datetime
 import re
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Deprecation Warning
+# ─────────────────────────────────────────────────────────────────────────────
+
+warnings.warn(
+    "LNAIOrchestrator is deprecated and will be removed in KS-LOS v3.0. "
+    "Use the new LangGraph-based agentic workflow instead. "
+    "See src/agents/graph.py and src/agents/nodes/ for the new implementation. "
+    "Migration guide: https://github.com/ks-los/docs/migration-v3.md",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 
 class ConversationStage(str):
