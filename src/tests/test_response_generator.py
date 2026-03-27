@@ -16,13 +16,13 @@ from src.agents.response_generator import (
     ApplicationSubmissionStrategy,
     ResponseGeneratorFactory,
     generate_xml_response,
+    ConversationStage,
 )
-from src.agents.orchestrator import (
+from src.agents.graph_state import (
     CapturedContext,
     LoanSnapshot,
     LoanRecommendation,
     DocumentsChecklist,
-    ConversationStage,
 )
 from src.agents.structured_parser import IntentAnalysis, PhaseUpdate
 

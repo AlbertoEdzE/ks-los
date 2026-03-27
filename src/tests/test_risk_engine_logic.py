@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from langchain_core.documents import Document
-from src.agents.nodes import risk_engine_node
+from src.agents.nodes_legacy import risk_engine_node
 from src.shared.types import ApplicantCreditProfile, Identity, Address, CreditSummary, PaymentBehavior, TradeLine, Inquiry, Flags, Metadata
 from datetime import date
 
@@ -42,7 +42,7 @@ def create_test_profile(score=750, dti_debt=1000):
         associated_consumers=[]
     )
 
-@patch("src.agents.nodes.get_kb")
+@patch("src.agents.nodes_legacy.get_kb")
 def test_risk_engine_logic_approved(mock_get_kb):
     """
     Experiment 1: Super Prime Profile -> Should be Approved.
@@ -63,7 +63,7 @@ def test_risk_engine_logic_approved(mock_get_kb):
     print(f"Decision for 750 Score: {result['risk_decision']}")
     assert isinstance(result['risk_score'], float)
 
-@patch("src.agents.nodes.get_kb")
+@patch("src.agents.nodes_legacy.get_kb")
 def test_risk_engine_logic_declined(mock_get_kb):
     """
     Experiment 2: Subprime Profile -> Should be Declined/Manual Review.

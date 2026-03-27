@@ -240,13 +240,13 @@ class ApplicationNode:
         state.application_id = application_id
         
         # Generate documents checklist
-        checklist_result = self.doc_requirements.run(
+        checklist_result = self.doc_requirements._run(
             loan_type=context.purpose or "personal",
             employment_type=context.employment_type or "salaried",
             loan_amount=float(context.loan_amount) if isinstance(context.loan_amount, (int, float)) else None
         )
         
-        from src.agents.orchestrator import DocumentsChecklist
+        from src.agents.graph_state import DocumentsChecklist
         state.documents_checklist = DocumentsChecklist(**checklist_result)
         
         # Create loan record (if callback provided)

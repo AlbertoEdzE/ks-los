@@ -48,16 +48,14 @@ from src.agents.graph_state import (
     ConversationMode,
     create_initial_state,
     CapturedContext,
-    Message,
-    PhaseTransition,
-    DocumentWithExtraction,
-    DiscrepancyFlag,
-)
-from src.agents.orchestrator import (
     LoanSnapshot,
     LoanRecommendation,
     DocumentsChecklist,
     STPCheckpoint,
+    Message,
+    PhaseTransition,
+    DocumentWithExtraction,
+    DiscrepancyFlag,
 )
 from src.agents.structured_parser import IntentAnalysis
 

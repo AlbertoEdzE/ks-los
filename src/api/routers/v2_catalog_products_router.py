@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.api.routers.v2_auth import require_officer_role
+from src.shared.auth import require_officer_role
 from src.shared.audit import log_audit
 from src.shared.db import LoanProductCatalog, get_db
 from src.shared.metrics import request_counter, request_errors_total, v2_catalog_product_writes_total

@@ -306,7 +306,7 @@ class CompletionNode:
     
     def _initialize_stp_checkpoints(self) -> List[Dict]:
         """Initialize STP checkpoints"""
-        from src.agents.orchestrator import STPCheckpoint
+        from src.agents.graph_state import STPCheckpoint
         
         checkpoints = [
             STPCheckpoint(name="Identity Verification", status="pending"),

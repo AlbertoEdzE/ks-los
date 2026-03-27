@@ -1,8 +1,6 @@
 import json
 import logging
-# TEMPORARILY DISABLED - Old LangGraph workflow being phased out
-# from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AIMessage
-# from langgraph.prebuilt import ToolNode
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 
 from src.config.llm import get_llm
 from src.agents.state import AgentState
@@ -81,6 +79,102 @@ def journey_coach_node(state: AgentState):
     response = llm_with_tools.invoke(messages)
     return {"messages": [response]}
 
+
+def tool_node(state: AgentState):
+    messages = state["messages"]
+    last_message = messages[-1]
+
+    tool_calls = []
+    if getattr(last_message, "tool_calls", None):
+        tool_calls = list(last_message.tool_calls)
+    else:
+        additional = getattr(last_message, "additional_kwargs", None) or {}
+        if isinstance(additional, dict) and additional.get("tool_calls"):
+            tool_calls = list(additional["tool_calls"])
+
+    if not tool_calls:
+        user_text = ""
+        for m in reversed(messages):
+            if isinstance(m, HumanMessage):
+                user_text = m.content or ""
+                break
+        text = user_text.lower()
+        if "credit profile" in text or "generate a credit profile" in text:
+            import re
+
+            age = None
+            territory = None
+
+            m_age = re.search(r"\b(\d{2})\b", user_text)
+            if m_age:
+                try:
+                    age = int(m_age.group(1))
+                except Exception:
+                    age = None
+
+            m_territory = re.search(r"\(([A-Za-z]{2,3})\)", user_text)
+            if m_territory:
+                territory = m_territory.group(1).upper()
+            else:
+                m_territory2 = re.search(r"\bfrom\s+([A-Za-z]{2,3})\b", user_text, re.IGNORECASE)
+                if m_territory2:
+                    territory = m_territory2.group(1).upper()
+
+            if age is not None and territory:
+                tool_calls = [{"id": "heuristic_generate_credit_profile", "name": "generate_credit_profile", "args": {"age": age, "territory": territory}}]
+
+    if not tool_calls:
+        return {}
+
+    tools_by_name = {t.name: t for t in tools}
+    tool_messages: list[ToolMessage] = []
+
+    for call in tool_calls:
+        call_id = None
+        name = None
+        args = None
+
+        if isinstance(call, dict):
+            call_id = call.get("id")
+            name = call.get("name") or call.get("function", {}).get("name")
+            args = call.get("args") or call.get("function", {}).get("arguments")
+        else:
+            call_id = getattr(call, "id", None)
+            name = getattr(call, "name", None)
+            args = getattr(call, "args", None)
+
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                args = {}
+        if args is None:
+            args = {}
+
+        tool = tools_by_name.get(name)
+        if not tool:
+            tool_messages.append(
+                ToolMessage(
+                    content=json.dumps({"error": f"Unknown tool: {name}"}),
+                    tool_call_id=call_id or "unknown",
+                )
+            )
+            continue
+
+        try:
+            result = tool._run(**args)
+        except Exception as e:
+            result = json.dumps({"error": str(e)})
+
+        tool_messages.append(
+            ToolMessage(
+                content=result,
+                tool_call_id=call_id or name or "tool_call",
+            )
+        )
+
+    return {"messages": tool_messages}
+
 def risk_engine_node(state: AgentState):
     """
     Analyzes the credit profile using:
@@ -153,7 +247,12 @@ STP Tier: {calculated_metrics.get('stp_tier', 'N/A')}
 
     # 3. Construct Analysis Prompt (Ensemble Context)
     # We inject the ML score AND calculated metrics into the prompt
-    user_prompt = build_risk_engine_user_prompt(policy_context, profile)
+    user_prompt = build_risk_engine_user_prompt(
+        {
+            "policy_context": policy_context,
+            "profile": profile.model_dump() if hasattr(profile, "model_dump") else str(profile),
+        }
+    )
     user_prompt += f"\n\n{metrics_context}"
     user_prompt += f"\n\n--- PREDICTIVE MODEL ---"
     user_prompt += f"\nXGBoost Risk Score: {ml_score:.1f}/100"

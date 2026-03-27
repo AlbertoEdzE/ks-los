@@ -49,13 +49,6 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from enum import Enum
 
-from src.agents.orchestrator import (
-    CapturedContext,
-    LoanSnapshot,
-    LoanRecommendation,
-    DocumentsChecklist,
-    STPCheckpoint,
-)
 from src.agents.structured_parser import IntentAnalysis
 from src.core.document_intelligence import DocumentExtractionResult
 
@@ -124,6 +117,79 @@ class DiscrepancyFlag(BaseModel):
     severity: Literal["low", "medium", "high"]
     recommendation: str
     resolved: bool = False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Core Domain Models (V3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CapturedContext(BaseModel):
+    purpose: Optional[str] = None
+    property_value: Optional[float] = None
+    property_currency: str = "USD"
+    loan_amount: Optional[float] = None
+    down_payment: Optional[float] = None
+    down_payment_currency: str = "USD"
+    employment_type: Optional[str] = None
+    monthly_income: Optional[float] = None
+    income_currency: str = "USD"
+    existing_debts: Optional[float] = None
+    loan_tenure_years: Optional[int] = None
+    preferred_term: Optional[str] = None
+    credit_score: Optional[int] = None
+    credit_history: Optional[str] = None
+    has_existing_debts: Optional[bool] = None
+    property_location: Optional[str] = None
+    borrower_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    urgency: Optional[Literal["low", "medium", "high", "critical"]] = None
+    affordability: Optional[str] = None
+    preferred_tenure: Optional[str] = None
+    collateral_available: Optional[str] = None
+    seriousness_score: Optional[int] = None
+    fit_score: Optional[int] = None
+
+
+class LoanSnapshot(BaseModel):
+    loan_amount: float
+    down_payment: float
+    property_value: float
+    estimated_emi: float
+    tenure_years: int
+    interest_rate: float
+    total_interest: float
+    total_repayment: float
+    ltv_ratio: float
+    foir_ratio: Optional[float] = None
+    currency: str = "USD"
+
+
+class LoanRecommendation(BaseModel):
+    name: str
+    type: Literal["aggressive", "balanced", "conservative"]
+    interest_rate: float
+    tenure_years: int
+    monthly_emi: float
+    total_interest: float
+    total_repayment: float
+    pros: List[str]
+    cons: List[str]
+    recommended: bool = False
+
+
+class DocumentsChecklist(BaseModel):
+    identity: List[Dict[str, Any]] = Field(default_factory=list)
+    income: List[Dict[str, Any]] = Field(default_factory=list)
+    business: List[Dict[str, Any]] = Field(default_factory=list)
+    property: List[Dict[str, Any]] = Field(default_factory=list)
+    vehicle: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class STPCheckpoint(BaseModel):
+    name: str
+    status: Literal["pending", "processing", "passed", "failed"] = "pending"
+    details: Optional[str] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -348,7 +414,6 @@ class AgenticOrchestratorState(BaseModel):
         """
         required_fields = [
             "purpose",
-            "borrower_name",  # CRITICAL: Added per LNAI design - Step 1 must capture name
             "loan_amount",
             "monthly_income",
             "employment_type",
@@ -432,6 +497,11 @@ __all__ = [
     "PhaseTransition",
     "DocumentWithExtraction",
     "DiscrepancyFlag",
+    "CapturedContext",
+    "LoanSnapshot",
+    "LoanRecommendation",
+    "DocumentsChecklist",
+    "STPCheckpoint",
     "AgenticOrchestratorState",
     
     # Factory

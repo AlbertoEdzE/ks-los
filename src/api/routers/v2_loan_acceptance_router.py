@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.api.routers.v2_auth import is_officer_request, require_viewer_role
+from src.shared.auth import is_officer_request, require_viewer_role
 from src.shared.audit import log_audit
 from src.shared.db import Loan, LoanDocument, LoanPhase, Message, get_db
 from src.shared.metrics import request_counter, request_errors_total

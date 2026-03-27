@@ -15,13 +15,13 @@ This module ensures:
 from typing import Dict, List, Any, Optional, Literal
 from pydantic import BaseModel
 import json
+from enum import Enum
 
-from src.agents.orchestrator import (
+from src.agents.graph_state import (
     CapturedContext,
     LoanSnapshot,
     LoanRecommendation,
     DocumentsChecklist,
-    ConversationStage,
 )
 from src.agents.structured_parser import (
     IntentAnalysis,
@@ -32,6 +32,19 @@ from src.agents.structured_parser import (
 # ─────────────────────────────────────────────────────────────────────────────
 # Response Templates
 # ─────────────────────────────────────────────────────────────────────────────
+
+class ConversationStage(str, Enum):
+    INTENT_CAPTURE = "intent_capture"
+    FINANCIAL_CONTEXT = "financial_context"
+    READY_FOR_METRICS = "ready_for_metrics"
+    READY_FOR_RECOMMENDATION = "ready_for_recommendation"
+    APPLICANT_IDENTITY = "applicant_identity"
+    APPLICATION_SUBMITTED = "application_submitted"
+    STP_PROCESSING = "stp_processing"
+    TERMS_ACCEPTANCE = "terms_acceptance"
+    DISBURSEMENT = "disbursement"
+    COMPLETED = "completed"
+
 
 class ResponseTemplate(BaseModel):
     """Template for generating structured responses"""
@@ -287,8 +300,8 @@ class FinancialContextStrategy(ResponseStrategy):
         intent = IntentAnalysis(
             purpose=context.purpose,
             employment_type=context.employment_type,
-            monthly_income=f"${float(context.monthly_income):,}" if isinstance(context.monthly_income, (int, float)) else str(context.monthly_income) if context.monthly_income else None,
-            existing_debts=f"${context.existing_debts:,}" if context.existing_debts else None,
+            monthly_income=(f"${float(context.monthly_income):,}" if isinstance(context.monthly_income, (int, float)) else (str(context.monthly_income) if context.monthly_income else None)),
+            existing_debts=(f"${float(context.existing_debts):,}" if isinstance(context.existing_debts, (int, float)) else (str(context.existing_debts) if context.existing_debts else None)),
             seriousness_score=context.seriousness_score,
             fit_score=context.fit_score,
         )
@@ -320,8 +333,8 @@ class RecommendationStrategy(ResponseStrategy):
         
         intent = IntentAnalysis(
             purpose=context.purpose,
-            loan_amount=f"${context.loan_amount:,}" if context.loan_amount else None,
-            monthly_income=f"${float(context.monthly_income):,}" if isinstance(context.monthly_income, (int, float)) else str(context.monthly_income) if context.monthly_income else None,
+            loan_amount=(f"${float(context.loan_amount):,}" if isinstance(context.loan_amount, (int, float)) else (str(context.loan_amount) if context.loan_amount else None)),
+            monthly_income=(f"${float(context.monthly_income):,}" if isinstance(context.monthly_income, (int, float)) else (str(context.monthly_income) if context.monthly_income else None)),
             seriousness_score=context.seriousness_score,
             fit_score=context.fit_score,
             next_conversation_angle="Wait for borrower to select recommendation",

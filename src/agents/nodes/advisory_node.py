@@ -36,6 +36,8 @@ from src.core.calculation_engines import (
     compute_reducing_emi,
     compute_affordability,
     compute_credit_risk,
+    compute_collateral_metrics,
+    compute_file_completeness,
 )
 
 
@@ -83,6 +85,16 @@ class AdvisoryNode:
         self.response_generator = XMLTagResponseGenerator()
         
         self.logger = logging.getLogger(__name__)
+    
+    def _to_float(self, value: Any) -> float:
+        try:
+            if isinstance(value, (int, float)):
+                return float(value)
+            if isinstance(value, str):
+                return float(value.replace(",", "").replace("$", "").strip())
+        except Exception:
+            pass
+        return 0.0
     
     def process(self, state: AgenticOrchestratorState) -> AgenticOrchestratorState:
         """
@@ -447,9 +459,9 @@ class AdvisoryNode:
         # Compute Loan Metrics (Deterministic - NO LLM)
         # ──────────────────────────────────────────────────────────────────
         
-        loan_amount = float(context.loan_amount) if isinstance(context.loan_amount, (int, float)) else 0
-        monthly_income = float(context.monthly_income) if isinstance(context.monthly_income, (int, float)) else 0
-        existing_debts = float(context.existing_debts) if isinstance(context.existing_debts, (int, float)) else 0
+        loan_amount = self._to_float(context.loan_amount)
+        monthly_income = self._to_float(context.monthly_income)
+        existing_debts = self._to_float(context.existing_debts)
         
         # Compute EMI for different tenure options
         base_rate = 0.085  # 8.5% base rate
@@ -472,20 +484,52 @@ class AdvisoryNode:
         # Compute affordability metrics
         affordability = compute_affordability(
             monthly_income=monthly_income,
-            existing_emi=existing_debts,
+            existing_emi_total=existing_debts,
             proposed_emi=emi_results[1]["emi"]  # Middle option
         )
+        
+        # Compute collateral metrics (if any)
+        property_value = float(context.property_value) if isinstance(context.property_value, (int, float)) else 0.0
+        down_payment = float(context.down_payment) if isinstance(context.down_payment, (int, float)) else 0.0
+        has_collateral = property_value > 0.0
+        collateral = compute_collateral_metrics(
+            loan_amount=loan_amount,
+            collateral_value=property_value,
+            haircut_percent=15.0,
+            security_type="property" if has_collateral else "none",
+            down_payment=down_payment
+        )
+        
+        # Compute completeness score from available context
+        loan_data = {
+            "borrower_name": context.borrower_name,
+            "loan_type": (context.purpose or "").strip() or "personal",
+            "loan_amount": loan_amount,
+            "purpose": context.purpose,
+            "employment_type": context.employment_type,
+            "monthly_income": monthly_income,
+            "existing_debts": existing_debts,
+            "credit_score": context.credit_score or None,
+            "collateral": "yes" if has_collateral else "no",
+            "down_payment": down_payment,
+            "property_value": property_value,
+        }
+        completeness_score = compute_file_completeness(loan_data)
+        credit_score = context.credit_score if isinstance(context.credit_score, int) else 650
+        loan_type = (context.purpose or "").strip() or "personal"
         
         # Compute credit risk
         credit_risk = compute_credit_risk(
             affordability=affordability,
-            collateral=None,  # Will be populated later
-            credit_score=None,  # Will be populated from bureau
-            completeness_score=0.8
+            collateral=collateral,
+            credit_score=credit_score,
+            completeness_score=completeness_score,
+            loan_type=loan_type,
+            has_collateral=has_collateral,
         )
         
         # Create loan snapshot
-        from src.agents.orchestrator import LoanSnapshot
+        from src.agents.graph_state import LoanSnapshot
         
         state.loan_snapshot = LoanSnapshot(
             loan_amount=loan_amount,
@@ -497,14 +541,14 @@ class AdvisoryNode:
             total_interest=emi_results[1]["total_interest"],
             total_repayment=emi_results[1]["total_repayment"],
             ltv_ratio=100.0,  # Will be updated for home loans
-            foir_ratio=affordability.foir * 100 if hasattr(affordability, 'foir') else None,
+            foir_ratio=affordability.foir if hasattr(affordability, 'foir') else None,
         )
         
         # ──────────────────────────────────────────────────────────────────
         # Generate Recommendations (from product catalog or default)
         # ──────────────────────────────────────────────────────────────────
         
-        from src.agents.orchestrator import LoanRecommendation
+        from src.agents.graph_state import LoanRecommendation
         
         state.recommendations = [
             LoanRecommendation(

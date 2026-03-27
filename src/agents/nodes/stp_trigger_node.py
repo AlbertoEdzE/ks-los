@@ -22,7 +22,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 import logging
 
-from src.agents.orchestrator import OrchestratorState, ConversationStage
+from src.agents.graph_state import AgenticOrchestratorState
 from src.core.document_intelligence import DocumentType
 
 
@@ -74,7 +74,7 @@ class STPTriggerNode:
     
     def check_eligibility(
         self,
-        state: OrchestratorState
+        state: AgenticOrchestratorState
     ) -> Tuple[bool, str]:
         """
         Check if application is eligible for STP.
@@ -123,7 +123,7 @@ class STPTriggerNode:
     
     def should_trigger(
         self,
-        state: OrchestratorState
+        state: AgenticOrchestratorState
     ) -> bool:
         """
         Check if STP should be triggered now.
@@ -145,7 +145,7 @@ class STPTriggerNode:
     
     def trigger(
         self,
-        state: OrchestratorState
+        state: AgenticOrchestratorState
     ) -> Dict[str, Any]:
         """
         Trigger STP processing.
@@ -158,14 +158,14 @@ class STPTriggerNode:
         """
         self.logger.info("Triggering STP processing")
         
-        # Update state to STP processing stage
-        state.stage = ConversationStage.STP_PROCESSING
+        state.stp_status = "processing"
+        state.current_stage = "stp_processing"
         
         # Return trigger result
         return {
             "success": True,
             "message": "STP processing initiated",
-            "stage": state.stage.value,
+            "stage": state.current_stage,
         }
     
     def _get_loan_limit(self, purpose: str) -> float:
@@ -224,7 +224,7 @@ class STPTriggerNode:
 # Convenience Function
 # ─────────────────────────────────────────────────────────────────────────────
 
-def check_stp_eligibility(state: OrchestratorState) -> Tuple[bool, str]:
+def check_stp_eligibility(state: AgenticOrchestratorState) -> Tuple[bool, str]:
     """
     Convenience function to check STP eligibility.
     
@@ -238,7 +238,7 @@ def check_stp_eligibility(state: OrchestratorState) -> Tuple[bool, str]:
     return node.check_eligibility(state)
 
 
-def trigger_stp_if_eligible(state: OrchestratorState) -> Tuple[bool, Dict[str, Any]]:
+def trigger_stp_if_eligible(state: AgenticOrchestratorState) -> Tuple[bool, Dict[str, Any]]:
     """
     Check eligibility and trigger STP if eligible.
     

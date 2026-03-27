@@ -23,10 +23,14 @@ from src.agents.graph_state import (
     ConversationMode,
     create_initial_state,
     Message,
+    CapturedContext,
 )
 # Import nodes directly to avoid langgraph dependency
 from src.core.document_intelligence import DocumentIntelligence, extract_from_image
-from src.agents.orchestrator import CapturedContext
+from src.agents.nodes.application_node import ApplicationNode
+from src.agents.nodes.completion_node import CompletionNode
+from src.agents.nodes.document_processor_node import DocumentProcessorNode
+from src.agents.nodes.stp_trigger_node import check_stp_eligibility
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,6 +65,7 @@ class TestCompleteBorrowerJourney:
         """Setup test fixtures"""
         self.state = create_initial_state(session_id="test-session-001")
         self.doc_intelligence = DocumentIntelligence()
+        self.doc_processor = DocumentProcessorNode()
     
     def test_advisory_mode_simulation(self):
         """Test advisory mode flow simulation"""

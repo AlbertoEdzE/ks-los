@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from src.agents.nodes import risk_engine_node
+from src.agents.nodes_legacy import risk_engine_node
 from src.shared.types import ApplicantCreditProfile, Identity, Address, CreditSummary, PaymentBehavior, TradeLine, Inquiry, Flags, Metadata
 from datetime import date
 import json
@@ -22,9 +22,9 @@ def create_test_profile(score=700):
         associated_consumers=[]
     )
 
-@patch("src.agents.nodes.get_kb")
-@patch("src.agents.nodes.get_ml_model")
-@patch("src.agents.nodes.llm")
+@patch("src.agents.nodes_legacy.get_kb")
+@patch("src.agents.nodes_legacy.get_ml_model")
+@patch("src.agents.nodes_legacy.llm")
 def test_risk_engine_ensemble_logic(mock_llm, mock_get_ml, mock_get_kb):
     """
     Test that ML probability is used in the prompt and decision logic.

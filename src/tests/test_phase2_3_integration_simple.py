@@ -15,7 +15,7 @@ from src.agents.graph_state import (
     create_initial_state,
 )
 from src.core.document_intelligence import DocumentIntelligence
-from src.agents.orchestrator import CapturedContext
+from src.agents.graph_state import CapturedContext
 
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"

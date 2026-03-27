@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
-from src.api.routers.v2_auth import require_officer_role, require_viewer_role
+from src.shared.auth import require_officer_role, require_viewer_role
 from src.shared.audit import log_audit
 from src.shared.db import Conversation, Loan, LoanPhase, get_db
 from src.shared.metrics import request_counter, request_errors_total, v2_phase_actions_total

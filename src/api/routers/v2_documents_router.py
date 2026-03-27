@@ -11,12 +11,26 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.api.routers.v2_auth import is_officer_request, require_viewer_role
+from src.shared.auth import API_KEYS, ENFORCE_RBAC, ROLE_ORDER, get_presented_token, get_role_for_token, require_role
 from src.shared.audit import log_audit
 from src.shared.db import Loan, LoanDocument, get_db
 from src.shared.metrics import request_counter, request_errors_total
 
-router = APIRouter(prefix="/api/documents", tags=["v2-documents"], dependencies=[Depends(require_viewer_role)])
+router = APIRouter(prefix="/api/documents", tags=["v2-documents"], dependencies=[Depends(require_role("viewer"))])
+
+
+def _is_officer_request(x_api_key: str | None, authorization: str | None) -> bool:
+    token = get_presented_token(x_api_key, authorization)
+    if ENFORCE_RBAC and API_KEYS:
+        if not token:
+            return False
+        role = get_role_for_token(token)
+        if not role:
+            return False
+        return ROLE_ORDER[role] >= ROLE_ORDER["operator"]
+    dev_officer = os.getenv("DEV_OFFICER_TOKEN", "loan-officer-access")
+    dev_admin = os.getenv("DEV_ADMIN_TOKEN", "admin-access")
+    return token in (dev_officer, dev_admin)
 
 
 def _now_iso() -> str:
@@ -170,7 +184,7 @@ def _require_loan_access(
     loan = db.get(Loan, loan_id)
     if not loan:
         raise HTTPException(status_code=404, detail="Loan not found")
-    if is_officer_request(x_api_key, authorization):
+    if _is_officer_request(x_api_key, authorization):
         return loan
     if not conversation_id or not loan.conversation_id or conversation_id != loan.conversation_id:
         raise HTTPException(status_code=403, detail="Not authorized")
@@ -246,7 +260,7 @@ async def upload_document(
     elif extraction_error:
         extraction_meta = {"status": "error", "error": extraction_error}
 
-    uploaded_by = "officer" if is_officer_request(x_api_key, authorization) else "borrower"
+    uploaded_by = "officer" if _is_officer_request(x_api_key, authorization) else "borrower"
     doc = LoanDocument(
         id=doc_uuid,
         loan_id=loan.id,
@@ -275,7 +289,7 @@ async def upload_document(
 
     try:
         status_now = (loan.stp_processing_status or "").strip().lower()
-        if status_now in {"", "awaiting_documents"} and not is_officer_request(x_api_key, authorization):
+        if status_now in {"", "awaiting_documents"} and not _is_officer_request(x_api_key, authorization):
             docs = (
                 db.execute(select(LoanDocument).where(LoanDocument.loan_id == loan.id).order_by(LoanDocument.uploaded_at.desc(), LoanDocument.id.desc()))
                 .scalars()
@@ -465,7 +479,7 @@ def review_document(
     db: Session = Depends(get_db),
 ):
     request_counter.labels(endpoint="/api/documents/{id}/review").inc()
-    if not is_officer_request(x_api_key, authorization):
+    if not _is_officer_request(x_api_key, authorization):
         request_errors_total.labels(endpoint="/api/documents/{id}/review").inc()
         raise HTTPException(status_code=403, detail="Not authorized")
 

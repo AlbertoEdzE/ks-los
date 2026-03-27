@@ -4,7 +4,7 @@ import os
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.api.routers.v2_auth import require_officer_role
+from src.shared.auth import require_role
 from src.shared.db import AuditEvent, get_db
 from src.shared.metrics import (
     drift_runs_total,
@@ -36,7 +36,7 @@ def _sum_counter(counter) -> float:
         return 0.0
 
 @router.get("/summary")
-def summary(_: bool = Depends(require_officer_role)) -> Dict[str, Any]:
+def summary(_: bool = Depends(require_role("operator"))) -> Dict[str, Any]:
     return {
         "training_runs": training_runs_total._value.get(),
         "drift_runs": drift_runs_total._value.get(),
@@ -61,7 +61,7 @@ def list_audit_events(
     correlationId: str | None = Query(default=None),
     event: str | None = Query(default=None),
     status: str | None = Query(default=None),
-    _: bool = Depends(require_officer_role),
+    _: bool = Depends(require_role("operator")),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     stmt = select(AuditEvent)

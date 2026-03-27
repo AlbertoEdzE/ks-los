@@ -8,7 +8,7 @@ from src.ml.drift import run_drift_check
 from src.ml.training_manager import training_manager
 from src.ml.inference import CreditRiskModel
 from src.shared.metrics import request_counter, training_runs_total, drift_runs_total
-from src.api.routers.v2_auth import require_officer_role
+from src.shared.auth import require_role
 from src.shared.audit import log_audit
 
 router = APIRouter(prefix="/training", tags=["training"])
@@ -28,7 +28,7 @@ class BatchTestRequest(BaseModel):
     samples: List[Dict[str, Any]]
 
 @router.post("/plan")
-def generate_plan(ctx: TrainingContext, _: bool = Depends(require_officer_role)) -> Dict[str, Any]:
+def generate_plan(ctx: TrainingContext, _: bool = Depends(require_role("operator"))) -> Dict[str, Any]:
     try:
         request_counter.labels(endpoint="/training/plan").inc()
         plan = propose_training_plan(context=ctx.model_dump())
@@ -40,7 +40,7 @@ def generate_plan(ctx: TrainingContext, _: bool = Depends(require_officer_role))
         raise HTTPException(status_code=500, detail="Plan generation failed")
 
 @router.post("/execute")
-def run_training(plan: TrainingPlan, background_tasks: BackgroundTasks, _: bool = Depends(require_officer_role)) -> Dict[str, Any]:
+def run_training(plan: TrainingPlan, background_tasks: BackgroundTasks, _: bool = Depends(require_role("operator"))) -> Dict[str, Any]:
     try:
         request_counter.labels(endpoint="/training/execute").inc()
         training_runs_total.inc()
@@ -65,11 +65,11 @@ def run_training(plan: TrainingPlan, background_tasks: BackgroundTasks, _: bool 
         raise HTTPException(status_code=500, detail="Training failed")
 
 @router.get("/status")
-def get_status(_: bool = Depends(require_officer_role)) -> Dict[str, Any]:
+def get_status(_: bool = Depends(require_role("operator"))) -> Dict[str, Any]:
     return training_manager.get_status()
 
 @router.post("/test")
-def batch_test(req: BatchTestRequest, _: bool = Depends(require_officer_role)) -> Dict[str, Any]:
+def batch_test(req: BatchTestRequest, _: bool = Depends(require_role("operator"))) -> Dict[str, Any]:
     try:
         model = CreditRiskModel()
         results = []
@@ -98,7 +98,7 @@ def batch_test(req: BatchTestRequest, _: bool = Depends(require_officer_role)) -
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/drift")
-def run_drift(_: bool = Depends(require_officer_role)) -> Dict[str, Any]:
+def run_drift(_: bool = Depends(require_role("operator"))) -> Dict[str, Any]:
     try:
         request_counter.labels(endpoint="/training/drift").inc()
         drift_runs_total.inc()
@@ -111,7 +111,7 @@ def run_drift(_: bool = Depends(require_officer_role)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/metrics")
-def get_current_model_metrics(_: bool = Depends(require_officer_role)) -> Dict[str, Any]:
+def get_current_model_metrics(_: bool = Depends(require_role("operator"))) -> Dict[str, Any]:
     """
     Returns metrics for the currently loaded model.
     Since we don't store live metrics in memory persistently across restarts (unless using a DB),
@@ -150,7 +150,7 @@ def get_current_model_metrics(_: bool = Depends(require_officer_role)) -> Dict[s
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/drift/report")
-def get_drift_report(_: bool = Depends(require_officer_role)) -> Response:
+def get_drift_report(_: bool = Depends(require_role("operator"))) -> Response:
     try:
         path = "doc/04_documentation/phase_4/drift_report.html"
         with open(path, "r", encoding="utf-8") as f:

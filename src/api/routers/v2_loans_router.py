@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.api.routers.v2_auth import require_officer_role
+from src.shared.auth import require_officer_role
 from src.shared.audit import log_audit
 from src.shared.db import Loan, LoanProductCatalog, get_db
 from src.shared.metrics import (

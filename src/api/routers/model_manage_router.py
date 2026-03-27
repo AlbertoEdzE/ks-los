@@ -2,14 +2,14 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any
 import logging
 from src.ml.inference import CreditRiskModel
-from src.api.routers.v2_auth import require_admin_role, require_officer_role
+from src.shared.auth import require_role
 from src.shared.audit import log_audit
 
 router = APIRouter(prefix="/model", tags=["model"])
 logger = logging.getLogger(__name__)
 
 @router.post("/reload")
-def reload_model(_: bool = Depends(require_admin_role)) -> Dict[str, Any]:
+def reload_model(_: bool = Depends(require_role("admin"))) -> Dict[str, Any]:
     try:
         success = CreditRiskModel().reload_model()
         if success:
@@ -24,7 +24,7 @@ def reload_model(_: bool = Depends(require_admin_role)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/rollback")
-def rollback_model(_: bool = Depends(require_admin_role)) -> Dict[str, Any]:
+def rollback_model(_: bool = Depends(require_role("admin"))) -> Dict[str, Any]:
     try:
         success, message = CreditRiskModel().rollback()
         if success:
@@ -41,7 +41,7 @@ def rollback_model(_: bool = Depends(require_admin_role)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/versions")
-def list_versions(_: bool = Depends(require_officer_role)) -> Dict[str, Any]:
+def list_versions(_: bool = Depends(require_role("operator"))) -> Dict[str, Any]:
     try:
         versions = CreditRiskModel().list_versions()
         return {"versions": versions}
@@ -50,7 +50,7 @@ def list_versions(_: bool = Depends(require_officer_role)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/status")
-def get_model_status(_: bool = Depends(require_officer_role)) -> Dict[str, Any]:
+def get_model_status(_: bool = Depends(require_role("operator"))) -> Dict[str, Any]:
     model_instance = CreditRiskModel()
     model = model_instance._model
     return {

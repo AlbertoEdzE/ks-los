@@ -253,7 +253,7 @@ fi
 echo "[KS LOS] Starting FastAPI (backend) on :$BACKEND_PORT..."
 
 export LOG_JSON=1
-export OTLP_URL="http://localhost:4317"
+export OTLP_URL="localhost:4317"
 export ENFORCE_RBAC=0
 export MLFLOW_TRACKING_URI="http://localhost:$MLFLOW_PORT"
 export OLLAMA_MODEL="${OLLAMA_MODEL}"
@@ -325,8 +325,8 @@ fi
 echo "[KS LOS] Stack URLs:"
 echo "  API:        http://localhost:$BACKEND_PORT/health"
 echo "  Metrics:    http://localhost:$BACKEND_PORT/metrics"
-echo "  Observability Summary: http://localhost:$BACKEND_PORT/observability/summary"
+echo "  Observability Summary (Authorization: Bearer ${DEV_OFFICER_TOKEN:-loan-officer-access}): http://localhost:$BACKEND_PORT/observability/summary"
 echo "  MLflow:     http://localhost:$MLFLOW_PORT/"
 echo "  Prometheus: http://localhost:9090/"
 echo "  Grafana:    http://localhost:3000/"
-echo "  Drift Report: http://localhost:$BACKEND_PORT/training/drift/report"
+echo "  Drift Report (Authorization: Bearer ${DEV_OFFICER_TOKEN:-loan-officer-access}): http://localhost:$BACKEND_PORT/training/drift/report"

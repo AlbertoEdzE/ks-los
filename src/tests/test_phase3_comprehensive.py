@@ -27,8 +27,10 @@ from src.agents.graph_state import (
     ConversationMode,
     create_initial_state,
     Message,
+    CapturedContext,
+    LoanSnapshot,
+    LoanRecommendation,
 )
-from src.agents.orchestrator import CapturedContext, LoanSnapshot, LoanRecommendation
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -467,42 +469,6 @@ class TestAgenticStateManagement:
         print(f"\nConfidence Tracking Test:")
         print(f"  Advisory avg: {avg_advisory:.2f}")
         print(f"  Application avg: {avg_application:.2f}")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Migration Tests
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestMigration:
-    """Test migration utilities"""
-    
-    def test_migration_status(self):
-        """Test migration status check"""
-        from src.agents.migration import check_deprecation_status
-        
-        status = check_deprecation_status()
-        
-        assert "deprecated_in" in status
-        assert "removal_version" in status
-        assert "migration_guide" in status
-        
-        print(f"\nMigration Status Test:")
-        print(f"  Deprecated in: {status['deprecated_in']}")
-        print(f"  Removal: {status['removal_version']}")
-    
-    def test_migration_module_exists(self):
-        """Test migration module is available"""
-        import importlib
-        
-        module = importlib.import_module("src.agents.migration")
-        
-        assert hasattr(module, "migrate_orchestrator_state")
-        assert hasattr(module, "create_migration_wrapper")
-        assert hasattr(module, "check_deprecation_status")
-        
-        print(f"\nMigration Module Test:")
-        print(f"  Module loaded: ✓")
-        print(f"  Functions available: ✓")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

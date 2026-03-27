@@ -68,30 +68,66 @@ class V3MessageResponse(BaseModel):
     message: Optional[Dict[str, Any]] = None
 
 
+class ConversationPatchRequest(BaseModel):
+    borrowerName: Optional[str] = None
+    assignedOfficer: Optional[str] = None
+    status: Optional[str] = None
+
+
+def _serialize_conversation(conversation: Conversation) -> Dict[str, Any]:
+    return {
+        "id": conversation.id,
+        "borrowerName": conversation.borrower_name,
+        "status": conversation.status,
+        "chatRole": conversation.chat_role,
+        "currentPhaseId": conversation.current_phase_id,
+        "seriousnessScore": conversation.seriousness_score,
+        "fitScore": conversation.fit_score,
+        "intentSummary": conversation.intent_summary,
+        "approvalProbability": conversation.approval_probability,
+        "recommendedProducts": conversation.recommended_products,
+        "nextConversationAngle": conversation.next_conversation_angle,
+        "assignedOfficer": conversation.assigned_officer,
+        "createdAt": conversation.created_at.isoformat() if conversation.created_at else None,
+    }
+
+
+@router.get("/", response_model=List[Dict[str, Any]])
+async def list_conversations(db: Session = Depends(get_db)):
+    rows = (
+        db.query(Conversation)
+        .order_by(Conversation.created_at.desc(), Conversation.id.asc())
+        .all()
+    )
+    return [_serialize_conversation(r) for r in rows]
+
+
 @router.post("/", response_model=Dict[str, Any])
-async def create_conversation(request: V3ConversationRequest):
+async def create_conversation(request: V3ConversationRequest, db: Session = Depends(get_db)):
     """Create a new agentic conversation - returns v2-compatible format"""
     session_id = request.session_id or str(uuid.uuid4())
     state = get_or_create_state(session_id, request.borrower_name)
     
-    # Return v2-compatible conversation object
-    conversation = {
-        "id": session_id,
-        "borrowerName": request.borrower_name,
-        "status": "active",
-        "chatRole": "borrower",
-        "currentPhaseId": None,
-        "seriousnessScore": None,
-        "fitScore": None,
-        "intentSummary": None,
-        "recommendedProducts": None,
-        "nextConversationAngle": "Ask about loan purpose",
-        "assignedOfficer": None,
-        "userId": None,
-        "createdAt": datetime.now().isoformat(),
-    }
+    existing = db.get(Conversation, session_id)
+    if existing is None:
+        existing = Conversation(
+            id=session_id,
+            borrower_name=request.borrower_name,
+            status="active",
+            chat_role="borrower",
+            next_conversation_angle="Ask about loan purpose",
+        )
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+    else:
+        if request.borrower_name and not existing.borrower_name:
+            existing.borrower_name = request.borrower_name
+            db.add(existing)
+            db.commit()
+            db.refresh(existing)
     
-    return {"conversation": conversation}
+    return {"conversation": _serialize_conversation(existing)}
 
 
 @router.post("/{session_id}/messages", response_model=V3MessageResponse)
@@ -229,29 +265,46 @@ async def send_message(session_id: str, request: V3MessageRequest):
 
 
 @router.get("/{session_id}", response_model=Dict[str, Any])
-async def get_conversation(session_id: str):
+async def get_conversation(session_id: str, db: Session = Depends(get_db)):
     """
-    Get conversation state from database.
-    
-    Phase 1: Uses database-backed persistence instead of in-memory store.
+    Get conversation metadata in a v2-compatible format.
     """
-    state = get_state(session_id)
-    
-    if state is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = db.get(Conversation, session_id)
+    if conv is None:
+        state = get_state(session_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        conv = Conversation(
+            id=session_id,
+            borrower_name=state.captured_context.borrower_name if state.captured_context else None,
+            status="active",
+            chat_role="borrower",
+            next_conversation_angle="Ask about loan purpose",
+        )
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+    return _serialize_conversation(conv)
 
-    return {
-        "session_id": session_id,
-        "mode": state.mode.value,
-        "stage": state.current_stage,
-        "captured_context": state.captured_context.model_dump() if state.captured_context else None,
-        "confidence_scores": state.confidence_scores,
-        "application_id": state.application_id,
-        "stp_status": state.stp_status,
-        "message_count": len(state.conversation_history),
-        "created_at": state.created_at.isoformat() if state.created_at else None,
-        "updated_at": state.updated_at.isoformat() if state.updated_at else None,
-    }
+
+@router.patch("/{session_id}", response_model=Dict[str, Any])
+async def patch_conversation(session_id: str, payload: ConversationPatchRequest, db: Session = Depends(get_db)):
+    conv = db.get(Conversation, session_id)
+    if conv is None:
+        conv = Conversation(id=session_id)
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+    if payload.borrowerName is not None:
+        conv.borrower_name = payload.borrowerName
+    if payload.assignedOfficer is not None:
+        conv.assigned_officer = payload.assignedOfficer
+    if payload.status is not None:
+        conv.status = payload.status
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return _serialize_conversation(conv)
 
 
 @router.delete("/{session_id}")

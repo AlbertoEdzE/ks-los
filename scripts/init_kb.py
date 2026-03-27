@@ -27,8 +27,8 @@ def main():
             kb.ingest_document(policy_path)
             logger.info("Policy ingested successfully.")
         else:
-            logger.error(f"Policy file not found at {policy_path}")
-            sys.exit(1)
+            logger.warning(f"Policy file not found at {policy_path}. Skipping KB policy ingest.")
+            return
             
     except Exception as e:
         logger.error(f"Knowledge Base initialization failed: {e}")

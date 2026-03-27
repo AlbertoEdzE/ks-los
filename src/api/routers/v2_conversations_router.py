@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-from src.api.routers.v2_auth import is_officer_request, require_officer_role, require_viewer_role
+from src.shared.auth import is_officer_request, require_officer_role, require_viewer_role
 from src.config.llm import get_llm, is_ollama_available
 from src.shared.audit import log_audit
 from src.shared.db import Conversation, Loan, LoanDocument, LoanPhase, Message, LoanProductCatalog, get_db

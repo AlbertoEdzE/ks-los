@@ -8,7 +8,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from langchain.schema import AIMessage
 
-from src.agents.tools.intent_extractor import (
+from src.agents.agent_tools.intent_extractor import (
     IntentExtractorTool,
     IntentExtractionInput,
     IntentExtractionResult,
@@ -182,7 +182,7 @@ class TestIntentExtractorTool:
         
         assert extracted == '{"purpose": "home_purchase"}'
     
-    @patch('src.agents.tools.intent_extractor.ChatOllama')
+    @patch('src.agents.agent_tools.intent_extractor.ChatOllama')
     def test_call_llm(self, mock_chat_ollama_class):
         """Test LLM calling (mocked)"""
         # Setup mock
@@ -247,7 +247,7 @@ class TestIntentExtractorTool:
         
         assert confidence["purpose"] == 0.0
     
-    @patch('src.agents.tools.intent_extractor.ChatOllama')
+    @patch('src.agents.agent_tools.intent_extractor.ChatOllama')
     def test_run_successful_extraction(self, mock_chat_ollama_class):
         """Test successful intent extraction (mocked LLM)"""
         # Setup mock
@@ -280,7 +280,7 @@ class TestIntentExtractorTool:
         assert result.confidence > 0.5
         assert result.parse_errors is None
     
-    @patch('src.agents.tools.intent_extractor.ChatOllama')
+    @patch('src.agents.agent_tools.intent_extractor.ChatOllama')
     def test_run_with_markdown_response(self, mock_chat_ollama_class):
         """Test handling of markdown-formatted JSON response"""
         mock_llm = Mock()
@@ -307,7 +307,7 @@ class TestIntentExtractorTool:
         assert result.context.purpose == "auto_loan"
         assert result.context.loan_amount == "$50,000"
     
-    @patch('src.agents.tools.intent_extractor.IntentExtractorTool._call_llm')
+    @patch('src.agents.agent_tools.intent_extractor.IntentExtractorTool._call_llm')
     def test_run_with_invalid_json(self, mock_call_llm):
         """Test handling of invalid JSON (no mock, tests error handling)"""
         mock_call_llm.return_value = '{invalid json}'
@@ -320,7 +320,7 @@ class TestIntentExtractorTool:
         assert result.confidence == 0.0
         assert result.parse_errors is not None
     
-    @patch('src.agents.tools.intent_extractor.ChatOllama')
+    @patch('src.agents.agent_tools.intent_extractor.ChatOllama')
     def test_run_with_partial_data(self, mock_chat_ollama_class):
         """Test extraction with partial information"""
         mock_llm = Mock()
@@ -345,7 +345,7 @@ class TestIntentExtractorTool:
 class TestConvenienceFunction:
     """Test extract_intent_from_conversation convenience function"""
     
-    @patch('src.agents.tools.intent_extractor.IntentExtractorTool')
+    @patch('src.agents.agent_tools.intent_extractor.IntentExtractorTool')
     def test_extract_intent_from_conversation(self, mock_tool_class):
         """Test convenience function"""
         # Setup mock
@@ -371,7 +371,7 @@ class TestConvenienceFunction:
 class TestIntegration:
     """Integration tests with realistic conversation scenarios"""
     
-    @patch('src.agents.tools.intent_extractor.ChatOllama')
+    @patch('src.agents.agent_tools.intent_extractor.ChatOllama')
     def test_full_conversation_extraction(self, mock_chat_ollama_class):
         """Test extraction from multi-turn conversation"""
         mock_llm = Mock()

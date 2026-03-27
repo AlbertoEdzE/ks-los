@@ -13,27 +13,15 @@ Usage:
 """
 
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
 import logging
 
-from src.agents.orchestrator import CapturedContext, OrchestratorState
+from src.agents.graph_state import AgenticOrchestratorState, CapturedContext, DiscrepancyFlag
 from src.core.document_intelligence import (
     DocumentExtractionResult,
     PaySlipFields,
     BankStatementFields,
     IDFields,
 )
-
-
-@dataclass
-class DiscrepancyFlag:
-    """Represents a discrepancy between extracted and declared data"""
-    field_name: str
-    declared_value: Any
-    extracted_value: Any
-    variance_percent: float
-    severity: str  # "low", "medium", "high"
-    recommendation: str
 
 
 class DocumentProcessorNode:
@@ -64,9 +52,9 @@ class DocumentProcessorNode:
     
     def process(
         self,
-        state: OrchestratorState,
+        state: AgenticOrchestratorState,
         extraction_results: List[DocumentExtractionResult]
-    ) -> OrchestratorState:
+    ) -> AgenticOrchestratorState:
         """
         Process extracted documents and update state.
         
@@ -87,16 +75,19 @@ class DocumentProcessorNode:
             
             # Auto-populate based on document type
             if result.document_type.value in ["pay_slip", "job_letter"]:
-                self._process_income_document(context, result, flags)
+                self._process_income_document(state, context, result, flags)
             
             elif result.document_type.value == "bank_statement":
-                self._process_bank_statement(context, result, flags)
+                self._process_bank_statement(state, context, result, flags)
             
             elif result.document_type.value in ["national_id", "passport"]:
-                self._process_id_document(context, result, flags)
+                self._process_id_document(state, context, result, flags)
         
         # Store flags in state
         state.captured_context = context
+        state.discrepancy_flags.extend(flags)
+        if any(f.severity == "high" for f in flags):
+            state.requires_manual_review = True
         
         # Log summary
         self.logger.info(
@@ -108,6 +99,7 @@ class DocumentProcessorNode:
     
     def _process_income_document(
         self,
+        state: AgenticOrchestratorState,
         context: CapturedContext,
         result: DocumentExtractionResult,
         flags: List[DiscrepancyFlag]
@@ -148,10 +140,11 @@ class DocumentProcessorNode:
         
         # Update field confidence
         if fields.gross_pay:
-            context.field_confidence["monthly_income"] = result.confidence
+            state.confidence_scores["monthly_income"] = result.confidence
     
     def _process_bank_statement(
         self,
+        state: AgenticOrchestratorState,
         context: CapturedContext,
         result: DocumentExtractionResult,
         flags: List[DiscrepancyFlag]
@@ -183,6 +176,7 @@ class DocumentProcessorNode:
     
     def _process_id_document(
         self,
+        state: AgenticOrchestratorState,
         context: CapturedContext,
         result: DocumentExtractionResult,
         flags: List[DiscrepancyFlag]
@@ -240,9 +234,9 @@ class DocumentProcessorNode:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def process_documents(
-    state: OrchestratorState,
+    state: AgenticOrchestratorState,
     extraction_results: List[DocumentExtractionResult]
-) -> OrchestratorState:
+) -> AgenticOrchestratorState:
     """
     Convenience function to process documents.
     
@@ -263,6 +257,5 @@ def process_documents(
 
 __all__ = [
     "DocumentProcessorNode",
-    "DiscrepancyFlag",
     "process_documents",
 ]

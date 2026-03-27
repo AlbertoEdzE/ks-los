@@ -20,7 +20,7 @@ from typing import List, Dict, Any, Optional, Type, ClassVar
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 
-from src.agents.orchestrator import DocumentsChecklist
+from src.agents.graph_state import DocumentsChecklist
 
 
 class DocumentRequirementsInput(BaseModel):
