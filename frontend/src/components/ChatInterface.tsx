@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -594,6 +594,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const ocrFileInputRef = useRef<HTMLInputElement>(null);
   const pendingUploadRef = useRef<{ category: string; documentType: string } | null>(null);
   const pendingChecklistNameRef = useRef<string | null>(null);
+  const autoDocsOpenedRef = useRef(false);
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -627,7 +628,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     return null;
   }, [loan, ui2Docs]);
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     // Only scroll if user is already near bottom (within 100px)
@@ -635,12 +636,37 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     if (isNearBottom || loading) {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }
-  };
+  }, [loading]);
 
   // Scroll only on new messages, not on every update
   useEffect(() => {
     scrollToBottom();
-  }, [messages.length]);
+  }, [messages.length, scrollToBottom]);
+
+  useEffect(() => {
+    autoDocsOpenedRef.current = false;
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (autoDocsOpenedRef.current) return;
+    if (viewState !== 'chat') return;
+    if (!conversationId || !loan?.id) return;
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    if (!lastAssistant) return;
+    const metadata = parseMetadata(lastAssistant.metadata);
+    if (!metadata || !isDocumentsChecklist(metadata.documentsChecklist)) return;
+
+    autoDocsOpenedRef.current = true;
+    setDocsOpen(true);
+    const nextExpanded =
+      metadata.documentsChecklist.identity && metadata.documentsChecklist.identity.length > 0
+        ? 'identity'
+        : metadata.documentsChecklist.income && metadata.documentsChecklist.income.length > 0
+          ? 'income'
+          : null;
+    if (nextExpanded) setExpandedCategory(nextExpanded);
+    setTimeout(() => docsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  }, [conversationId, loan?.id, messages, viewState]);
 
   const refreshLoan = async (activeConversationId: string): Promise<V2Loan | null> => {
     try {
@@ -1147,33 +1173,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     return v === 'aggressive' || v === 'balanced' || v === 'conservative' ? v : null;
   }, [conversation?.intentSummary]);
 
-  const isLoanRecommendation = (value: unknown): value is {
-    name: string;
-    type: 'aggressive' | 'balanced' | 'conservative';
-    interest_rate: number;
-    tenure_years: number;
-    monthly_emi: number;
-    total_interest: number;
-    total_repayment: number;
-    pros: string[];
-    cons: string[];
-    recommended: boolean;
-  } => {
-    const rec = asRecord(value);
-    if (!rec) return false;
-    if (typeof rec.name !== 'string') return false;
-    if (rec.type !== 'aggressive' && rec.type !== 'balanced' && rec.type !== 'conservative') return false;
-    if (typeof rec.interest_rate !== 'number') return false;
-    if (typeof rec.tenure_years !== 'number') return false;
-    if (typeof rec.monthly_emi !== 'number') return false;
-    if (typeof rec.total_interest !== 'number') return false;
-    if (typeof rec.total_repayment !== 'number') return false;
-    if (!Array.isArray(rec.pros) || !rec.pros.every((p) => typeof p === 'string')) return false;
-    if (!Array.isArray(rec.cons) || !rec.cons.every((c) => typeof c === 'string')) return false;
-    if (typeof rec.recommended !== 'boolean') return false;
-    return true;
-  };
-
   const isLoanSnapshot = (value: unknown): value is {
     loan_amount: number;
     down_payment: number;
@@ -1202,18 +1201,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     if (snap.foir_ratio !== undefined && typeof snap.foir_ratio !== 'number') return false;
     return true;
   };
-
-  const earliestSnapshotMsgId = useMemo(() => {
-    for (const msg of messages) {
-      if (msg.role !== 'assistant') continue;
-      const metadata = parseMetadata(msg.metadata);
-      if (!metadata) continue;
-      if (isLoanRecommendation(metadata.selectedRecommendation) && isLoanSnapshot(metadata.loanSnapshot)) {
-        return msg.id;
-      }
-    }
-    return null;
-  }, [messages]);
 
   const isDocumentsChecklist = (value: unknown): value is {
     identity: Array<{ name: string; status: 'required' | 'optional'; description: string; uploaded?: boolean }>;
@@ -1259,28 +1246,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     return cleaned;
   };
 
-  const borrowerReadyForRecommendations = (metadata: Record<string, unknown>): boolean => {
-    const intentAnalysis = asRecord(metadata.intentAnalysis);
-    const intent = intentAnalysis ? asRecord(intentAnalysis.intentSummary) : null;
-    if (!intent) return false;
-
-    const purpose = String(intent.purpose ?? '').trim().toLowerCase();
-    const loanAmount = String(intent.loanAmount ?? '').trim();
-    const monthlyIncome = String(intent.monthlyIncome ?? '').trim();
-    const employmentType = String(intent.employmentType ?? '').trim();
-    const creditHistory = String(intent.creditHistory ?? '').trim();
-    const propertyValue = String(intent.propertyValue ?? '').trim();
-    const downPayment = String(intent.downPayment ?? '').trim();
-
-    const hasLoanAmount = /[0-9]/.test(loanAmount);
-    const hasIncome = /[0-9]/.test(monthlyIncome);
-    const hasEmployment = employmentType.length > 0;
-    const hasCredit = creditHistory.length > 0;
-    const homeOk = purpose !== 'home' || (/[0-9]/.test(propertyValue) && downPayment.length > 0);
-
-    return purpose.length > 0 && hasLoanAmount && hasIncome && hasEmployment && hasCredit && homeOk;
-  };
-
   const renderCardsForMessage = (msg: V2Message) => {
     const metadata = parseMetadata(msg.metadata);
     if (!metadata) return null;
@@ -1312,12 +1277,21 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         .map((rec) => {
           const r = asRecord(rec);
           if (!r) return null;
+          const tenureRaw = r.tenure_years ?? r.tenureYears ?? r.maxTenureMonths ?? 240;
+          const tenureNum = Number(tenureRaw);
+          const tenureYears = Number.isFinite(tenureNum) ? (tenureNum > 60 ? tenureNum / 12 : tenureNum) : 0;
+          const typeRaw = String(r.type || r.category || 'balanced').toLowerCase();
+          const planType: 'aggressive' | 'balanced' | 'conservative' = (typeRaw.includes('aggressive') || typeRaw.includes('fast'))
+            ? 'aggressive'
+            : (typeRaw.includes('conservative') || typeRaw.includes('comfort'))
+              ? 'conservative'
+              : 'balanced';
           // Normalize LOS backend structure to expected format
           return {
             name: String(r.name || r.estimatedRate || 'Option'),
-            type: String(r.type || r.category || 'balanced'),
+            type: planType,
             interest_rate: Number(r.interest_rate || r.baseInterestRate || 8.4),
-            tenure_years: Number(r.tenure_years || r.maxTenureMonths || 240) / 12,
+            tenure_years: tenureYears,
             monthly_emi: Number(r.monthly_emi || r.estimatedEmi || 0),
             total_interest: Number(r.total_interest || 0),
             total_repayment: Number(r.total_repayment || 0),

@@ -435,7 +435,7 @@ export function TermsAcceptanceCard({
             </button>
             <button
               onClick={saveSignature}
-              disabled={!signature}
+              disabled={false}
               className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Save Signature

@@ -12,7 +12,7 @@ export interface V3LoanSnapshot {
   estimated_emi?: number;
   tenure_years?: number;
   interest_rate?: number;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface V3LoanRecommendation {
@@ -28,7 +28,7 @@ export interface V3LoanRecommendation {
 
 export interface V3DocumentsChecklist {
   requiredNow?: Array<{name: string; description: string}>;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface V3ChatResponse {
@@ -44,7 +44,7 @@ export interface V3ChatResponse {
     application_id?: string;
     stp_status?: string;
     escalation_needed?: boolean;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -101,8 +101,8 @@ export const sendMessage = async (
  */
 export const getConversation = async (
   session_id: string
-): Promise<any> => {
-  const response = await axios.get(
+): Promise<Record<string, unknown>> => {
+  const response = await axios.get<Record<string, unknown>>(
     `${API_URL}/api/v3/conversations/${session_id}`
   );
   return response.data;

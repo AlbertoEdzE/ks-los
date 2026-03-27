@@ -454,16 +454,14 @@ class AgenticOrchestratorState(BaseModel):
         
         Scientific Design:
         - All required fields must be captured with high confidence
-        - borrower_name is CRITICAL - must be captured before application mode
-        - This ensures the agent completes Step 1 (Understand need: purpose + name)
-          before moving to Step 2 (Employment & income)
+        - This ensures the agent captures core intent + affordability inputs
+          before moving into application data collection
         
         Required Fields (per LNAI design doc):
         1. purpose - Loan purpose (home, auto, personal, etc.)
-        2. borrower_name - Full legal name (CRITICAL for application)
-        3. loan_amount - Amount requested
-        4. monthly_income - Income for affordability
-        5. employment_type - Employment status for risk assessment
+        2. loan_amount - Amount requested
+        3. monthly_income - Income for affordability
+        4. employment_type - Employment status for risk assessment
         
         Returns:
             True if all fields are reliable (confidence >= 0.7)

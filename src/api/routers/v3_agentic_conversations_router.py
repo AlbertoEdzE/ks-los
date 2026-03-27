@@ -20,11 +20,12 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-from src.shared.db import get_db, Conversation, Message as DBMessage, V3ConversationState
+from src.shared.db import get_db, Conversation, Loan, LoanPhase, Message as DBMessage, V3ConversationState
 from src.shared.state_persistence import get_or_create_state, update_state, get_state, delete_state
 from src.shared.xml_parser import parse_llm_response
 from src.agents.graph_state import (
@@ -92,6 +93,61 @@ def _serialize_conversation(conversation: Conversation) -> Dict[str, Any]:
     }
 
 
+def _resolve_phase_id(db: Session, phase_name: str) -> Optional[str]:
+    row = (
+        db.query(LoanPhase)
+        .filter(func.lower(LoanPhase.name) == phase_name.strip().lower())
+        .order_by(LoanPhase.sort_order.asc(), LoanPhase.id.asc())
+        .first()
+    )
+    return row.id if row else None
+
+
+def _sync_phase(db: Session, session_id: str, state: AgenticOrchestratorState) -> None:
+    conv = db.get(Conversation, session_id)
+    if conv is None:
+        conv = Conversation(
+            id=session_id,
+            borrower_name=state.captured_context.borrower_name if state.captured_context else None,
+            status="active",
+            chat_role="borrower",
+            next_conversation_angle="Ask about loan purpose",
+        )
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+
+    loan = (
+        db.query(Loan)
+        .filter(Loan.conversation_id == session_id)
+        .order_by(Loan.created_at.desc(), Loan.id.desc())
+        .first()
+    )
+
+    desired_phase_name: Optional[str] = None
+    if loan and (loan.stp_processing_status or "").strip().lower() in {"awaiting_acceptance", "awaiting-acceptance"}:
+        desired_phase_name = "Conditional Approval & Offer"
+    elif loan and (loan.stp_processing_status or "").strip().lower() in {"processing", "approved"}:
+        desired_phase_name = "Underwriting & Credit Decision"
+    elif loan and (loan.stp_processing_status or "").strip().lower() in {"awaiting_documents", "awaiting-documents"}:
+        desired_phase_name = "Document Collection & KYC"
+    elif state.mode == ConversationMode.APPLICATION:
+        desired_phase_name = "Application Submission"
+    elif state.mode == ConversationMode.COMPLETION:
+        desired_phase_name = "Document Collection & KYC" if state.documents_checklist else "Verification & Credit Appraisal"
+    else:
+        desired_phase_name = "Lead & Inquiry"
+
+    phase_id = _resolve_phase_id(db, desired_phase_name) if desired_phase_name else None
+    if phase_id and conv.current_phase_id != phase_id:
+        conv.current_phase_id = phase_id
+        db.add(conv)
+    if loan and phase_id and loan.current_phase_id != phase_id:
+        loan.current_phase_id = phase_id
+        db.add(loan)
+    db.commit()
+
+
 @router.get("/", response_model=List[Dict[str, Any]])
 async def list_conversations(db: Session = Depends(get_db)):
     rows = (
@@ -131,7 +187,7 @@ async def create_conversation(request: V3ConversationRequest, db: Session = Depe
 
 
 @router.post("/{session_id}/messages", response_model=V3MessageResponse)
-async def send_message(session_id: str, request: V3MessageRequest):
+async def send_message(session_id: str, request: V3MessageRequest, db: Session = Depends(get_db)):
     """
     Send a message to the agentic conversation.
     
@@ -166,7 +222,51 @@ async def send_message(session_id: str, request: V3MessageRequest):
         state = advisory_node.process(state)
         
     elif state.mode == ConversationMode.APPLICATION:
-        application_node = ApplicationNode()
+        def _create_or_update_loan(loan_data: Dict[str, Any]):
+            existing = (
+                db.query(Loan)
+                .filter(Loan.conversation_id == session_id)
+                .order_by(Loan.created_at.desc(), Loan.id.desc())
+                .first()
+            )
+            if existing is None:
+                existing = Loan(
+                    borrower_name=str(loan_data.get("borrower_name") or "Unknown"),
+                    borrower_email=loan_data.get("borrower_email"),
+                    borrower_phone=loan_data.get("borrower_phone"),
+                    loan_type=str(loan_data.get("loan_type") or "personal"),
+                    loan_amount=str(loan_data.get("loan_amount") or "0"),
+                    purpose=loan_data.get("purpose"),
+                    employment_type=loan_data.get("employment_type"),
+                    monthly_income=str(loan_data.get("monthly_income") or ""),
+                    existing_debts=str(loan_data.get("existing_debts") or ""),
+                    conversation_id=session_id,
+                    status="submitted",
+                )
+                db.add(existing)
+                db.commit()
+                db.refresh(existing)
+            else:
+                existing.borrower_name = str(loan_data.get("borrower_name") or existing.borrower_name)
+                existing.borrower_email = loan_data.get("borrower_email") or existing.borrower_email
+                existing.borrower_phone = loan_data.get("borrower_phone") or existing.borrower_phone
+                existing.loan_type = str(loan_data.get("loan_type") or existing.loan_type)
+                existing.loan_amount = str(loan_data.get("loan_amount") or existing.loan_amount)
+                existing.purpose = loan_data.get("purpose") or existing.purpose
+                existing.employment_type = loan_data.get("employment_type") or existing.employment_type
+                if loan_data.get("monthly_income") is not None:
+                    existing.monthly_income = str(loan_data.get("monthly_income"))
+                if loan_data.get("existing_debts") is not None:
+                    existing.existing_debts = str(loan_data.get("existing_debts"))
+                existing.conversation_id = session_id
+                if existing.status in {"draft", ""}:
+                    existing.status = "submitted"
+                db.add(existing)
+                db.commit()
+                db.refresh(existing)
+            return {"id": existing.id}
+
+        application_node = ApplicationNode(create_loan_callback=_create_or_update_loan)
         state = application_node.process(state)
         
     elif state.mode == ConversationMode.COMPLETION:
@@ -228,17 +328,41 @@ async def send_message(session_id: str, request: V3MessageRequest):
     # Parsed metadata from XML takes precedence
     merged_metadata = {
         **parsed_metadata,  # XML-parsed metadata (intentAnalysis, loanSnapshot, etc.)
-        "documentsChecklist": docs_checklist_v2,  # V2 format for frontend
         "application_id": state.application_id,
         "stp_status": state.stp_status,
     }
 
-    # Add loan_snapshot and recommendations from state if not in parsed metadata
-    if "loanSnapshot" not in parsed_metadata and state.loan_snapshot:
-        merged_metadata["loanSnapshot"] = state.loan_snapshot.model_dump()
-    
-    if "loanRecommendations" not in parsed_metadata and state.recommendations:
-        merged_metadata["loanRecommendations"] = [r.model_dump() for r in state.recommendations]
+    last_meta = last_message.metadata if last_message and isinstance(last_message.metadata, dict) else {}
+    if (
+        docs_checklist_v2 is not None
+        and ("documentsChecklist" not in merged_metadata)
+        and ("documents_checklist" in last_meta)
+    ):
+        merged_metadata["documentsChecklist"] = docs_checklist_v2
+    if "loanSnapshot" not in merged_metadata and "loan_snapshot" in last_meta:
+        merged_metadata["loanSnapshot"] = last_meta.get("loan_snapshot")
+    if "loanRecommendations" not in merged_metadata and "recommendations" in last_meta:
+        merged_metadata["loanRecommendations"] = last_meta.get("recommendations")
+    if "selectedRecommendation" not in merged_metadata and "selected_recommendation" in last_meta:
+        merged_metadata["selectedRecommendation"] = last_meta.get("selected_recommendation")
+    if "awaitingAcceptance" not in merged_metadata and "awaiting_acceptance" in last_meta:
+        merged_metadata["awaitingAcceptance"] = bool(last_meta.get("awaiting_acceptance"))
+
+    loan = (
+        db.query(Loan)
+        .filter(Loan.conversation_id == session_id)
+        .order_by(Loan.created_at.desc(), Loan.id.desc())
+        .first()
+    )
+    if loan:
+        merged_metadata["loanId"] = loan.id
+        if docs_checklist_v2 is not None and loan.document_checklist != docs_checklist_v2:
+            loan.document_checklist = docs_checklist_v2
+            db.add(loan)
+            db.commit()
+            db.refresh(loan)
+
+    _sync_phase(db, session_id, state)
 
     assistant_message = {
         "id": f"msg-{datetime.now().timestamp()}",
@@ -345,31 +469,98 @@ async def get_messages(session_id: str, db: Session = Depends(get_db)):
         List of messages in chronological order
     """
     try:
-        # First, try to get messages from V3 state
+        loan = (
+            db.query(Loan)
+            .filter(Loan.conversation_id == session_id)
+            .order_by(Loan.created_at.desc(), Loan.id.desc())
+            .first()
+        )
+        loan_id = loan.id if loan else None
+
         state = get_state(session_id)
+
+        docs_checklist_v2 = None
+        if state is not None and state.documents_checklist:
+            docs_checklist_v2 = {
+                "identity": [
+                    {"name": doc["name"], "status": "required" if doc.get("required") else "optional", "description": doc.get("description", "")}
+                    for doc in state.documents_checklist.identity
+                ] if state.documents_checklist.identity else [],
+                "income": [
+                    {"name": doc["name"], "status": "required" if doc.get("required") else "optional", "description": doc.get("description", "")}
+                    for doc in state.documents_checklist.income
+                ] if state.documents_checklist.income else [],
+                "business": [
+                    {"name": doc["name"], "status": "required" if doc.get("required") else "optional", "description": doc.get("description", "")}
+                    for doc in state.documents_checklist.business
+                ] if hasattr(state.documents_checklist, "business") and state.documents_checklist.business else [],
+                "property": [
+                    {"name": doc["name"], "status": "required" if doc.get("required") else "optional", "description": doc.get("description", "")}
+                    for doc in state.documents_checklist.property
+                ] if hasattr(state.documents_checklist, "property") and state.documents_checklist.property else [],
+                "vehicle": [
+                    {"name": doc["name"], "status": "required" if doc.get("required") else "optional", "description": doc.get("description", "")}
+                    for doc in state.documents_checklist.vehicle
+                ] if hasattr(state.documents_checklist, "vehicle") and state.documents_checklist.vehicle else [],
+            }
+
+        state_msgs: list[dict[str, Any]] = []
         if state is not None and state.conversation_history:
-            # Convert V3 state messages to frontend-compatible format
-            result = [
-                {
-                    "id": f"msg-{idx}",
-                    "conversationId": session_id,
-                    "role": msg.role,
-                    "content": msg.content,
-                    "metadata": msg.metadata or {},
-                    "createdAt": msg.timestamp.isoformat() if hasattr(msg, 'timestamp') and msg.timestamp else None,
-                }
-                for idx, msg in enumerate(state.conversation_history)
-            ]
-            logger.debug(f"Retrieved {len(result)} messages from V3 state for session {session_id}")
-            return result
+            for idx, msg in enumerate(state.conversation_history):
+                if msg.role == "assistant":
+                    clean_text, parsed = parse_llm_response(msg.content)
+                    meta: dict[str, Any] = {}
+                    if isinstance(parsed, dict):
+                        meta.update(parsed)
+                    if isinstance(msg.metadata, dict):
+                        if "loan_snapshot" in msg.metadata and "loanSnapshot" not in meta:
+                            meta["loanSnapshot"] = msg.metadata.get("loan_snapshot")
+                        if "recommendations" in msg.metadata and "loanRecommendations" not in meta:
+                            meta["loanRecommendations"] = msg.metadata.get("recommendations")
+                        if "selected_recommendation" in msg.metadata:
+                            meta["selectedRecommendation"] = msg.metadata.get("selected_recommendation")
+                        if "awaiting_acceptance" in msg.metadata:
+                            meta["awaitingAcceptance"] = bool(msg.metadata.get("awaiting_acceptance"))
+                    if (
+                        docs_checklist_v2 is not None
+                        and isinstance(msg.metadata, dict)
+                        and "documents_checklist" in msg.metadata
+                    ):
+                        meta["documentsChecklist"] = docs_checklist_v2
+                    if loan_id:
+                        meta["loanId"] = loan_id
+                    meta["application_id"] = state.application_id if state else None
+                    meta["stp_status"] = state.stp_status if state else None
+                    state_msgs.append(
+                        {
+                            "id": f"v3-msg-{idx}",
+                            "conversationId": session_id,
+                            "role": msg.role,
+                            "content": clean_text,
+                            "metadata": meta,
+                            "createdAt": msg.timestamp.isoformat() if msg.timestamp else None,
+                        }
+                    )
+                else:
+                    meta = msg.metadata if isinstance(msg.metadata, dict) else {}
+                    if loan_id:
+                        meta = {**meta, "loanId": loan_id}
+                    state_msgs.append(
+                        {
+                            "id": f"v3-msg-{idx}",
+                            "conversationId": session_id,
+                            "role": msg.role,
+                            "content": msg.content,
+                            "metadata": meta,
+                            "createdAt": msg.timestamp.isoformat() if msg.timestamp else None,
+                        }
+                    )
         
-        # Fallback: Query messages from database (for v2 conversations)
         messages = db.query(DBMessage).filter(
             DBMessage.conversation_id == session_id
         ).order_by(DBMessage.created_at.asc()).all()
         
-        # Convert to frontend-compatible format
-        result = [
+        db_msgs = [
             {
                 "id": msg.id,
                 "conversationId": msg.conversation_id,
@@ -381,8 +572,10 @@ async def get_messages(session_id: str, db: Session = Depends(get_db)):
             for msg in messages
         ]
         
-        logger.debug(f"Retrieved {len(result)} messages from database for session {session_id}")
-        return result
+        merged = state_msgs + db_msgs
+        merged.sort(key=lambda m: (m.get("createdAt") or "", m.get("id") or ""))
+        logger.debug(f"Retrieved {len(merged)} messages for session {session_id}")
+        return merged
         
     except Exception as e:
         logger.error(f"Error retrieving messages for session {session_id}: {e}")

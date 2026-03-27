@@ -28,8 +28,9 @@ export interface ChatResponse {
  */
 export const sendMessage = async (
   message: string,
-  history: ChatMessage[] = []
+  _history: ChatMessage[] = []
 ): Promise<ChatResponse> => {
+  void _history;
   // Use v3 agentic endpoint
   const response = await axios.post<ChatResponse>(`${API_URL}/api/v3/conversations/messages`, {
     content: message,

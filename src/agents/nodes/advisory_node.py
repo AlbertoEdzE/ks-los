@@ -107,8 +107,12 @@ class AdvisoryNode:
             Updated state with new responses and extracted context
         """
         self.logger.info(f"Processing advisory mode, stage: {state.current_stage}")
-        
-        # Determine current step based on captured context
+
+        if state.recommendations and state.selected_recommendation is None:
+            if self._try_capture_recommendation_selection(state):
+                state.update_timestamp()
+                return state
+
         step = self._determine_step(state)
         
         # Execute appropriate step
@@ -121,19 +125,43 @@ class AdvisoryNode:
         elif step == "financial_details":
             state = self._step3_financial_details(state)
         
-        elif step == "contact_capture":
-            state = self._step3b_contact_capture(state)
-        
         elif step == "snapshot_and_recommendations":
             state = self._step4_snapshot_and_recommendations(state)
-        
-        # Update mode if ready to proceed
-        if state.can_proceed_to_application():
-            state.mode = ConversationMode.APPLICATION
-            self.logger.info("Advisory mode complete, proceeding to application")
+
+        elif step == "await_selection":
+            state = self._step4b_await_selection(state)
         
         state.update_timestamp()
         return state
+
+    def _try_capture_recommendation_selection(self, state: AgenticOrchestratorState) -> bool:
+        last_user_text = None
+        for m in reversed(state.conversation_history):
+            if m.role == "user":
+                last_user_text = m.content
+                break
+        if not last_user_text:
+            return False
+
+        text = last_user_text.strip().lower()
+        if not text:
+            return False
+
+        for rec in state.recommendations:
+            name = (rec.name or "").strip().lower()
+            typ = (rec.type or "").strip().lower()
+            if (name and name in text) or (typ and typ in text):
+                state.selected_recommendation = rec
+                state.mode = ConversationMode.APPLICATION
+                state.current_stage = "contact_capture"
+                state.add_message(
+                    "assistant",
+                    f"Great — we'll go with the {rec.name} option. What’s your email address and phone number so I can proceed with your application?",
+                    metadata={"selected_recommendation": rec.model_dump()},
+                )
+                return True
+
+        return False
     
     def _determine_step(self, state: AgenticOrchestratorState) -> str:
         """
@@ -145,27 +173,31 @@ class AdvisoryNode:
         """
         context = state.captured_context
         
-        # Step 4: Have ALL required fields including contact info
-        if (context.purpose and context.loan_amount and 
-            context.monthly_income and context.employment_type and
-            context.email and context.phone):
+        if context.purpose and context.borrower_name and context.employment_type and context.monthly_income and context.loan_amount and context.existing_debts is not None:
+            if not state.loan_snapshot or not state.recommendations:
+                return "snapshot_and_recommendations"
+            if state.selected_recommendation is None:
+                return "await_selection"
             return "snapshot_and_recommendations"
-        
-        # Step 3b: Have financials, need contact info
-        if (context.purpose and context.loan_amount and 
-            context.monthly_income and context.employment_type):
-            return "contact_capture"
         
         # Step 3: Have employment/income, need loan amount
         if context.employment_type and context.monthly_income:
             return "financial_details"
         
         # Step 2: Have purpose, need employment/income
-        if context.purpose:
+        if context.purpose and context.borrower_name:
             return "employment_income"
         
         # Step 1: Need to understand purpose
         return "understand_need"
+
+    def _step4b_await_selection(self, state: AgenticOrchestratorState) -> AgenticOrchestratorState:
+        state.add_message(
+            "assistant",
+            "Which option would you like to go with — Fast Track, Balanced, or Comfort?",
+            metadata={"awaiting_recommendation_selection": True},
+        )
+        return state
     
     def _step1_understand_need(self, state: AgenticOrchestratorState) -> AgenticOrchestratorState:
         """
@@ -350,7 +382,7 @@ class AdvisoryNode:
         has_amount = bool(context.loan_amount)
         has_debts = context.existing_debts is not None
         
-        if has_amount and has_debts:
+        if has_amount and has_debts and bool(context.borrower_name):
             # Ready for snapshot + recommendations
             return self._step4_snapshot_and_recommendations(state)
         else:
