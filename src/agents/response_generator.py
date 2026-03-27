@@ -184,42 +184,68 @@ class ResponseStrategy:
 
 
 class IntentCaptureStrategy(ResponseStrategy):
-    """Strategy for intent capture stage responses"""
+    """
+    Strategy for intent capture stage responses.
     
+    Scientific Design (per LNAI specification):
+    - Step 1 requires BOTH purpose AND borrower_name
+    - If purpose captured but name missing: Intelligently prompt for name
+    - The HOW is natural (LLM-generated), but the GOAL is fixed
+    - ONE INTENT PER TURN: Don't ask for multiple things at once
+    
+    Flow Logic:
+    1. No purpose yet → Ask about loan purpose
+    2. Purpose captured, no name → Ask for name (naturally, not robotic)
+    3. Both captured → Move to Step 2 (Employment & income)
+    """
+
     def generate(
         self,
         context: CapturedContext,
         stage: ConversationStage,
         has_purpose: bool = False,
+        has_name: bool = False,  # NEW: Track name capture status
         **kwargs
     ) -> str:
         generator = XMLTagResponseGenerator()
-        
+
+        # Case 1: No purpose yet - initial greeting
         if not has_purpose or not context.purpose:
-            # Initial greeting
             chat_text = (
                 "Hello! I'm your Loan Navigator. I'm here to help you find the most "
                 "efficient path to the funding you need. To get us started, could you "
                 "tell me a bit about what you're looking to achieve? Are you thinking "
                 "about a new home, a car, starting a business, or perhaps a personal loan?"
             )
+        
+        # Case 2: Purpose captured, but name missing - intelligently ask for name
+        # This is CRITICAL per LNAI design - Step 1 requires BOTH purpose AND name
+        elif has_purpose and not has_name:
+            # Generate natural, conversational name request
+            # The agent INTELLIGENTLY weaves this into the conversation
+            chat_text = (
+                f"That's wonderful! A {context.purpose.replace('_', ' ')} is a major milestone. "
+                "I'm excited to help you navigate this. To personalize your experience, "
+                "may I ask for your full name so I can address you properly?"
+            )
+        
+        # Case 3: Both purpose and name captured - move to next stage
         else:
-            # Purpose captured, move to next stage
             chat_text = (
                 f"That's wonderful! A {context.purpose.replace('_', ' ')} is a major milestone. "
                 "To help me structure the best path for you, could you share more details? "
                 "Specifically, I'd love to know what the property value or loan amount is, "
                 "and what you're planning for a down payment so we can find the most affordable option."
             )
-        
-        # Always include intent analysis
+
+        # Always include intent analysis for UI/frontend
         intent = IntentAnalysis(
             purpose=context.purpose,
             urgency=context.urgency,
             seriousness_score=context.seriousness_score,
             fit_score=context.fit_score,
         )
-        
+
         return generator.generate(
             chat_text=chat_text,
             intent=intent

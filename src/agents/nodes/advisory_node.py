@@ -159,69 +159,87 @@ class AdvisoryNode:
         """
         Step 1: Understand borrower's need.
         
-        Extracts:
-        - Loan purpose (home, auto, personal, etc.)
-        - Borrower name
-        - Initial context
+        Scientific Design (per LNAI specification):
+        - Extracts: Loan purpose (home, auto, personal, etc.)
+        - Extracts: Borrower name (CRITICAL - must be captured in Step 1)
+        - Extracts: Initial context (urgency, timeline, etc.)
+        
+        Agentic Intelligence:
+        - LLM extracts both purpose AND name from conversation
+        - If name is missing, agent INTELLIGENTLY prompts for it
+        - The HOW is natural (LLM-generated), but the GOAL is fixed
+        - ONE INTENT PER TURN: Don't ask for name AND purpose together
+        
+        Flow Logic:
+        1. First turn: Greet and ask about loan purpose (don't overwhelm)
+        2. Subsequent turns: Extract purpose AND name via LLM
+        3. If purpose captured but name missing: Intelligently ask for name
+        4. If both captured: Proceed to Step 2 (Employment & income)
         """
         # Get last user message
         if not state.conversation_history:
-            # Initial greeting
+            # Initial greeting - ask about purpose only (don't overwhelm user)
             response_text = (
                 "Hello! I'm your Loan Navigator. I'm here to help you find the most "
                 "efficient path to the funding you need. To get us started, could you "
                 "tell me a bit about what you're looking to achieve? Are you thinking "
                 "about a new home, a car, starting a business, or perhaps a personal loan?"
             )
-            
+
             state.add_message("assistant", response_text)
             return state
-        
-        # Extract intent from conversation
+
+        # Extract intent from conversation using LLM
         last_message = state.conversation_history[-1].content
-        
+
         try:
-            # Use LLM to extract intent
+            # Use LLM to extract intent (purpose + name + other fields)
             conv_history = [
                 {"role": m.role, "content": m.content}
                 for m in state.conversation_history
             ]
             extraction = self.intent_extractor._run(conversation_history=conv_history)
-            
+
             # Parse extraction result
             from src.agents.agent_tools.intent_extractor import IntentExtractionResult
             result = IntentExtractionResult.model_validate_json(extraction)
-            
+
             # Update context with extracted data
             if result.context.purpose:
                 state.captured_context.purpose = result.context.purpose
             if result.context.borrower_name:
                 state.captured_context.borrower_name = result.context.borrower_name
-            
+
             # Store confidence scores
             state.confidence_scores.update(result.field_confidence)
-            
+
             self.logger.info(
                 f"Extracted intent: purpose={state.captured_context.purpose}, "
+                f"name={state.captured_context.borrower_name}, "
                 f"confidence={result.confidence:.2f}"
             )
-            
+
         except Exception as e:
             self.logger.warning(f"Intent extraction failed: {str(e)}")
             # Continue with fallback
-        
-        # Generate response
+
+        # Generate response using LLM-based strategy
+        # The strategy INTELLIGENTLY decides what to ask based on what's missing
         strategy = IntentCaptureStrategy()
         has_purpose = bool(state.captured_context.purpose)
-        
+        has_name = bool(state.captured_context.borrower_name)
+
+        # CRITICAL: If we have purpose but NOT name, we MUST ask for name
+        # This is per LNAI design - Step 1 requires BOTH purpose AND name
         response_text = strategy.generate(
             context=state.captured_context,
             stage=None,  # Not used in strategy
             has_purpose=has_purpose,
+            has_name=has_name,  # NEW: Pass name status for intelligent prompting
         )
-        
+
         state.add_message("assistant", response_text)
-        
+
         return state
     
     def _step2_employment_income(self, state: AgenticOrchestratorState) -> AgenticOrchestratorState:
@@ -436,7 +454,7 @@ class AdvisoryNode:
         # Compute EMI for different tenure options
         base_rate = 0.085  # 8.5% base rate
         tenures = [15, 20, 25]  # years
-        
+
         emi_results = []
         for tenure in tenures:
             emi_result = compute_reducing_emi(
@@ -446,7 +464,7 @@ class AdvisoryNode:
             )
             emi_results.append({
                 "tenure": tenure,
-                "emi": emi_result.monthly_payment,
+                "emi": emi_result.emi,  # Fixed: was monthly_payment
                 "total_interest": emi_result.total_interest,
                 "total_repayment": emi_result.total_repayment,
             })

@@ -614,6 +614,27 @@ How well does this borrower fit our products?
 4. **Handle contradictions** — if user corrects themselves, use the corrected value
 5. **Currency awareness** — preserve the currency symbol mentioned (USD $, TTD, JMD, etc.)
 6. **Caribbean context** — recognize Caribbean employment terms (government, contract, self-employed)
+7. **Employment type normalization** — Map common terms to standard types:
+   - "employed", "working", "employee" → "salaried"
+   - "self-employed", "business owner", "entrepreneur" → "self-employed"
+   - "contractor", "freelance", "consultant", "gig worker" → "contractor"
+   - "government worker", "public sector", "civil servant" → "salaried"
+   - If user says "employed" without specification, use "salaried"
+8. **Aggressive number extraction** — Extract ANY numbers that look like amounts:
+   - "350000" → loan_amount="$350000"
+   - "10000 USD" → monthly_income="$10000"
+   - "15% down" → down_payment="15%"
+   - Numbers in context of money, income, loans, debts should ALWAYS be extracted
+9. **Understand negations** — "no", "none", "zero", "nothing" mean ZERO amount:
+   - "no debts" → existing_debts="$0"
+   - "no loan payments" → existing_debts="$0"
+   - "no commitments" → existing_debts="$0"
+   - "nothing" → existing_debts="$0"
+10. **Extract multiple fields** — Users often provide multiple pieces of info in one message:
+    - "salaried, 10000 USD" → employment_type="salaried" AND monthly_income="$10000"
+    - "350000, no debts" → loan_amount="$350000" AND existing_debts="$0"
+    - "alberto@email.com, 555-1234" → email="alberto@email.com" AND phone="555-1234"
+    - ALWAYS look for multiple fields in each user message
 
 ## EXAMPLES
 

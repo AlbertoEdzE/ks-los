@@ -327,19 +327,38 @@ class AgenticOrchestratorState(BaseModel):
         )
     
     def can_proceed_to_application(self) -> bool:
-        """Check if ready to proceed to application mode"""
+        """
+        Check if ready to proceed to application mode.
+        
+        Scientific Design:
+        - All required fields must be captured with high confidence
+        - borrower_name is CRITICAL - must be captured before application mode
+        - This ensures the agent completes Step 1 (Understand need: purpose + name)
+          before moving to Step 2 (Employment & income)
+        
+        Required Fields (per LNAI design doc):
+        1. purpose - Loan purpose (home, auto, personal, etc.)
+        2. borrower_name - Full legal name (CRITICAL for application)
+        3. loan_amount - Amount requested
+        4. monthly_income - Income for affordability
+        5. employment_type - Employment status for risk assessment
+        
+        Returns:
+            True if all fields are reliable (confidence >= 0.7)
+        """
         required_fields = [
             "purpose",
+            "borrower_name",  # CRITICAL: Added per LNAI design - Step 1 must capture name
             "loan_amount",
             "monthly_income",
             "employment_type",
         ]
-        
+
         # All required fields must be reliable
         for field in required_fields:
             if not self.is_field_reliable(field, threshold=0.7):
                 return False
-        
+
         return True
     
     def can_trigger_stp(self) -> bool:
