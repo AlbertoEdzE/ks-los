@@ -45,7 +45,8 @@ State Architecture:
 """
 
 from typing import Dict, List, Any, Optional, Literal
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from enum import Enum
 
@@ -149,6 +150,61 @@ class CapturedContext(BaseModel):
     collateral_available: Optional[str] = None
     seriousness_score: Optional[int] = None
     fit_score: Optional[int] = None
+
+    @field_validator(
+        "property_value",
+        "loan_amount",
+        "down_payment",
+        "monthly_income",
+        "existing_debts",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_numeric_money_fields(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            t = v.strip()
+            if not t:
+                return None
+            cleaned = re.sub(r"[^\d.\-]", "", t.replace(",", ""))
+            if cleaned in {"", "-", ".", "-.", ".-"}:
+                return None
+            try:
+                return float(cleaned)
+            except ValueError:
+                return None
+        return v
+
+    @field_validator("loan_tenure_years", mode="before")
+    @classmethod
+    def _coerce_tenure_years(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, float):
+            return int(v)
+        if isinstance(v, str):
+            m = re.search(r"\d+", v)
+            return int(m.group(0)) if m else None
+        return v
+
+    @field_validator("credit_score", mode="before")
+    @classmethod
+    def _coerce_credit_score(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, float):
+            return int(v)
+        if isinstance(v, str):
+            m = re.search(r"\d{3}", v)
+            return int(m.group(0)) if m else None
+        return v
 
 
 class LoanSnapshot(BaseModel):

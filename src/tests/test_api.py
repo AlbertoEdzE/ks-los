@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch, MagicMock
 from src.main import app
+from src.agents.graph_state import create_initial_state
 
 client = TestClient(app)
 
@@ -19,74 +20,51 @@ def test_security_headers_present_on_health():
     assert response.headers.get("Permissions-Policy") is not None
     assert response.headers.get("X-Correlation-ID") is not None
 
-@patch("src.api.routers.agent_router.agent_app")
-def test_chat_endpoint_success(mock_agent_app):
-    """Test the chat endpoint with a successful response."""
-    # Mock the graph response
-    # endpoint calls await agent_app.ainvoke(inputs)
-    mock_agent_app.ainvoke = AsyncMock()
-    
-    # Mock return value structure
-    # model_dump is synchronous, so use MagicMock
-    mock_profile = MagicMock()
-    mock_profile.model_dump.return_value = {"name": "John Doe", "score": 750}
-    
-    # Simple object to mimic AIMessage
-    class MockAIMessage:
-        content = "Here is the profile..."
-        
-    mock_agent_app.ainvoke.return_value = {
-        "messages": [
-            {"type": "human", "content": "Generate a profile"},
-            MockAIMessage()
-        ],
-        "credit_profile": mock_profile,
-        "risk_score": 750.0,
-        "risk_decision": "APPROVED",
-        "risk_reasoning": "Score above 720",
-        "advice": "Approve"
-    }
-
-    payload = {
-        "message": "Generate a profile",
-        "session_id": "test-session-123"
-    }
-    
-    response = client.post("/agent/chat", json=payload)
-    
+def test_v3_create_conversation_success():
+    response = client.post(
+        "/api/v3/conversations/",
+        json={"session_id": "test-session-123", "borrower_name": "Jane Doe"},
+    )
     assert response.status_code == 200
     data = response.json()
-    assert "response" in data
-    assert "credit_profile" in data
-    assert data["response"] == "Here is the profile..."
-    assert data["credit_profile"]["name"] == "John Doe"
-    assert data["risk_score"] == 750.0
-    assert data["risk_decision"] == "APPROVED"
+    assert "conversation" in data
+    assert data["conversation"]["id"] == "test-session-123"
+    assert data["conversation"]["borrowerName"] == "Jane Doe"
 
-@patch("src.api.routers.agent_router.agent_app")
-def test_chat_endpoint_error(mock_agent_app):
-    """Test the chat endpoint handling internal errors."""
-    mock_agent_app.ainvoke = AsyncMock()
-    mock_agent_app.ainvoke.side_effect = Exception("Internal Graph Error")
 
-    payload = {
-        "message": "Crash me",
-        "session_id": "test-session-error"
-    }
-    
-    response = client.post("/agent/chat", json=payload)
-    
-    # Depending on how exception handlers are set up, this might be 500
-    assert response.status_code == 500
-    assert "detail" in response.json()
+def test_v3_send_message_success():
+    session_id = "test-session-v3-send"
+    state = create_initial_state(session_id=session_id)
 
-def test_chat_endpoint_invalid_payload():
-    """Test the chat endpoint with missing required fields."""
-    payload = {
-        "session_id": "test-session-123"
-        # Missing 'message'
-    }
-    
-    response = client.post("/agent/chat", json=payload)
-    
-    assert response.status_code == 422
+    def advisory_process(s):
+        s.add_message("assistant", "Stub response")
+        return s
+
+    with patch("src.api.routers.v3_agentic_conversations_router.get_or_create_state", return_value=state), patch(
+        "src.api.routers.v3_agentic_conversations_router.update_state", return_value=True
+    ), patch("src.api.routers.v3_agentic_conversations_router.RepairNode") as MockRepairNode, patch(
+        "src.api.routers.v3_agentic_conversations_router.RAGNode"
+    ) as MockRAGNode, patch(
+        "src.api.routers.v3_agentic_conversations_router.AdvisoryNode"
+    ) as MockAdvisoryNode, patch(
+        "src.api.routers.v3_agentic_conversations_router.EscalationNode"
+    ) as MockEscalationNode:
+        for node_cls in (MockRepairNode, MockRAGNode, MockEscalationNode):
+            node = MagicMock()
+            node.process.side_effect = lambda s: s
+            node_cls.return_value = node
+
+        advisory_node = MagicMock()
+        advisory_node.process.side_effect = advisory_process
+        MockAdvisoryNode.return_value = advisory_node
+
+        response = client.post(
+            f"/api/v3/conversations/{session_id}/messages",
+            json={"content": "Hello"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_id"] == session_id
+    assert data["response"] == "Stub response"
+    assert data["mode"] == "advisory"

@@ -24,15 +24,12 @@ from src.api.routers.admin_config_router import router as admin_config_router
 from src.api.routers.admin_seed_router import router as admin_seed_router
 from src.api.routers.model_manage_router import router as model_manage_router
 from src.api.routers.v3_agentic_conversations_router import router as v3_agentic_router
-from src.api.routers.agent_router import router as agent_router
 from src.api.routers.v2_phases_router import router as phases_router
 from src.api.routers.v2_loans_router import router as loans_router
 from src.api.routers.v2_catalog_products_router import router as catalog_products_router
 from src.api.routers.v2_documents_router import router as documents_router
 from src.api.routers.v2_loan_acceptance_router import router as loan_acceptance_router
 from src.api.routers.v2_conversations_router import router as conversations_router, borrower_router as borrower_conversations_router
-# LNAI orchestrator is a separate reference implementation - not used in LOS production
-# from src.api.routers.lnai_orchestrator_router import router as lnai_orchestrator_router
 
 # Configure logging
 if os.getenv("LOG_JSON", "1") == "1":
@@ -114,7 +111,6 @@ app.include_router(chat_support_router)
 app.include_router(admin_config_router)
 app.include_router(admin_seed_router)
 app.include_router(model_manage_router)
-app.include_router(agent_router)
 app.include_router(phases_router)
 app.include_router(loans_router)
 app.include_router(catalog_products_router)
@@ -122,11 +118,9 @@ app.include_router(documents_router)
 app.include_router(loan_acceptance_router)
 app.include_router(conversations_router)
 app.include_router(borrower_conversations_router)
-# LNAI orchestrator disabled
 
 # NEW: V3 Agentic Conversations Router (uses LangGraph agentic workflow)
 app.include_router(v3_agentic_router)
-# app.include_router(lnai_orchestrator_router)
 
 
 @app.exception_handler(HTTPException)

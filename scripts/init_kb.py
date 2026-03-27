@@ -22,13 +22,16 @@ def main():
         kb.clear()
 
         # Ingest Policy
-        policy_path = os.path.join(project_root, "doc", "policies", "credit_policy_v1.md")
-        if os.path.exists(policy_path):
+        policy_path_candidates = [
+            os.path.join(project_root, "doc", "01_execution", "policies", "credit_policy_v1.md"),
+            os.path.join(project_root, "doc", "policies", "credit_policy_v1.md"),
+        ]
+        policy_path = next((p for p in policy_path_candidates if os.path.exists(p)), None)
+        if policy_path:
             kb.ingest_document(policy_path)
-            logger.info("Policy ingested successfully.")
+            logger.info(f"Policy ingested successfully from {policy_path}.")
         else:
-            logger.warning(f"Policy file not found at {policy_path}. Skipping KB policy ingest.")
-            return
+            logger.warning("Policy file not found. Skipping KB policy ingest.")
             
     except Exception as e:
         logger.error(f"Knowledge Base initialization failed: {e}")

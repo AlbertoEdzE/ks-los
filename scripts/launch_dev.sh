@@ -215,7 +215,7 @@ if [ -z "$PYTHON_BIN" ]; then
   fi
 fi
 
-VSTR="$($PYTHON_BIN -c 'import sys; print(f\"{sys.version_info.major}.{sys.version_info.minor}\")' 2>/dev/null || echo '')"
+VSTR="$($PYTHON_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo '')"
 REQ_OK=0
 case "$VSTR" in
   3.11|3.12|3.13) REQ_OK=1 ;;

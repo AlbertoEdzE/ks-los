@@ -6,7 +6,7 @@ Extracts structured borrower intent from conversation history using LLM.
 
 from typing import List, Optional, Type, Dict, Any
 from langchain.tools import BaseTool
-from langchain_community.chat_models import ChatOllama
+from langchain_ollama import ChatOllama
 from pydantic import BaseModel, Field
 import json
 import re
