@@ -567,10 +567,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const [viewState, setViewState] = useState<ViewState>('welcome');
   const [loan, setLoan] = useState<V2Loan | null>(null);
   const [ui2Docs, setUi2Docs] = useState<V2LoanDocument[]>([]);
-  const [ui2DocsLoading, setUi2DocsLoading] = useState(false);
-  const [ui2DocsError, setUi2DocsError] = useState<string | null>(null);
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
-  const [docsOpen, setDocsOpen] = useState(false);
   const [uploadingType, setUploadingType] = useState<string | null>(null);
   const [uploadingChecklistName, setUploadingChecklistName] = useState<string | null>(null);
   const [dismissedDocPromptId, setDismissedDocPromptId] = useState<string | null>(null);
@@ -582,15 +578,13 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     textPreview?: string;
     fields?: Record<string, unknown>;
   } | null>(null);
-  const [stpBusy, setStpBusy] = useState(false);
-  const [stpError, setStpError] = useState<string | null>(null);
+  /* removed STP panel state */
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestGenRef = useRef(0);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const docsPanelRef = useRef<HTMLDivElement>(null);
-  const ui2FileInputRef = useRef<HTMLInputElement>(null);
+  /* removed documents panel ref */
   const ocrFileInputRef = useRef<HTMLInputElement>(null);
   const pendingUploadRef = useRef<{ category: string; documentType: string } | null>(null);
   const pendingChecklistNameRef = useRef<string | null>(null);
@@ -647,27 +641,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     autoDocsOpenedRef.current = false;
   }, [conversationId]);
 
-  useEffect(() => {
-    if (autoDocsOpenedRef.current) return;
-    if (viewState !== 'chat') return;
-    if (!conversationId || !loan?.id) return;
-    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-    if (!lastAssistant) return;
-    const metadata = parseMetadata(lastAssistant.metadata);
-    if (!metadata || !isDocumentsChecklist(metadata.documentsChecklist)) return;
-
-    autoDocsOpenedRef.current = true;
-    setDocsOpen(true);
-    const nextExpanded =
-      metadata.documentsChecklist.identity && metadata.documentsChecklist.identity.length > 0
-        ? 'identity'
-        : metadata.documentsChecklist.income && metadata.documentsChecklist.income.length > 0
-          ? 'income'
-          : null;
-    if (nextExpanded) setExpandedCategory(nextExpanded);
-    setTimeout(() => docsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
-  }, [conversationId, loan?.id, messages, viewState]);
-
   const refreshLoan = async (activeConversationId: string): Promise<V2Loan | null> => {
     try {
       const res = await fetch(`http://localhost:8000/api/v3/conversations/${activeConversationId}/loan`);
@@ -695,15 +668,11 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   };
 
   const refreshUi2Docs = async (activeConversationId: string, activeLoanId: string) => {
-    setUi2DocsError(null);
-    setUi2DocsLoading(true);
     try {
       const res = await fetch(`http://localhost:8000/api/documents/loan/${activeLoanId}`, {
         headers: { 'X-Conversation-ID': activeConversationId },
       });
       if (!res.ok) {
-        const raw = await res.text().catch(() => '');
-        setUi2DocsError(raw ? `Failed to load documents: ${raw}` : `Failed to load documents (${res.status}).`);
         setUi2Docs([]);
         return null;
       }
@@ -711,11 +680,8 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       setUi2Docs(next);
       return next;
     } catch {
-      setUi2DocsError('Failed to load documents due to a network error.');
       setUi2Docs([]);
       return null;
-    } finally {
-      setUi2DocsLoading(false);
     }
   };
 
@@ -723,11 +689,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     if (!conversationId || !loan?.id) return;
     void refreshUi2Docs(conversationId, loan.id);
   }, [conversationId, loan?.id]);
-
-  const triggerUi2Upload = (category: string, documentType: string) => {
-    pendingUploadRef.current = { category, documentType };
-    ui2FileInputRef.current?.click();
-  };
 
   const triggerInlineUi2Upload = (category: string, documentType: string) => {
     pendingChecklistNameRef.current = null;
@@ -761,7 +722,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       el.click();
       return;
     }
-    ui2FileInputRef.current?.click();
+    ocrFileInputRef.current?.click();
   };
 
   const getDocExtraction = (doc: V2LoanDocument) => {
@@ -807,11 +768,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         headers: { 'X-Conversation-ID': conversationId },
         body: fd,
       });
-      if (!res.ok) {
-        const raw = await res.text().catch(() => '');
-        setUi2DocsError(raw ? `Upload failed: ${raw}` : `Upload failed (${res.status}).`);
-        return;
-      }
+      if (!res.ok) return;
       const created = (await res.json().catch(() => null)) as V2LoanDocument | null;
       const nextDocs = await refreshUi2Docs(conversationId, loan.id);
       await refreshLoan(conversationId);
@@ -821,7 +778,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         openDocPreview(best);
       }
     } catch {
-      setUi2DocsError('Upload failed due to a network error.');
+      /* no-op */
     } finally {
       setUploadingType(null);
       setUploadingChecklistName(null);
@@ -830,40 +787,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     }
   };
 
-  const deleteUi2Document = async (docId: string) => {
-    if (!conversationId || !loan?.id) return;
-    try {
-      const res = await fetch(`http://localhost:8000/api/documents/${docId}`, {
-        method: 'DELETE',
-        headers: { 'X-Conversation-ID': conversationId },
-      });
-      if (!res.ok) return;
-      await refreshUi2Docs(conversationId, loan.id);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const downloadUi2Document = async (docId: string, filename: string) => {
-    if (!conversationId) return;
-    try {
-      const res = await fetch(`http://localhost:8000/api/documents/${docId}/download`, {
-        headers: { 'X-Conversation-ID': conversationId },
-      });
-      if (!res.ok) return;
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename || 'document';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  /* removed panel-specific delete/download helpers */
 
   useEffect(() => {
     onMessagesUpdated?.(messages.filter((m) => !isOfficerOnlyMessage(m)));
@@ -888,10 +812,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
 
     const bootstrap = async () => {
       setBootstrapping(true);
-      setDocsOpen(false);
-      setExpandedCategory(null);
       setUi2Docs([]);
-      setUi2DocsError(null);
       if (typeof resetSignal === 'number') {
         window.localStorage.removeItem(STORAGE_KEY);
       }
@@ -1126,35 +1047,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   };
 
   const canSend = input.trim().length > 0 && !loading && !bootstrapping;
-
-  const runStp = async () => {
-    if (!conversationId || !loan?.id) return;
-    setStpError(null);
-    setStpBusy(true);
-    try {
-      const latestLoan = await refreshLoan(conversationId);
-      await refreshMessages(conversationId);
-      const currentStatus = (latestLoan?.stpProcessingStatus || '').toLowerCase();
-      if (['awaiting_acceptance', 'completed', 'processing'].includes(currentStatus)) return;
-      const res = await fetch(`http://localhost:8000/api/loans/${loan.id}/stp-process`, {
-        method: 'POST',
-        headers: { 'X-Conversation-ID': conversationId },
-      });
-      if (!res.ok) {
-        const raw = await res.text().catch(() => '');
-        setStpError(raw ? `STP failed: ${raw}` : `STP failed (${res.status}).`);
-        await refreshLoan(conversationId);
-        await refreshMessages(conversationId);
-        return;
-      }
-      await refreshLoan(conversationId);
-      await refreshMessages(conversationId);
-    } catch {
-      setStpError('STP failed due to a network error.');
-    } finally {
-      setStpBusy(false);
-    }
-  };
 
   const bubbleClassForRole = useMemo(() => {
     return {
@@ -1428,27 +1320,12 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                 type="button"
                 disabled={bootstrapping || loading || uploadingType !== null}
                 onClick={() => {
-                  setDocsOpen(true);
-                  setExpandedCategory(nextRequiredDoc.categoryKey);
                   triggerInlineUi2Upload(nextRequiredDoc.categoryKey, nextRequiredDoc.documentType);
-                  setTimeout(() => docsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
                 }}
                 className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 text-[11px] font-extrabold disabled:opacity-40 disabled:cursor-not-allowed"
                 data-testid="button-upload-next-document"
               >
                 Upload
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setDocsOpen(true);
-                  setExpandedCategory(nextRequiredDoc.categoryKey);
-                  setTimeout(() => docsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
-                }}
-                className="rounded-xl border border-slate-200/60 dark:border-white/[0.06] bg-white/90 dark:bg-white/[0.06] px-3 py-2 text-[11px] font-extrabold text-slate-700 dark:text-slate-200"
-                data-testid="button-open-documents-panel"
-              >
-                Open panel
               </button>
             </div>
           </div>
@@ -1710,204 +1587,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
 
       <div className="glass-header relative z-10 border-t border-slate-200/40 dark:border-white/[0.04] p-4 bg-white/70 dark:bg-[#141414]/80 backdrop-blur-xl">
         <div className="max-w-2xl mx-auto">
-          {viewState === 'chat' && conversationId && loan?.id && docsOpen ? (
-            <div
-              ref={docsPanelRef}
-              className="mb-3 rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] p-3"
-              data-testid="borrower-doc-upload-panel"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-xs font-extrabold tracking-tight text-slate-800 dark:text-slate-200">Your Documents</div>
-                <div className="flex items-center gap-3">
-                  <div className="text-[10px] text-slate-400 dark:text-slate-500">{loan?.catalogProductCode ? `Product: ${loan.catalogProductCode}` : ' '}</div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDocsOpen(false);
-                    }}
-                    className="text-[10px] font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                    aria-label="Hide documents panel"
-                  >
-                    Hide
-                  </button>
-                </div>
-              </div>
-              <input
-                ref={ui2FileInputRef}
-                type="file"
-                className="hidden"
-                accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  e.currentTarget.value = '';
-                  void uploadUi2Document(f);
-                }}
-                data-testid="input-file-upload"
-              />
-
-              {ui2DocsError ? <div className="mt-2 text-[11px] text-red-600 dark:text-red-400">{ui2DocsError}</div> : null}
-              {stpError ? <div className="mt-2 text-[11px] text-red-600 dark:text-red-400">{stpError}</div> : null}
-
-              {(() => {
-                const categories = getDocumentCategories(loan.loanType || '', loan.employmentType || '');
-                const getDocsForType = (documentType: string) =>
-                  ui2Docs.filter((d) => (d.documentType || '').toLowerCase() === documentType.toLowerCase());
-
-                const totalRequired = categories.flatMap((c) => c.types.filter((t) => t.required)).length;
-                const uploadedRequired = categories.flatMap((c) => c.types.filter((t) => t.required && getDocsForType(t.key).length > 0)).length;
-                const progressPercent = totalRequired > 0 ? Math.round((uploadedRequired / totalRequired) * 100) : 0;
-                const stpStatus = (loan.stpProcessingStatus || '').toLowerCase();
-                const isStpReady = totalRequired > 0 && uploadedRequired >= totalRequired;
-                const canRunStp = isStpReady && stpStatus !== 'awaiting_acceptance' && stpStatus !== 'completed' && !stpBusy;
-
-                return (
-                  <div className="mt-3 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {uploadedRequired} of {totalRequired} required uploaded
-                      </div>
-                      <div className="text-[11px] font-extrabold text-blue-700 dark:text-blue-400">{progressPercent}%</div>
-                    </div>
-                    <div className="h-2 rounded-full bg-slate-100 dark:bg-white/[0.06] overflow-hidden">
-                      <div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 transition-all" style={{ width: `${progressPercent}%` }} />
-                    </div>
-
-                    {ui2DocsLoading ? <div className="text-[11px] text-slate-500 dark:text-slate-400">Loading documents…</div> : null}
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Automated checks: {stpStatus ? stpStatus.replaceAll('_', ' ') : 'not started'}
-                      </div>
-                      <button
-                        type="button"
-                        disabled={!canRunStp}
-                        onClick={() => void runStp()}
-                        className="rounded-xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.06] px-3 py-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                        data-testid="button-run-stp"
-                      >
-                        {stpBusy ? 'Running…' : 'Run Checks'}
-                      </button>
-                    </div>
-
-                    {categories.map((cat) => {
-                      const isExpanded = expandedCategory === cat.key;
-                      return (
-                        <div key={cat.key} className="rounded-xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03]">
-                          <button
-                            type="button"
-                            onClick={() => setExpandedCategory((v) => (v === cat.key ? null : cat.key))}
-                            className="w-full px-3 py-2 flex items-center justify-between"
-                            data-testid={`button-doc-category-${cat.key}`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <div className="text-sm">{cat.icon}</div>
-                              <div className="text-xs font-extrabold tracking-tight text-slate-800 dark:text-slate-200 truncate">{cat.label}</div>
-                            </div>
-                            <div className="text-[11px] text-slate-400 dark:text-slate-500">{isExpanded ? 'Hide' : 'Show'}</div>
-                          </button>
-
-                          {!isExpanded ? null : (
-                            <div className="px-3 pb-3 grid gap-2">
-                              {cat.types.map((t) => {
-                                const docsForType = getDocsForType(t.key);
-                                const latest = docsForType[0] || null;
-                                const status = latest?.status || (t.required ? 'missing' : 'optional');
-                                const busy = uploadingType === t.key;
-                                return (
-                                  <div key={t.key} className="rounded-xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] px-3 py-2">
-                                    <div className="flex items-start justify-between gap-3">
-                                      <div className="min-w-0">
-                                        <div className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-                                          {t.label}
-                                          {t.required ? <span className="ml-2 text-[10px] text-amber-700 dark:text-amber-400">Required</span> : null}
-                                        </div>
-                                        <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">Status: {status}</div>
-                                      </div>
-                                      <div className="shrink-0 flex items-center gap-2">
-                                        <button
-                                          type="button"
-                                          disabled={busy || loading || bootstrapping}
-                                          onClick={() => triggerUi2Upload(cat.key, t.key)}
-                                          className="rounded-lg border border-slate-200/60 dark:border-white/[0.06] bg-white/90 dark:bg-white/[0.06] px-2 py-1 text-[10px] font-bold text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                                          data-testid={`button-doc-upload-${cat.key}-${t.key}`}
-                                        >
-                                          Upload
-                                        </button>
-                                      </div>
-                                    </div>
-
-                                    {docsForType.length > 0 ? (
-                                      <div className="mt-2 grid gap-1">
-                                        {docsForType.slice(0, 3).map((d) => {
-                                          const ex = getDocExtraction(d);
-                                          const err = (ex.error || '').toLowerCase();
-                                          const isUnavailable = err.includes('ocr_unavailable') || err.includes('tesseract');
-                                          const exLabel =
-                                            ex.status === 'ok'
-                                              ? 'OCR: ok'
-                                              : ex.status === 'error'
-                                                ? isUnavailable
-                                                  ? 'OCR: unavailable'
-                                                  : 'OCR: error'
-                                                : 'OCR: none';
-                                          const exTone =
-                                            ex.status === 'ok'
-                                              ? 'text-emerald-700 dark:text-emerald-400'
-                                              : ex.status === 'error'
-                                                ? 'text-rose-700 dark:text-rose-400'
-                                                : 'text-slate-500 dark:text-slate-400';
-                                          return (
-                                            <div key={d.id} className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300">
-                                              <div className="min-w-0 truncate">
-                                                {d.originalName || d.fileName || 'document'}
-                                                <span className={`ml-2 ${exTone}`}>{exLabel}</span>
-                                              </div>
-                                              <div className="shrink-0 flex items-center gap-2">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => openDocPreview(d)}
-                                                  className="text-[11px] font-bold text-slate-700 dark:text-slate-200"
-                                                  data-testid={`button-doc-preview-${d.id}`}
-                                                >
-                                                  Preview
-                                                </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => void downloadUi2Document(d.id, d.originalName || d.fileName || 'document')}
-                                                className="text-[11px] font-bold text-blue-700 dark:text-blue-400"
-                                                data-testid={`button-doc-download-${d.id}`}
-                                              >
-                                                Download
-                                              </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => void deleteUi2Document(d.id)}
-                                                className="text-[11px] font-bold text-red-700 dark:text-red-400"
-                                                data-testid={`button-doc-delete-${d.id}`}
-                                              >
-                                                Delete
-                                              </button>
-                                            </div>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    ) : null}
-
-                                    {busy ? <div className="mt-2 text-[10px] text-slate-400 dark:text-slate-500">Uploading…</div> : null}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-            </div>
-          ) : null}
+          {/* Attachments panel removed in favor of inline chat document cards */}
 
           <div className="flex gap-3 items-end">
             <div className="flex-1 relative">
@@ -1949,18 +1629,18 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
               type="button"
               onClick={() => {
                 if (viewState !== 'chat' || !conversationId || !loan?.id) return;
-                const next = !docsOpen;
-                setDocsOpen(next);
-                if (next) setTimeout(() => docsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+                const target = nextRequiredDoc
+                  ? { category: nextRequiredDoc.categoryKey, documentType: nextRequiredDoc.documentType }
+                  : { category: 'other', documentType: 'document' };
+                pendingUploadRef.current = target;
+                ocrFileInputRef.current?.click();
               }}
               disabled={viewState !== 'chat' || bootstrapping || !conversationId || !loan?.id}
               className={`rounded-2xl h-12 w-12 shadow-sm transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center ${
-                docsOpen
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white border border-blue-600/60'
-                  : 'bg-white/90 dark:bg-white/[0.06] hover:bg-slate-50 dark:hover:bg-white/[0.09] text-slate-700 dark:text-slate-200 border border-slate-200/60 dark:border-white/[0.06]'
+                'bg-white/90 dark:bg-white/[0.06] hover:bg-slate-50 dark:hover:bg-white/[0.09] text-slate-700 dark:text-slate-200 border border-slate-200/60 dark:border-white/[0.06]'
               }`}
               aria-label="Attachments"
-              aria-pressed={docsOpen}
+              aria-pressed={false}
               data-testid="button-attachments"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
