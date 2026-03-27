@@ -578,6 +578,14 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     textPreview?: string;
     fields?: Record<string, unknown>;
   } | null>(null);
+  const [lastExtraction, setLastExtraction] = useState<{
+    title: string;
+    documentType: string;
+    status: 'ok' | 'error' | 'none';
+    error?: string;
+    textPreview?: string;
+    fields?: Record<string, unknown>;
+  } | null>(null);
   /* removed STP panel state */
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -754,6 +762,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     if (!conversationId || !loan?.id) return;
     const pending = pendingUploadRef.current;
     if (!pending) return;
+    setLastExtraction(null);
     const checklistName = pendingChecklistNameRef.current;
     if (checklistName) setUploadingChecklistName(checklistName);
     setUploadingType(pending.documentType);
@@ -776,6 +785,20 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       if (created && created.id) {
         const best = nextDocs?.find((d) => d.id === created.id) ?? created;
         openDocPreview(best);
+        const dt = (pending.documentType || '').toLowerCase();
+        const shouldShowExtraction = dt.includes('id') || dt.includes('passport') || dt.includes('national') || dt.includes('job') || dt.includes('employment');
+        if (shouldShowExtraction) {
+          const title = best.originalName || best.fileName || 'document';
+          const ex = getDocExtraction(best);
+          setLastExtraction({
+            title,
+            documentType: pending.documentType,
+            status: ex.status,
+            error: ex.error,
+            textPreview: ex.textPreview,
+            fields: ex.fields,
+          });
+        }
       }
     } catch {
       /* no-op */
@@ -1226,6 +1249,8 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         <DocumentsCard
           key="documents"
           checklist={metadata.documentsChecklist}
+          collapsible={true}
+          defaultOpen={false}
           busyDocumentName={uploadingChecklistName}
           disableUpload={bootstrapping || loading || uploadingChecklistName !== null}
           onUpload={(docName) => triggerChecklistUpload(docName)}
@@ -1575,6 +1600,63 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                       <div className="w-1.5 h-1.5 bg-slate-400/70 dark:bg-slate-500 rounded-full" style={{ animation: 'bounce 1.4s infinite ease-in-out both', animationDelay: '0s' }} />
                       <div className="w-1.5 h-1.5 bg-slate-400/70 dark:bg-slate-500 rounded-full" style={{ animation: 'bounce 1.4s infinite ease-in-out both', animationDelay: '0.16s' }} />
                       <div className="w-1.5 h-1.5 bg-slate-400/70 dark:bg-slate-500 rounded-full" style={{ animation: 'bounce 1.4s infinite ease-in-out both', animationDelay: '0.32s' }} />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {lastExtraction ? (
+                <div className="flex justify-start">
+                  <div className="w-full max-w-2xl">
+                    <div
+                      data-testid="card-ocr-extraction"
+                      className="my-3 rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] p-4 shadow-sm"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-xs font-extrabold tracking-tight text-slate-800 dark:text-slate-200">Extracted information</div>
+                          <div className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-white truncate">{lastExtraction.title}</div>
+                          <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                            OCR status: {lastExtraction.status}
+                            {lastExtraction.documentType ? ` • type: ${lastExtraction.documentType}` : ''}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setLastExtraction(null)}
+                          className="shrink-0 text-[11px] font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+
+                      {lastExtraction.status === 'error' ? (
+                        <div className="mt-3 text-[11px] text-rose-700 dark:text-rose-400">
+                          {lastExtraction.error ? `Extraction failed: ${lastExtraction.error}` : 'Extraction failed.'}
+                        </div>
+                      ) : null}
+
+                      {lastExtraction.fields && Object.keys(lastExtraction.fields).length > 0 ? (
+                        <div className="mt-3 rounded-xl border border-slate-200/60 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.04] px-3 py-2">
+                          <div className="text-xs font-extrabold text-slate-800 dark:text-slate-200">Fields</div>
+                          <div className="mt-2 grid gap-2 text-[11px] text-slate-700 dark:text-slate-200">
+                            {Object.entries(lastExtraction.fields).map(([k, v]) => (
+                              <div key={k} className="flex items-start justify-between gap-3">
+                                <div className="font-bold">{k}</div>
+                                <div className="text-right break-words">{typeof v === 'string' ? v : JSON.stringify(v)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {lastExtraction.textPreview ? (
+                        <div className="mt-3 rounded-xl border border-slate-200/60 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.04] px-3 py-2">
+                          <div className="text-xs font-extrabold text-slate-800 dark:text-slate-200">Text preview</div>
+                          <pre className="mt-2 whitespace-pre-wrap text-[11px] text-slate-700 dark:text-slate-200 max-h-[35vh] overflow-y-auto">
+                            {lastExtraction.textPreview}
+                          </pre>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>

@@ -30,6 +30,28 @@ const BORROWER_JOURNEY_STEPS = [
   { key: 'disbursement', label: 'Disbursement' },
 ];
 
+type AgentStyle = {
+  id: string;
+  label: string;
+  ringClass: string;
+  badgeClass: string;
+  lineClass: string;
+};
+
+const AGENT_STYLES: AgentStyle[] = [
+  { id: 'intake', label: 'Intake Agent', ringClass: 'bg-sky-500/20 dark:bg-sky-400/15', badgeClass: 'bg-sky-500/40 dark:bg-sky-400/30', lineClass: 'bg-sky-500/70 dark:bg-sky-400/50' },
+  { id: 'documents', label: 'Documents Agent', ringClass: 'bg-blue-500/20 dark:bg-blue-400/15', badgeClass: 'bg-blue-500/40 dark:bg-blue-400/30', lineClass: 'bg-blue-500/70 dark:bg-blue-400/50' },
+  { id: 'underwriting', label: 'Underwriting Agent', ringClass: 'bg-indigo-500/20 dark:bg-indigo-400/15', badgeClass: 'bg-indigo-500/40 dark:bg-indigo-400/30', lineClass: 'bg-indigo-500/70 dark:bg-indigo-400/50' },
+  { id: 'closing', label: 'Closing Agent', ringClass: 'bg-violet-500/20 dark:bg-violet-400/15', badgeClass: 'bg-violet-500/40 dark:bg-violet-400/30', lineClass: 'bg-violet-500/70 dark:bg-violet-400/50' },
+];
+
+function agentStyleForStepIndex(stepIndex: number): AgentStyle {
+  if (stepIndex <= 1) return AGENT_STYLES[0];
+  if (stepIndex === 2) return AGENT_STYLES[1];
+  if (stepIndex <= 4) return AGENT_STYLES[2];
+  return AGENT_STYLES[3];
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
 }
@@ -159,6 +181,7 @@ export const BorrowerJourneyTracker: React.FC<BorrowerJourneyTrackerProps> = ({
             {BORROWER_JOURNEY_STEPS.map((step, i) => {
               const isCompleted = i < currentIdx;
               const isCurrent = i === currentIdx;
+              const agentStyle = agentStyleForStepIndex(i);
  
               return (
                 <div key={step.key} className="flex items-start" data-testid={`journey-step-${i}`}>
@@ -170,22 +193,24 @@ export const BorrowerJourneyTracker: React.FC<BorrowerJourneyTrackerProps> = ({
                           style={{ animationDuration: '2s' }} 
                         />
                       )}
-                      <div
-                        className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-500 ${
-                          isCompleted
-                            ? 'bg-blue-600 text-white shadow-sm shadow-blue-200/50 dark:shadow-blue-900/30'
-                            : isCurrent
-                              ? 'bg-blue-600 text-white shadow-md shadow-blue-200/50 dark:shadow-blue-900/30 ring-2 ring-blue-100 dark:ring-blue-500/15'
-                              : 'bg-slate-100 dark:bg-white/[0.06] text-slate-400 dark:text-slate-500'
-                        }`}
-                      >
-                        {isCompleted ? (
-                          <svg className="w-3 h-3" strokeWidth={3} viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        ) : (
-                          <span>{i + 1}</span>
-                        )}
+                      <div className={`relative z-10 rounded-full p-[1.5px] ${agentStyle.ringClass}`} title={agentStyle.label}>
+                        <div
+                          className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-500 ${
+                            isCompleted
+                              ? 'bg-blue-600 text-white shadow-sm shadow-blue-200/50 dark:shadow-blue-900/30'
+                              : isCurrent
+                                ? 'bg-blue-600 text-white shadow-md shadow-blue-200/50 dark:shadow-blue-900/30 ring-2 ring-blue-100 dark:ring-blue-500/15'
+                                : 'bg-slate-100 dark:bg-white/[0.06] text-slate-400 dark:text-slate-500'
+                          }`}
+                        >
+                          {isCompleted ? (
+                            <svg className="w-3 h-3" strokeWidth={3} viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                              <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          ) : (
+                            <span>{i + 1}</span>
+                          )}
+                        </div>
                       </div>
                     </div>
  
@@ -200,13 +225,14 @@ export const BorrowerJourneyTracker: React.FC<BorrowerJourneyTrackerProps> = ({
                     >
                       {step.label}
                     </p>
+                    <div className={`mt-1 h-[3px] w-6 rounded-full ${agentStyle.badgeClass}`} aria-hidden="true" />
                   </div>
  
                   {i < BORROWER_JOURNEY_STEPS.length - 1 && (
                     <div className="flex items-center pt-3 -mx-0.5">
                       <div 
                         className={`h-[2px] w-6 transition-colors duration-500 ${
-                          i < currentIdx ? 'bg-blue-500' : 'bg-slate-200 dark:bg-white/[0.06]'
+                          i < currentIdx ? agentStyle.lineClass : 'bg-slate-200 dark:bg-white/[0.06]'
                         }`} 
                       />
                     </div>

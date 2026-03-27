@@ -18,9 +18,18 @@ interface DocumentsCardProps {
   onUpload?: (documentName: string) => void;
   busyDocumentName?: string | null;
   disableUpload?: boolean;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }
 
-export function DocumentsCard({ checklist, onUpload, busyDocumentName = null, disableUpload = false }: DocumentsCardProps) {
+export function DocumentsCard({
+  checklist,
+  onUpload,
+  busyDocumentName = null,
+  disableUpload = false,
+  collapsible = false,
+  defaultOpen = false,
+}: DocumentsCardProps) {
   const renderDocumentSection = (title: string, documents: DocumentItem[]) => (
     <div className="mb-4">
       <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
@@ -61,20 +70,39 @@ export function DocumentsCard({ checklist, onUpload, busyDocumentName = null, di
     </div>
   );
 
-  return (
-    <div
-      data-testid="documents-card"
-      className="my-4 rounded-2xl border border-slate-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-5 shadow-sm"
-    >
-      <div className="flex items-center gap-2 mb-4">
-        <div className="w-8 h-8 rounded-xl bg-slate-600 dark:bg-slate-500 flex items-center justify-center">
-          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-        </div>
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Required Documents</h3>
-      </div>
+  const allDocuments = [
+    ...checklist.identity,
+    ...checklist.income,
+    ...(checklist.business || []),
+    ...(checklist.property || []),
+    ...(checklist.vehicle || []),
+  ];
+  const totalCount = allDocuments.length;
+  const requiredCount = allDocuments.filter((d) => d.status === 'required').length;
 
+  const header = (
+    <div className="flex items-center gap-2">
+      <div className="w-8 h-8 rounded-xl bg-slate-600 dark:bg-slate-500 flex items-center justify-center">
+        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+          />
+        </svg>
+      </div>
+      <div className="min-w-0">
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Required Documents</h3>
+        <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+          {requiredCount} required • {totalCount} total
+        </div>
+      </div>
+    </div>
+  );
+
+  const content = (
+    <>
       {renderDocumentSection('Identity Documents', checklist.identity)}
       {renderDocumentSection('Income Documents', checklist.income)}
       {checklist.business && renderDocumentSection('Business Documents', checklist.business)}
@@ -86,6 +114,34 @@ export function DocumentsCard({ checklist, onUpload, busyDocumentName = null, di
           <strong>Tip:</strong> Upload clear photos or PDFs. Documents are processed using OCR for faster verification.
         </p>
       </div>
+    </>
+  );
+
+  if (collapsible) {
+    return (
+      <details
+        open={defaultOpen}
+        data-testid="documents-card"
+        className="my-4 rounded-2xl border border-slate-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-5 shadow-sm"
+      >
+        <summary className="list-none cursor-pointer select-none">
+          <div className="flex items-center justify-between gap-3">
+            {header}
+            <div className="shrink-0 text-[11px] font-semibold text-slate-600 dark:text-slate-300">Click to expand</div>
+          </div>
+        </summary>
+        <div className="mt-4">{content}</div>
+      </details>
+    );
+  }
+
+  return (
+    <div
+      data-testid="documents-card"
+      className="my-4 rounded-2xl border border-slate-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-5 shadow-sm"
+    >
+      <div className="mb-4">{header}</div>
+      {content}
     </div>
   );
 }
