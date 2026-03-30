@@ -505,6 +505,34 @@ function App() {
         .slice(0, 3) as Array<Record<string, unknown>>;
     }, [conversation?.approvalProbability]);
 
+    const latestCalculated = React.useMemo(() => {
+      const msgs = visibleMessages.slice().reverse();
+      for (const m of msgs) {
+        if (m.role !== 'assistant') continue;
+        const meta = typeof m.metadata === 'object' && m.metadata ? (m.metadata as Record<string, unknown>) : null;
+        const calc = meta?.calculatedMetrics;
+        if (calc && typeof calc === 'object') {
+          return calc as Record<string, unknown>;
+        }
+      }
+      return null;
+    }, [visibleMessages]);
+
+    const stpTier = React.useMemo(() => {
+      const v = latestCalculated?.stpTier;
+      return typeof v === 'string' ? v : null;
+    }, [latestCalculated]);
+
+    const riskGrade = React.useMemo(() => {
+      const v = latestCalculated?.riskGrade;
+      return typeof v === 'string' ? v : null;
+    }, [latestCalculated]);
+
+    const foir = React.useMemo(() => {
+      const v = latestCalculated?.foir;
+      return typeof v === 'number' ? v : null;
+    }, [latestCalculated]);
+
     const recommendedProducts = React.useMemo(() => {
       const raw = conversation?.recommendedProducts as unknown;
       return Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
@@ -725,6 +753,27 @@ function App() {
                           )}
                         </div>
                       )}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-3">
+                        <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">STP Tier</div>
+                        <div className="mt-1 text-xl font-black tracking-tight text-slate-900 dark:text-white" data-testid="stp-tier">
+                          {stpTier ? stpTier : '—'}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-3">
+                        <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Risk Grade</div>
+                        <div className="mt-1 text-xl font-black tracking-tight text-slate-900 dark:text-white" data-testid="risk-grade">
+                          {riskGrade ? riskGrade : '—'}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-3">
+                        <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">FOIR</div>
+                        <div className="mt-1 text-xl font-black tracking-tight text-slate-900 dark:text-white" data-testid="foir">
+                          {foir === null ? '—' : `${foir.toFixed(1)}%`}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-3">

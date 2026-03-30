@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 from src.shared.db import get_db, Conversation, Loan, LoanPhase, Message as DBMessage, V3ConversationState
 from src.shared.state_persistence import get_or_create_state, update_state, get_state, delete_state
 from src.shared.xml_parser import parse_llm_response
+from src.core.calculation_engines import compute_full_loan_metrics, assess_stp_eligibility
 from src.agents.graph_state import (
     AgenticOrchestratorState,
     ConversationMode,
@@ -362,6 +363,74 @@ async def send_message(session_id: str, request: V3MessageRequest, db: Session =
             db.commit()
             db.refresh(loan)
 
+    # Calculate and attach deterministic metrics if not already present
+    try:
+        if "calculatedMetrics" not in merged_metadata:
+            intent = parsed_metadata.get("intentAnalysis")
+            intent_rec = intent if isinstance(intent, dict) else None
+            loan_data: dict[str, Any] = {}
+            if loan is not None:
+                loan_data = {
+                    "id": loan.id,
+                    "borrower_name": loan.borrower_name,
+                    "borrower_email": loan.borrower_email,
+                    "borrower_phone": loan.borrower_phone,
+                    "loan_type": loan.loan_type,
+                    "loan_amount": loan.loan_amount,
+                    "interest_rate": loan.interest_rate,
+                    "tenure": loan.tenure,
+                    "monthly_income": loan.monthly_income,
+                    "existing_debts": loan.existing_debts,
+                    "credit_score": loan.credit_score,
+                    "employment_type": loan.employment_type,
+                    "purpose": loan.purpose,
+                    "collateral": loan.collateral,
+                    "down_payment": loan.down_payment,
+                    "property_value": loan.property_value,
+                    "ltv": loan.ltv,
+                }
+            elif intent_rec is not None:
+                loan_data = {
+                    "loan_type": str(intent_rec.get("purpose") or "personal"),
+                    "loan_amount": intent_rec.get("loanAmount"),
+                    "monthly_income": intent_rec.get("monthlyIncome"),
+                    "existing_debts": intent_rec.get("existingDebts"),
+                    "credit_score": intent_rec.get("creditHistory"),
+                    "employment_type": intent_rec.get("employmentType"),
+                    "tenure": intent_rec.get("preferredTenure"),
+                    "property_value": intent_rec.get("propertyValue"),
+                    "down_payment": intent_rec.get("downPayment"),
+                    "collateral": intent_rec.get("collateralAvailable"),
+                }
+            if loan_data:
+                snapshot = compute_full_loan_metrics(loan_data)
+                stp = assess_stp_eligibility(loan_data)
+                merged_metadata["calculatedMetrics"] = {
+                    "computedAt": snapshot.computed_at,
+                    "emi": snapshot.emi.emi,
+                    "totalInterest": snapshot.emi.total_interest,
+                    "totalRepayment": snapshot.emi.total_repayment,
+                    "apr": snapshot.apr.apr,
+                    "foir": snapshot.affordability.foir,
+                    "dti": snapshot.affordability.dti,
+                    "dscr": snapshot.affordability.dscr,
+                    "incomeSurplus": snapshot.affordability.income_surplus,
+                    "ltv": snapshot.collateral.ltv,
+                    "collateralCoverage": snapshot.collateral.collateral_coverage_ratio,
+                    "approvalProbability": snapshot.credit_risk.approval_probability,
+                    "riskGrade": snapshot.credit_risk.risk_grade,
+                    "sanctionReadinessScore": snapshot.credit_risk.sanction_readiness_score,
+                    "eligibilityScore": snapshot.credit_risk.eligibility_score,
+                    "policyDeviationCount": snapshot.credit_risk.policy_deviation_count,
+                    "compensatingFactorCount": snapshot.credit_risk.compensating_factor_count,
+                    "delinquencyRiskSignal": snapshot.credit_risk.delinquency_risk_signal,
+                    "dropOffRiskSignal": snapshot.credit_risk.drop_off_risk_signal,
+                    "stpTier": stp.tier,
+                    "stpReasons": stp.reasons,
+                }
+    except Exception as e:
+        logger.warning(f"Failed to compute calculated metrics for session {session_id}: {e}")
+
     _sync_phase(db, session_id, state)
 
     assistant_message = {
@@ -521,6 +590,8 @@ async def get_messages(session_id: str, db: Session = Depends(get_db)):
                             meta["selectedRecommendation"] = msg.metadata.get("selected_recommendation")
                         if "awaiting_acceptance" in msg.metadata:
                             meta["awaitingAcceptance"] = bool(msg.metadata.get("awaiting_acceptance"))
+                        if "calculatedMetrics" in msg.metadata and "calculatedMetrics" not in meta:
+                            meta["calculatedMetrics"] = msg.metadata.get("calculatedMetrics")
                     if (
                         docs_checklist_v2 is not None
                         and isinstance(msg.metadata, dict)
