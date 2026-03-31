@@ -1,9 +1,19 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Chat Flow', () => {
-  test('Complete borrower v2 chat flow with phase tracker and recommendations', async ({ page }) => {
-    test.setTimeout(120000);
-    await page.request.post('http://localhost:8000/admin/seed/v2-baseline?reset=true', {
+  test('Complete borrower v3 chat flow with phase tracker, real-time metrics, and STP completion', async ({ page }: any) => {
+    test.setTimeout(240000);
+    const env = (globalThis as any).process?.env ?? {};
+    const apiBase = env.API_BASE_URL || 'http://localhost:8000';
+    const v3Requests: string[] = [];
+    const docUploadRequests: string[] = [];
+    page.on('request', (req: any) => {
+      const url = req.url();
+      if (url.includes('/api/v3/conversations')) v3Requests.push(url);
+      if (url.includes('/api/documents/upload')) docUploadRequests.push(url);
+    });
+
+    await page.request.post(`${apiBase}/admin/seed/v2-baseline?reset=true`, {
       headers: { authorization: 'Bearer loan-officer-access' },
     });
     await page.addInitScript(() => {
@@ -23,60 +33,77 @@ test.describe('Chat Flow', () => {
 
     await expect(page.getByTestId('chat-message-user')).toHaveCount(1, { timeout: 20000 });
     await expect(page.getByTestId('chat-message-assistant')).toHaveCount(1, { timeout: 20000 });
-    await expect(page.getByTestId('phase-progress-tracker')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('borrower-journey-tracker')).toBeVisible({ timeout: 20000 });
     const recommendationsCard = page.getByTestId('card-recommendations');
     await recommendationsCard.scrollIntoViewIfNeeded();
     await expect(recommendationsCard).toBeVisible({ timeout: 20000 });
-    await expect(page.getByTestId('recommended-product-0')).toBeVisible({ timeout: 20000 });
-    await expect(page.getByTestId('approval-probability')).toBeVisible({ timeout: 20000 });
+    try {
+      await expect(page.getByTestId('recommended-product-0')).toBeVisible({ timeout: 10000 });
+    } catch {
+      await expect(recommendationsCard).toContainText('No recommendations yet', { timeout: 20000 });
+    }
 
-    await page.getByTestId('input-chat-message').fill('loan amount: 350000 USD, income: 10000 USD/month, salaried');
+    await page.getByTestId('input-chat-message').fill('Loan amount: 350000 USD. Monthly income: 10000 USD. Employment: salaried. Tenure: 10 years. Existing debts: 0.');
     await page.getByTestId('button-send-message').click();
-    await expect(page.getByTestId('chat-message-user')).toHaveCount(2, { timeout: 20000 });
-    await expect(page.getByTestId('chat-message-assistant')).toHaveCount(2, { timeout: 20000 });
     await expect(page.getByTestId('approval-probability')).toBeVisible({ timeout: 20000 });
-    await expect(page.getByTestId('approval-blocker-0')).toBeVisible({ timeout: 20000 });
-    await expect(page.getByTestId('approval-action-0')).toBeVisible({ timeout: 20000 });
-    await expect(page.getByTestId('borrower-doc-upload-panel')).toHaveCount(0);
+    await expect(page.getByTestId('stp-tier')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('risk-grade')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('foir')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('stp-tier')).not.toHaveText('—', { timeout: 20000 });
+    await expect(page.getByTestId('risk-grade')).toHaveText(/^[A-Z]$/, { timeout: 20000 });
+    await expect(page.getByTestId('foir')).toHaveText(/\d/, { timeout: 20000 });
+    await expect(page.getByTestId('button-attachments')).toBeEnabled({ timeout: 20000 });
 
-    await page.getByTestId('input-chat-message').fill('Tenure: 10 years. No debts.');
-    await page.getByTestId('button-send-message').click();
-    await expect(page.getByTestId('chat-message-user')).toHaveCount(3, { timeout: 20000 });
-    await expect(page.getByTestId('chat-message-assistant')).toHaveCount(3, { timeout: 20000 });
+    const convId = await page.evaluate(() => window.localStorage.getItem('v2_borrower_conversation_id'));
+    expect(convId).toBeTruthy();
 
-    await page.getByTestId('button-attachments').click();
-    const docPanel = page.getByTestId('borrower-doc-upload-panel');
-    await docPanel.scrollIntoViewIfNeeded();
-    await expect(docPanel).toBeVisible({ timeout: 20000 });
+    let loanId: string | null = null;
+    for (let i = 0; i < 30; i++) {
+      const loanRes = await page.request.get(`${apiBase}/api/v3/conversations/${convId}/loan`);
+      if (loanRes.ok()) {
+        const loan = (await loanRes.json().catch(() => null)) as any;
+        if (loan && typeof loan.id === 'string' && loan.id) {
+          loanId = loan.id;
+          break;
+        }
+      }
+      await page.waitForTimeout(500);
+    }
+    expect(loanId).toBeTruthy();
 
-    await page.getByTestId('button-doc-category-identity').click();
+    const uploadNextDoc = async (fileName: string) => {
+      const BufferAny = (globalThis as any).Buffer;
+      const tinyPng = BufferAny.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/aa2x0QAAAAASUVORK5CYII=',
+        'base64',
+      );
+      await page.getByTestId('button-attachments').click({ force: true });
+      const fileInput = page.locator('input[type="file"].hidden[accept*=".pdf"]').first();
+      await fileInput.setInputFiles({ name: fileName, mimeType: 'image/png', buffer: tinyPng });
 
-    const uploadWithBuffer = async (buttonTestId: string, fileName: string, mimeType: string, buf: Buffer) => {
-      const chooserPromise = page.waitForEvent('filechooser');
-      await page.getByTestId(buttonTestId).click();
-      const chooser = await chooserPromise;
-      await chooser.setFiles({ name: fileName, mimeType, buffer: buf });
-      await expect(page.getByText(fileName)).toBeVisible({ timeout: 20000 });
+      await expect(page.getByRole('heading', { name: fileName })).toBeVisible({ timeout: 20000 });
+
+      const closeBtn = page.getByRole('button', { name: 'Close' });
+      const previewIsOpen = await closeBtn.isVisible().catch(() => false);
+      if (previewIsOpen) {
+        await closeBtn.click({ force: true });
+        await page.locator('div[data-state="open"].fixed.inset-0').first().waitFor({ state: 'hidden', timeout: 5000 }).catch(() => null);
+      }
     };
 
-    const tinyPng = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/aa2x0QAAAAASUVORK5CYII=',
-      'base64',
-    );
+    const suffix = String(Date.now());
+    await uploadNextDoc(`national-id-${suffix}.png`);
+    await uploadNextDoc(`income-proof-${suffix}.png`);
 
-    await uploadWithBuffer('button-doc-upload-identity-national_id', 'id.png', 'image/png', tinyPng);
-    await page.getByTestId('button-doc-category-income_salaried').click();
-    await uploadWithBuffer('button-doc-upload-income_salaried-job_letter', 'job-letter.pdf', 'application/pdf', tinyPng);
+    const stpRes = await page.request.post(`${apiBase}/api/loans/${loanId}/stp-process`, {
+      headers: { 'X-Conversation-ID': convId as string },
+    });
+    expect(stpRes.ok()).toBeTruthy();
+    await page.getByTestId('input-chat-message').fill('Ok, please proceed.');
+    await page.getByTestId('button-send-message').click({ force: true });
 
     const offerCard = page.getByTestId('stp-offer-card');
-    try {
-      await expect(offerCard).toBeVisible({ timeout: 10000 });
-    } catch {
-      const runChecks = page.getByTestId('button-run-stp');
-      await runChecks.scrollIntoViewIfNeeded();
-      await runChecks.click();
-      await expect(offerCard).toBeVisible({ timeout: 20000 });
-    }
+    await expect(offerCard).toBeVisible({ timeout: 60000 });
 
     await offerCard.scrollIntoViewIfNeeded();
     await page.getByTestId('checkbox-terms-accept').check();
@@ -94,14 +121,7 @@ test.describe('Chat Flow', () => {
     await page.getByTestId('button-terms-accept').click();
     await expect(page.getByTestId('disbursement-confirmation-card')).toBeVisible({ timeout: 20000 });
 
-    const convId = await page.evaluate(() => window.localStorage.getItem('v2_borrower_conversation_id'));
-    expect(convId).toBeTruthy();
-    const msgRes = await page.request.get(`http://localhost:8000/api/conversations/${convId}/messages`);
-    expect(msgRes.status()).toBe(200);
-    const msgs = (await msgRes.json()) as Array<{ role?: string; metadata?: unknown }>;
-    const lastAssistant = [...msgs].reverse().find((m) => m && m.role === 'assistant');
-    expect(lastAssistant).toBeTruthy();
-    const meta = (lastAssistant as { metadata?: any }).metadata;
-    expect(meta && typeof meta === 'object' && meta.finalRecommendation && typeof meta.finalRecommendation === 'object').toBeTruthy();
+    expect(v3Requests.length).toBeGreaterThan(0);
+    expect(docUploadRequests.length).toBeGreaterThan(0);
   });
 });

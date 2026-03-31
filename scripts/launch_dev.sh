@@ -118,6 +118,8 @@ echo "[KS LOS] Cleaning up previous session..."
 if [ -f "$COMPOSE_FILE" ]; then
     echo "[KS LOS] Stopping Docker containers..."
     docker compose -f "$COMPOSE_FILE" down --remove-orphans || true
+    echo "[KS LOS] Pulling latest Docker images..."
+    docker compose -f "$COMPOSE_FILE" pull || true
 fi
 
 # 2. Kill local processes on critical ports
@@ -230,12 +232,10 @@ fi
 if [ -x "$ROOT_DIR/venv/bin/python" ]; then
   PYTHON_BIN="$ROOT_DIR/venv/bin/python"
 fi
-"$PYTHON_BIN" -m pip install -U pip wheel setuptools >/dev/null 2>&1 || true
-if ! "$PYTHON_BIN" -c "import uvicorn" >/dev/null 2>&1; then
-  if [ -f "$ROOT_DIR/requirements.txt" ]; then
-    echo "[KS LOS] Installing backend dependencies..."
-    "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
-  fi
+"$PYTHON_BIN" -m pip install -U pip "wheel<0.46" setuptools >/dev/null 2>&1 || true
+if [ -f "$ROOT_DIR/requirements.txt" ]; then
+  echo "[KS LOS] Installing backend dependencies..."
+  "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
 fi
 
 if ! "$PYTHON_BIN" -c "import uvicorn" >/dev/null 2>&1; then
@@ -295,14 +295,11 @@ if [ -f "$FRONT_DIR/package.json" ]; then
   # Start Frontend with nohup
   (
     cd "$FRONT_DIR"
-    # Install dependencies if node_modules is missing
-    if [ ! -d "node_modules" ]; then
-      echo "[KS LOS] Installing frontend dependencies (this may take a moment)..."
-      if [ -f "package-lock.json" ]; then
-        npm ci || npm install
-      else
-        npm install
-      fi
+    echo "[KS LOS] Installing frontend dependencies (this may take a moment)..."
+    if [ -f "package-lock.json" ]; then
+      npm ci || npm install
+    else
+      npm install
     fi
     
     echo "[KS LOS] Starting frontend dev server..."

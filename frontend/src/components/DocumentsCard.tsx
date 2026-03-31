@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 interface DocumentItem {
   name: string;
   status: 'required' | 'optional';
@@ -30,6 +32,12 @@ export function DocumentsCard({
   collapsible = false,
   defaultOpen = false,
 }: DocumentsCardProps) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    setIsOpen(defaultOpen);
+  }, [defaultOpen]);
+
   const renderDocumentSection = (title: string, documents: DocumentItem[]) => (
     <div className="mb-4">
       <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
@@ -120,14 +128,25 @@ export function DocumentsCard({
   if (collapsible) {
     return (
       <details
-        open={defaultOpen}
+        open={isOpen}
+        onToggle={(e) => setIsOpen((e.currentTarget as HTMLDetailsElement).open)}
         data-testid="documents-card"
         className="my-4 rounded-2xl border border-slate-200/60 dark:border-white/10 bg-white/80 dark:bg-white/5 p-5 shadow-sm"
       >
         <summary className="list-none cursor-pointer select-none">
           <div className="flex items-center justify-between gap-3">
             {header}
-            <div className="shrink-0 text-[11px] font-semibold text-slate-600 dark:text-slate-300">Click to expand</div>
+            <div className="shrink-0 flex items-center gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+              <span>{isOpen ? 'Click to collapse' : 'Click to expand'}</span>
+              <svg
+                className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
           </div>
         </summary>
         <div className="mt-4">{content}</div>

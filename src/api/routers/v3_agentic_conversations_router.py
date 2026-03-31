@@ -17,6 +17,7 @@ Phase 1 Update: Uses database-backed state persistence instead of in-memory stor
 import uuid
 import logging
 from datetime import datetime
+import re
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 from src.shared.db import get_db, Conversation, Loan, LoanPhase, Message as DBMessage, V3ConversationState
 from src.shared.state_persistence import get_or_create_state, update_state, get_state, delete_state
 from src.shared.xml_parser import parse_llm_response
-from src.core.calculation_engines import compute_full_loan_metrics, assess_stp_eligibility
+from src.core.calculation_engines import compute_full_loan_metrics, assess_stp_eligibility, parse_numeric
 from src.agents.graph_state import (
     AgenticOrchestratorState,
     ConversationMode,
@@ -147,6 +148,234 @@ def _sync_phase(db: Session, session_id: str, state: AgenticOrchestratorState) -
         loan.current_phase_id = phase_id
         db.add(loan)
     db.commit()
+
+
+def _as_record(v: Any) -> Optional[Dict[str, Any]]:
+    return v if isinstance(v, dict) else None
+
+
+def _extract_intent_summary(parsed_metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    intent = _as_record(parsed_metadata.get("intentAnalysis"))
+    if not intent:
+        return None
+    summary = _as_record(intent.get("intentSummary"))
+    if summary:
+        return summary
+    return intent
+
+
+def _build_loan_data_from_state(state: AgenticOrchestratorState) -> Dict[str, Any]:
+    ctx = state.captured_context
+    if ctx is None:
+        return {}
+    loan_data: Dict[str, Any] = {}
+    if ctx.borrower_name:
+        loan_data["borrower_name"] = ctx.borrower_name
+    if ctx.email:
+        loan_data["borrower_email"] = ctx.email
+    if ctx.phone:
+        loan_data["borrower_phone"] = ctx.phone
+    if ctx.purpose:
+        loan_data["purpose"] = ctx.purpose
+        loan_data["loan_type"] = ctx.purpose
+    if ctx.loan_amount is not None:
+        loan_data["loan_amount"] = ctx.loan_amount
+    if ctx.monthly_income is not None:
+        loan_data["monthly_income"] = ctx.monthly_income
+    if ctx.existing_debts is not None:
+        loan_data["existing_debts"] = ctx.existing_debts
+    if ctx.employment_type:
+        loan_data["employment_type"] = ctx.employment_type
+    if ctx.credit_score is not None:
+        loan_data["credit_score"] = ctx.credit_score
+    if ctx.property_value is not None:
+        loan_data["property_value"] = ctx.property_value
+    if ctx.down_payment is not None:
+        loan_data["down_payment"] = ctx.down_payment
+    if ctx.loan_tenure_years is not None:
+        loan_data["tenure"] = f"{ctx.loan_tenure_years} years"
+    if ctx.collateral_available:
+        loan_data["collateral"] = ctx.collateral_available
+    return loan_data
+
+
+def _build_loan_data_from_history(state: AgenticOrchestratorState) -> Dict[str, Any]:
+    msgs = getattr(state, "conversation_history", None)
+    if not isinstance(msgs, list) or not msgs:
+        return {}
+
+    user_texts: list[str] = []
+    for m in msgs:
+        try:
+            if getattr(m, "role", None) == "user" and isinstance(getattr(m, "content", None), str):
+                user_texts.append(m.content)
+        except Exception:
+            continue
+
+    combined = " ".join(user_texts).strip()
+    if not combined:
+        return {}
+
+    low = combined.lower()
+    out: Dict[str, Any] = {}
+
+    if "home" in low or "mortgage" in low:
+        out["loan_type"] = "home"
+        out["purpose"] = "home"
+    elif "vehicle" in low or "car" in low or "auto" in low:
+        out["loan_type"] = "vehicle"
+        out["purpose"] = "vehicle"
+    elif "business" in low:
+        out["loan_type"] = "business"
+        out["purpose"] = "business"
+    elif "personal" in low:
+        out["loan_type"] = "personal"
+        out["purpose"] = "personal"
+
+    if "salaried" in low or "salary" in low:
+        out["employment_type"] = "salaried"
+    elif "self employed" in low or "self-employed" in low or "freelance" in low or "contractor" in low:
+        out["employment_type"] = "self-employed"
+
+    nums = [float(n.replace(",", "")) for n in re.findall(r"(\d[\d,]*)", combined)]
+    if nums:
+        out["loan_amount"] = nums[0]
+    if len(nums) >= 2:
+        out["monthly_income"] = nums[1]
+    if len(nums) >= 3:
+        out["existing_debts"] = nums[2]
+
+    tenure_match = re.search(r"(?:tenure|term)\s*[:=]?\s*(\d[\d,\.]*)\s*(years?|yrs?|months?|mos?)?", low)
+    if tenure_match:
+        raw_num = tenure_match.group(1)
+        unit = tenure_match.group(2) or ""
+        unit = unit.strip().lower()
+        if unit.startswith("y"):
+            out["tenure"] = f"{raw_num} years"
+        elif unit.startswith("m"):
+            out["tenure"] = f"{raw_num} months"
+        else:
+            out["tenure"] = raw_num
+    else:
+        years_match = re.search(r"(\d[\d,\.]*)\s*(years?|yrs?)", low)
+        months_match = re.search(r"(\d[\d,\.]*)\s*(months?|mos?)", low)
+        if years_match:
+            out["tenure"] = f"{years_match.group(1)} years"
+        elif months_match:
+            out["tenure"] = f"{months_match.group(1)} months"
+
+    return out
+
+
+def _should_compute_snapshot(loan_data: Dict[str, Any]) -> bool:
+    principal = parse_numeric(loan_data.get("loan_amount"))
+    monthly_income = parse_numeric(loan_data.get("monthly_income"))
+    return principal > 0 and monthly_income > 0
+
+
+def _should_compute_stp(loan_data: Dict[str, Any]) -> bool:
+    principal = parse_numeric(loan_data.get("loan_amount"))
+    monthly_income = parse_numeric(loan_data.get("monthly_income"))
+    employment = str(loan_data.get("employment_type") or "").strip()
+    return principal > 0 and monthly_income > 0 and bool(employment)
+
+
+def _ensure_conversation_row(db: Session, session_id: str, state: AgenticOrchestratorState) -> Conversation:
+    conv = db.get(Conversation, session_id)
+    if conv is not None:
+        return conv
+    conv = Conversation(
+        id=session_id,
+        borrower_name=state.captured_context.borrower_name if state.captured_context else None,
+        status="active",
+        chat_role="borrower",
+        next_conversation_angle="Ask about loan purpose",
+    )
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return conv
+
+
+def _ensure_loan_row(db: Session, session_id: str, loan_data: Dict[str, Any], docs_checklist_v2: Optional[Dict[str, Any]]) -> Loan:
+    existing = (
+        db.query(Loan)
+        .filter(Loan.conversation_id == session_id)
+        .order_by(Loan.created_at.desc(), Loan.id.desc())
+        .first()
+    )
+
+    def _set_if_present(attr: str, value: Any):
+        if value is None:
+            return
+        if isinstance(value, str) and not value.strip():
+            return
+        if hasattr(existing, attr):
+            setattr(existing, attr, value)
+
+    if existing is None:
+        existing = Loan(
+            borrower_name=str(loan_data.get("borrower_name") or "Unknown"),
+            borrower_email=loan_data.get("borrower_email"),
+            borrower_phone=loan_data.get("borrower_phone"),
+            loan_type=str(loan_data.get("loan_type") or loan_data.get("purpose") or "personal"),
+            loan_amount=str(loan_data.get("loan_amount") or "0"),
+            interest_rate=str(loan_data.get("interest_rate") or loan_data.get("interestRate") or ""),
+            tenure=str(loan_data.get("tenure") or ""),
+            monthly_income=str(loan_data.get("monthly_income") or ""),
+            existing_debts=str(loan_data.get("existing_debts") or ""),
+            credit_score=str(loan_data.get("credit_score") or ""),
+            employment_type=loan_data.get("employment_type"),
+            purpose=loan_data.get("purpose"),
+            collateral=loan_data.get("collateral"),
+            down_payment=str(loan_data.get("down_payment") or ""),
+            property_value=str(loan_data.get("property_value") or ""),
+            ltv=str(loan_data.get("ltv") or ""),
+            document_checklist=docs_checklist_v2,
+            conversation_id=session_id,
+            status="draft",
+        )
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        return existing
+
+    _set_if_present("borrower_name", str(loan_data.get("borrower_name") or existing.borrower_name))
+    _set_if_present("borrower_email", loan_data.get("borrower_email"))
+    _set_if_present("borrower_phone", loan_data.get("borrower_phone"))
+    _set_if_present("loan_type", str(loan_data.get("loan_type") or loan_data.get("purpose") or existing.loan_type))
+
+    amount = loan_data.get("loan_amount")
+    if amount is not None and parse_numeric(amount) > 0:
+        existing.loan_amount = str(amount)
+
+    income = loan_data.get("monthly_income")
+    if income is not None and parse_numeric(income) > 0:
+        existing.monthly_income = str(income)
+
+    debts = loan_data.get("existing_debts")
+    if debts is not None and parse_numeric(debts) >= 0:
+        existing.existing_debts = str(debts)
+
+    _set_if_present("interest_rate", str(loan_data.get("interest_rate") or loan_data.get("interestRate") or existing.interest_rate))
+    _set_if_present("tenure", str(loan_data.get("tenure") or existing.tenure))
+    _set_if_present("credit_score", str(loan_data.get("credit_score") or existing.credit_score))
+    _set_if_present("employment_type", loan_data.get("employment_type"))
+    _set_if_present("purpose", loan_data.get("purpose"))
+    _set_if_present("collateral", loan_data.get("collateral"))
+    _set_if_present("down_payment", str(loan_data.get("down_payment") or existing.down_payment))
+    _set_if_present("property_value", str(loan_data.get("property_value") or existing.property_value))
+    _set_if_present("ltv", str(loan_data.get("ltv") or existing.ltv))
+
+    if docs_checklist_v2 is not None and existing.document_checklist != docs_checklist_v2:
+        existing.document_checklist = docs_checklist_v2
+
+    if existing.status in {"", None}:
+        existing.status = "draft"
+    db.add(existing)
+    db.commit()
+    db.refresh(existing)
+    return existing
 
 
 @router.get("/", response_model=List[Dict[str, Any]])
@@ -366,8 +595,6 @@ async def send_message(session_id: str, request: V3MessageRequest, db: Session =
     # Calculate and attach deterministic metrics if not already present
     try:
         if "calculatedMetrics" not in merged_metadata:
-            intent = parsed_metadata.get("intentAnalysis")
-            intent_rec = intent if isinstance(intent, dict) else None
             loan_data: dict[str, Any] = {}
             if loan is not None:
                 loan_data = {
@@ -389,47 +616,185 @@ async def send_message(session_id: str, request: V3MessageRequest, db: Session =
                     "property_value": loan.property_value,
                     "ltv": loan.ltv,
                 }
-            elif intent_rec is not None:
-                loan_data = {
-                    "loan_type": str(intent_rec.get("purpose") or "personal"),
-                    "loan_amount": intent_rec.get("loanAmount"),
-                    "monthly_income": intent_rec.get("monthlyIncome"),
-                    "existing_debts": intent_rec.get("existingDebts"),
-                    "credit_score": intent_rec.get("creditHistory"),
-                    "employment_type": intent_rec.get("employmentType"),
-                    "tenure": intent_rec.get("preferredTenure"),
-                    "property_value": intent_rec.get("propertyValue"),
-                    "down_payment": intent_rec.get("downPayment"),
-                    "collateral": intent_rec.get("collateralAvailable"),
-                }
+                fallback_state = _build_loan_data_from_state(state)
+                if fallback_state:
+                    for k, v in fallback_state.items():
+                        cur = loan_data.get(k)
+                        if cur in (None, ""):
+                            loan_data[k] = v
+                        elif k in ("loan_amount", "monthly_income") and parse_numeric(cur) <= 0:
+                            loan_data[k] = v
+                intent_summary = _extract_intent_summary(parsed_metadata) or {}
+                if intent_summary:
+                    inferred = {
+                        "loan_type": str(intent_summary.get("purpose") or intent_summary.get("loan_type") or "personal"),
+                        "loan_amount": intent_summary.get("loanAmount") or intent_summary.get("loan_amount"),
+                        "monthly_income": intent_summary.get("monthlyIncome") or intent_summary.get("monthly_income"),
+                        "existing_debts": intent_summary.get("existingDebts") or intent_summary.get("existing_debts"),
+                        "credit_score": intent_summary.get("creditHistory") or intent_summary.get("credit_history"),
+                        "employment_type": intent_summary.get("employmentType") or intent_summary.get("employment_type"),
+                        "tenure": intent_summary.get("preferredTenure") or intent_summary.get("preferred_tenure"),
+                        "property_value": intent_summary.get("propertyValue") or intent_summary.get("property_value"),
+                        "down_payment": intent_summary.get("downPayment") or intent_summary.get("down_payment"),
+                        "collateral": intent_summary.get("collateralAvailable") or intent_summary.get("collateral_available"),
+                    }
+                    for k, v in inferred.items():
+                        if v is None or v == "":
+                            continue
+                        cur = loan_data.get(k)
+                        if cur in (None, ""):
+                            loan_data[k] = v
+                        elif k in ("loan_amount", "monthly_income") and parse_numeric(cur) <= 0:
+                            loan_data[k] = v
+                fallback_hist = _build_loan_data_from_history(state)
+                if fallback_hist:
+                    for k, v in fallback_hist.items():
+                        cur = loan_data.get(k)
+                        if cur in (None, ""):
+                            loan_data[k] = v
+                        elif k in ("loan_amount", "monthly_income") and parse_numeric(cur) <= 0:
+                            loan_data[k] = v
+            else:
+                loan_data = _build_loan_data_from_state(state)
+                if not loan_data:
+                    intent_summary = _extract_intent_summary(parsed_metadata) or {}
+                    if intent_summary:
+                        loan_data = {
+                            "loan_type": str(intent_summary.get("purpose") or "personal"),
+                            "loan_amount": intent_summary.get("loanAmount") or intent_summary.get("loan_amount"),
+                            "monthly_income": intent_summary.get("monthlyIncome") or intent_summary.get("monthly_income"),
+                            "existing_debts": intent_summary.get("existingDebts") or intent_summary.get("existing_debts"),
+                            "credit_score": intent_summary.get("creditHistory") or intent_summary.get("credit_history"),
+                            "employment_type": intent_summary.get("employmentType") or intent_summary.get("employment_type"),
+                            "tenure": intent_summary.get("preferredTenure") or intent_summary.get("preferred_tenure"),
+                            "property_value": intent_summary.get("propertyValue") or intent_summary.get("property_value"),
+                            "down_payment": intent_summary.get("downPayment") or intent_summary.get("down_payment"),
+                            "collateral": intent_summary.get("collateralAvailable") or intent_summary.get("collateral_available"),
+                        }
+                if loan_data:
+                    fallback = _build_loan_data_from_history(state)
+                    if fallback:
+                        for k, v in fallback.items():
+                            cur = loan_data.get(k)
+                            if k not in loan_data or cur in (None, ""):
+                                loan_data[k] = v
+                            elif k in ("loan_amount", "monthly_income") and parse_numeric(cur) <= 0:
+                                loan_data[k] = v
+                else:
+                    loan_data = _build_loan_data_from_history(state)
             if loan_data:
-                snapshot = compute_full_loan_metrics(loan_data)
-                stp = assess_stp_eligibility(loan_data)
-                merged_metadata["calculatedMetrics"] = {
-                    "computedAt": snapshot.computed_at,
-                    "emi": snapshot.emi.emi,
-                    "totalInterest": snapshot.emi.total_interest,
-                    "totalRepayment": snapshot.emi.total_repayment,
-                    "apr": snapshot.apr.apr,
-                    "foir": snapshot.affordability.foir,
-                    "dti": snapshot.affordability.dti,
-                    "dscr": snapshot.affordability.dscr,
-                    "incomeSurplus": snapshot.affordability.income_surplus,
-                    "ltv": snapshot.collateral.ltv,
-                    "collateralCoverage": snapshot.collateral.collateral_coverage_ratio,
-                    "approvalProbability": snapshot.credit_risk.approval_probability,
-                    "riskGrade": snapshot.credit_risk.risk_grade,
-                    "sanctionReadinessScore": snapshot.credit_risk.sanction_readiness_score,
-                    "eligibilityScore": snapshot.credit_risk.eligibility_score,
-                    "policyDeviationCount": snapshot.credit_risk.policy_deviation_count,
-                    "compensatingFactorCount": snapshot.credit_risk.compensating_factor_count,
-                    "delinquencyRiskSignal": snapshot.credit_risk.delinquency_risk_signal,
-                    "dropOffRiskSignal": snapshot.credit_risk.drop_off_risk_signal,
-                    "stpTier": stp.tier,
-                    "stpReasons": stp.reasons,
-                }
+                calculated: Dict[str, Any] = {}
+                stp = None
+                if _should_compute_stp(loan_data):
+                    stp = assess_stp_eligibility(loan_data)
+                    calculated["stpTier"] = stp.tier
+                    calculated["stp_tier"] = stp.tier
+                    calculated["stpReasons"] = stp.reasons
+                    calculated["stp_reasons"] = stp.reasons
+
+                snapshot = None
+                if _should_compute_snapshot(loan_data):
+                    snapshot = compute_full_loan_metrics(loan_data)
+                    approval_pct = snapshot.credit_risk.approval_probability
+                    approval_prob = approval_pct / 100.0 if isinstance(approval_pct, (int, float)) else None
+                    calculated.update(
+                        {
+                            "computedAt": snapshot.computed_at,
+                            "emi": snapshot.emi.emi,
+                            "totalInterest": snapshot.emi.total_interest,
+                            "totalRepayment": snapshot.emi.total_repayment,
+                            "apr": snapshot.apr.apr,
+                            "foir": snapshot.affordability.foir,
+                            "dti": snapshot.affordability.dti,
+                            "dscr": snapshot.affordability.dscr,
+                            "incomeSurplus": snapshot.affordability.income_surplus,
+                            "ltv": snapshot.collateral.ltv,
+                            "collateralCoverage": snapshot.collateral.collateral_coverage_ratio,
+                            "approvalProbability": approval_prob,
+                            "approval_probability": approval_pct,
+                            "riskGrade": snapshot.credit_risk.risk_grade,
+                            "risk_grade": snapshot.credit_risk.risk_grade,
+                            "sanctionReadinessScore": snapshot.credit_risk.sanction_readiness_score,
+                            "sanction_readiness_score": snapshot.credit_risk.sanction_readiness_score,
+                            "eligibilityScore": snapshot.credit_risk.eligibility_score,
+                            "eligibility_score": snapshot.credit_risk.eligibility_score,
+                            "policyDeviationCount": snapshot.credit_risk.policy_deviation_count,
+                            "policy_deviation_count": snapshot.credit_risk.policy_deviation_count,
+                            "compensatingFactorCount": snapshot.credit_risk.compensating_factor_count,
+                            "compensating_factor_count": snapshot.credit_risk.compensating_factor_count,
+                            "delinquencyRiskSignal": snapshot.credit_risk.delinquency_risk_signal,
+                            "delinquency_risk_signal": snapshot.credit_risk.delinquency_risk_signal,
+                            "dropOffRiskSignal": snapshot.credit_risk.drop_off_risk_signal,
+                            "drop_off_risk_signal": snapshot.credit_risk.drop_off_risk_signal,
+                        }
+                    )
+
+                if calculated:
+                    merged_metadata["calculatedMetrics"] = calculated
+
+                if snapshot is not None:
+                    loan = _ensure_loan_row(db, session_id, loan_data, docs_checklist_v2)
+                    merged_metadata["loanId"] = loan.id
+                    conv = _ensure_conversation_row(db, session_id, state)
+                    if conv.borrower_name is None and state.captured_context and state.captured_context.borrower_name:
+                        conv.borrower_name = state.captured_context.borrower_name
+                    if state.captured_context and state.captured_context.seriousness_score is not None:
+                        conv.seriousness_score = state.captured_context.seriousness_score
+                    if state.captured_context and state.captured_context.fit_score is not None:
+                        conv.fit_score = state.captured_context.fit_score
+                    intent_summary = _extract_intent_summary(merged_metadata) or {}
+                    if conv.seriousness_score is None and isinstance(intent_summary.get("seriousnessScore"), int):
+                        conv.seriousness_score = int(intent_summary["seriousnessScore"])
+                    if conv.fit_score is None and isinstance(intent_summary.get("fitScore"), int):
+                        conv.fit_score = int(intent_summary["fitScore"])
+                    next_angle = intent_summary.get("nextConversationAngle")
+                    if isinstance(next_angle, str) and next_angle.strip():
+                        conv.next_conversation_angle = next_angle.strip()
+                    if isinstance(intent_summary, dict) and intent_summary:
+                        conv.intent_summary = intent_summary
+                    loan_recs = merged_metadata.get("loanRecommendations")
+                    if isinstance(loan_recs, list) and loan_recs:
+                        conv.recommended_products = loan_recs
+                    approval_prob = calculated.get("approvalProbability")
+                    if isinstance(approval_prob, (int, float)):
+                        conv.approval_probability = {"probability": float(approval_prob), "computedAt": snapshot.computed_at}
+                    db.add(conv)
+                    db.commit()
+                    db.refresh(conv)
     except Exception as e:
         logger.warning(f"Failed to compute calculated metrics for session {session_id}: {e}")
+
+    try:
+        conv = _ensure_conversation_row(db, session_id, state)
+        intent_summary = _extract_intent_summary(merged_metadata) or {}
+
+        if conv.borrower_name is None and state.captured_context and state.captured_context.borrower_name:
+            conv.borrower_name = state.captured_context.borrower_name
+
+        if state.captured_context and state.captured_context.seriousness_score is not None:
+            conv.seriousness_score = state.captured_context.seriousness_score
+        if state.captured_context and state.captured_context.fit_score is not None:
+            conv.fit_score = state.captured_context.fit_score
+
+        if conv.seriousness_score is None and isinstance(intent_summary.get("seriousnessScore"), int):
+            conv.seriousness_score = int(intent_summary["seriousnessScore"])
+        if conv.fit_score is None and isinstance(intent_summary.get("fitScore"), int):
+            conv.fit_score = int(intent_summary["fitScore"])
+
+        next_angle = intent_summary.get("nextConversationAngle")
+        if isinstance(next_angle, str) and next_angle.strip():
+            conv.next_conversation_angle = next_angle.strip()
+
+        if isinstance(intent_summary, dict) and intent_summary:
+            conv.intent_summary = intent_summary
+
+        loan_recs = merged_metadata.get("loanRecommendations")
+        if isinstance(loan_recs, list) and loan_recs:
+            conv.recommended_products = loan_recs
+
+        db.add(conv)
+    except Exception as e:
+        logger.warning(f"Failed to update conversation fields for session {session_id}: {e}")
 
     _sync_phase(db, session_id, state)
 

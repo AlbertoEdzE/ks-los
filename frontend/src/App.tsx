@@ -476,14 +476,77 @@ function App() {
       return idx >= 0 ? idx : 0;
     }, [activePhases, conversation?.currentPhaseId]);
 
+    const latestCalculated = React.useMemo(() => {
+      const msgs = visibleMessages.slice().reverse();
+      for (const m of msgs) {
+        if (m.role !== 'assistant') continue;
+        const meta = typeof m.metadata === 'object' && m.metadata ? (m.metadata as Record<string, unknown>) : null;
+        const calc = meta?.calculatedMetrics;
+        if (calc && typeof calc === 'object') {
+          return calc as Record<string, unknown>;
+        }
+      }
+      return null;
+    }, [visibleMessages]);
+
+    const latestIntentSummary = React.useMemo(() => {
+      const msgs = visibleMessages.slice().reverse();
+      for (const m of msgs) {
+        if (m.role !== 'assistant') continue;
+        const meta = typeof m.metadata === 'object' && m.metadata ? (m.metadata as Record<string, unknown>) : null;
+        const intent = meta?.intentAnalysis;
+        if (!intent || typeof intent !== 'object') continue;
+        const summary = (intent as Record<string, unknown>).intentSummary;
+        if (summary && typeof summary === 'object') {
+          return summary as Record<string, unknown>;
+        }
+      }
+      return null;
+    }, [visibleMessages]);
+
     const approvalProbability = React.useMemo(() => {
       const raw = conversation?.approvalProbability as unknown;
       if (typeof raw === 'number') return raw;
       if (raw && typeof raw === 'object' && typeof (raw as { probability?: unknown }).probability === 'number') {
         return (raw as { probability: number }).probability;
       }
+
+      const calc = latestCalculated as unknown;
+      if (calc && typeof calc === 'object') {
+        const c = calc as Record<string, unknown>;
+        const fromCalc = c.approvalProbability ?? c.approval_probability;
+        if (typeof fromCalc === 'number') {
+          if (fromCalc >= 0 && fromCalc <= 1) return fromCalc;
+          if (fromCalc > 1 && fromCalc <= 100) return fromCalc / 100;
+        }
+      }
+
       return null;
-    }, [conversation?.approvalProbability]);
+    }, [conversation?.approvalProbability, latestCalculated]);
+
+    const nextConversationAngle = React.useMemo(() => {
+      const fromConv = conversation?.nextConversationAngle;
+      if (typeof fromConv === 'string' && fromConv.trim()) return fromConv.trim();
+      const fromMsg = latestIntentSummary?.nextConversationAngle;
+      if (typeof fromMsg === 'string' && fromMsg.trim()) return fromMsg.trim();
+      return null;
+    }, [conversation?.nextConversationAngle, latestIntentSummary]);
+
+    const seriousnessScore = React.useMemo(() => {
+      const fromConv = conversation?.seriousnessScore;
+      if (typeof fromConv === 'number') return fromConv;
+      const fromMsg = latestIntentSummary?.seriousnessScore;
+      if (typeof fromMsg === 'number') return fromMsg;
+      return null;
+    }, [conversation?.seriousnessScore, latestIntentSummary]);
+
+    const fitScore = React.useMemo(() => {
+      const fromConv = conversation?.fitScore;
+      if (typeof fromConv === 'number') return fromConv;
+      const fromMsg = latestIntentSummary?.fitScore;
+      if (typeof fromMsg === 'number') return fromMsg;
+      return null;
+    }, [conversation?.fitScore, latestIntentSummary]);
 
     const approvalTopBlockers = React.useMemo(() => {
       const raw = conversation?.approvalProbability as unknown;
@@ -505,32 +568,21 @@ function App() {
         .slice(0, 3) as Array<Record<string, unknown>>;
     }, [conversation?.approvalProbability]);
 
-    const latestCalculated = React.useMemo(() => {
-      const msgs = visibleMessages.slice().reverse();
-      for (const m of msgs) {
-        if (m.role !== 'assistant') continue;
-        const meta = typeof m.metadata === 'object' && m.metadata ? (m.metadata as Record<string, unknown>) : null;
-        const calc = meta?.calculatedMetrics;
-        if (calc && typeof calc === 'object') {
-          return calc as Record<string, unknown>;
-        }
-      }
-      return null;
-    }, [visibleMessages]);
-
     const stpTier = React.useMemo(() => {
-      const v = latestCalculated?.stpTier;
+      const v = latestCalculated?.stpTier ?? latestCalculated?.stp_tier;
       return typeof v === 'string' ? v : null;
     }, [latestCalculated]);
 
     const riskGrade = React.useMemo(() => {
-      const v = latestCalculated?.riskGrade;
+      const v = latestCalculated?.riskGrade ?? latestCalculated?.risk_grade;
       return typeof v === 'string' ? v : null;
     }, [latestCalculated]);
 
     const foir = React.useMemo(() => {
       const v = latestCalculated?.foir;
-      return typeof v === 'number' ? v : null;
+      if (typeof v !== 'number') return null;
+      if (v <= 0) return null;
+      return v;
     }, [latestCalculated]);
 
     const recommendedProducts = React.useMemo(() => {
@@ -779,7 +831,7 @@ function App() {
                     <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-3">
                       <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Next Conversation Angle</div>
                       <div className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-200" data-testid="next-conversation-angle">
-                        {conversation?.nextConversationAngle || '—'}
+                        {nextConversationAngle || '—'}
                       </div>
                     </div>
 
@@ -787,14 +839,14 @@ function App() {
                       <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-3">
                         <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Seriousness Score</div>
                         <div className="mt-1 text-xl font-black tracking-tight text-slate-900 dark:text-white" data-testid="seriousness-score">
-                          {typeof conversation?.seriousnessScore === 'number' ? conversation.seriousnessScore : '—'}
+                          {seriousnessScore === null ? '—' : seriousnessScore}
                         </div>
                       </div>
 
                       <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-3">
                         <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Fit Score</div>
                         <div className="mt-1 text-xl font-black tracking-tight text-slate-900 dark:text-white" data-testid="fit-score">
-                          {typeof conversation?.fitScore === 'number' ? conversation.fitScore : '—'}
+                          {fitScore === null ? '—' : fitScore}
                         </div>
                       </div>
                     </div>

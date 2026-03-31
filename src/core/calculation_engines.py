@@ -8,7 +8,7 @@ Ported from Loan-Navigator-AI's TypeScript implementation with Caribbean market 
 """
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 import math
 import re
 
@@ -1222,7 +1222,7 @@ CURRENCY_PATTERNS: list[tuple[re.Pattern, float]] = [
 ]
 
 
-def detect_currency_rate(amount_str: str | None) -> float:
+def detect_currency_rate(amount_str: Any) -> float:
     """
     Detect currency from amount string and return conversion rate to USD.
     
@@ -1232,10 +1232,12 @@ def detect_currency_rate(amount_str: str | None) -> float:
     Returns:
         Conversion rate to USD (1.0 if USD or unknown)
     """
-    if not amount_str:
+    if amount_str is None:
         return 1.0
     
-    s = amount_str.strip()
+    s = str(amount_str).strip()
+    if not s:
+        return 1.0
     for pattern, rate in CURRENCY_PATTERNS:
         if pattern.search(s):
             return rate
