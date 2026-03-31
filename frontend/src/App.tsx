@@ -438,6 +438,8 @@ function App() {
     const [conversation, setConversation] = useState<V2Conversation | null>(null);
     const [visibleMessages, setVisibleMessages] = useState<V2ChatMessage[]>([]);
     const [resetSignal, setResetSignal] = useState(0);
+    const [stickyCalculated, setStickyCalculated] = useState<Record<string, unknown> | null>(null);
+    const [stickyIntentSummary, setStickyIntentSummary] = useState<Record<string, unknown> | null>(null);
     const routeLocation = useLocation();
     const [designOverlayOpacity, setDesignOverlayOpacity] = useState(0.5);
     const [designOverlayName, setDesignOverlayName] = useState('');
@@ -476,12 +478,25 @@ function App() {
       return idx >= 0 ? idx : 0;
     }, [activePhases, conversation?.currentPhaseId]);
 
+    const parseMeta = (raw: unknown): Record<string, unknown> | null => {
+      if (!raw) return null;
+      if (typeof raw === 'string') {
+        try {
+          return JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      }
+      if (typeof raw === 'object') return raw as Record<string, unknown>;
+      return null;
+    };
+
     const latestCalculated = React.useMemo(() => {
       const msgs = visibleMessages.slice().reverse();
       for (const m of msgs) {
         if (m.role !== 'assistant') continue;
-        const meta = typeof m.metadata === 'object' && m.metadata ? (m.metadata as Record<string, unknown>) : null;
-        const calc = meta?.calculatedMetrics;
+        const meta = parseMeta(m.metadata);
+        const calc = meta?.calculatedMetrics ?? meta?.calculated_metrics;
         if (calc && typeof calc === 'object') {
           return calc as Record<string, unknown>;
         }
@@ -493,8 +508,8 @@ function App() {
       const msgs = visibleMessages.slice().reverse();
       for (const m of msgs) {
         if (m.role !== 'assistant') continue;
-        const meta = typeof m.metadata === 'object' && m.metadata ? (m.metadata as Record<string, unknown>) : null;
-        const intent = meta?.intentAnalysis;
+        const meta = parseMeta(m.metadata);
+        const intent = meta?.intentAnalysis ?? meta?.intent_analysis;
         if (!intent || typeof intent !== 'object') continue;
         const summary = (intent as Record<string, unknown>).intentSummary;
         if (summary && typeof summary === 'object') {
@@ -503,6 +518,14 @@ function App() {
       }
       return null;
     }, [visibleMessages]);
+
+    React.useEffect(() => {
+      if (latestCalculated) setStickyCalculated(latestCalculated);
+    }, [latestCalculated]);
+
+    React.useEffect(() => {
+      if (latestIntentSummary) setStickyIntentSummary(latestIntentSummary);
+    }, [latestIntentSummary]);
 
     const approvalProbability = React.useMemo(() => {
       const raw = conversation?.approvalProbability as unknown;
@@ -527,26 +550,29 @@ function App() {
     const nextConversationAngle = React.useMemo(() => {
       const fromConv = conversation?.nextConversationAngle;
       if (typeof fromConv === 'string' && fromConv.trim()) return fromConv.trim();
-      const fromMsg = latestIntentSummary?.nextConversationAngle;
+      const source = latestIntentSummary ?? stickyIntentSummary;
+      const fromMsg = source?.nextConversationAngle;
       if (typeof fromMsg === 'string' && fromMsg.trim()) return fromMsg.trim();
       return null;
-    }, [conversation?.nextConversationAngle, latestIntentSummary]);
+    }, [conversation?.nextConversationAngle, latestIntentSummary, stickyIntentSummary]);
 
     const seriousnessScore = React.useMemo(() => {
       const fromConv = conversation?.seriousnessScore;
       if (typeof fromConv === 'number') return fromConv;
-      const fromMsg = latestIntentSummary?.seriousnessScore;
+      const source = latestIntentSummary ?? stickyIntentSummary;
+      const fromMsg = source?.seriousnessScore;
       if (typeof fromMsg === 'number') return fromMsg;
       return null;
-    }, [conversation?.seriousnessScore, latestIntentSummary]);
+    }, [conversation?.seriousnessScore, latestIntentSummary, stickyIntentSummary]);
 
     const fitScore = React.useMemo(() => {
       const fromConv = conversation?.fitScore;
       if (typeof fromConv === 'number') return fromConv;
-      const fromMsg = latestIntentSummary?.fitScore;
+      const source = latestIntentSummary ?? stickyIntentSummary;
+      const fromMsg = source?.fitScore;
       if (typeof fromMsg === 'number') return fromMsg;
       return null;
-    }, [conversation?.fitScore, latestIntentSummary]);
+    }, [conversation?.fitScore, latestIntentSummary, stickyIntentSummary]);
 
     const approvalTopBlockers = React.useMemo(() => {
       const raw = conversation?.approvalProbability as unknown;
@@ -569,21 +595,24 @@ function App() {
     }, [conversation?.approvalProbability]);
 
     const stpTier = React.useMemo(() => {
-      const v = latestCalculated?.stpTier ?? latestCalculated?.stp_tier;
+      const source = latestCalculated ?? stickyCalculated;
+      const v = source?.stpTier ?? source?.stp_tier;
       return typeof v === 'string' ? v : null;
-    }, [latestCalculated]);
+    }, [latestCalculated, stickyCalculated]);
 
     const riskGrade = React.useMemo(() => {
-      const v = latestCalculated?.riskGrade ?? latestCalculated?.risk_grade;
+      const source = latestCalculated ?? stickyCalculated;
+      const v = source?.riskGrade ?? source?.risk_grade;
       return typeof v === 'string' ? v : null;
-    }, [latestCalculated]);
+    }, [latestCalculated, stickyCalculated]);
 
     const foir = React.useMemo(() => {
-      const v = latestCalculated?.foir;
+      const source = latestCalculated ?? stickyCalculated;
+      const v = source?.foir;
       if (typeof v !== 'number') return null;
       if (v <= 0) return null;
       return v;
-    }, [latestCalculated]);
+    }, [latestCalculated, stickyCalculated]);
 
     const recommendedProducts = React.useMemo(() => {
       const raw = conversation?.recommendedProducts as unknown;

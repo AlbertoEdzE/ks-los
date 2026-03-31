@@ -570,6 +570,8 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const [uploadingType, setUploadingType] = useState<string | null>(null);
   const [uploadingChecklistName, setUploadingChecklistName] = useState<string | null>(null);
   const [dismissedDocPromptId, setDismissedDocPromptId] = useState<string | null>(null);
+  const [ocrProcessing, setOcrProcessing] = useState<{ title: string; documentType: string; startedAt: number } | null>(null);
+  const [, setOcrTick] = useState(0);
   const [docPreviewOpen, setDocPreviewOpen] = useState(false);
   const [docPreview, setDocPreview] = useState<{
     title: string;
@@ -597,6 +599,21 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const pendingUploadRef = useRef<{ category: string; documentType: string } | null>(null);
   const pendingChecklistNameRef = useRef<string | null>(null);
   const autoDocsOpenedRef = useRef(false);
+  const termsFallbackRef = useRef<{
+    loanAmount: number;
+    interestRate: number;
+    tenure: number;
+    monthlyEmi: number;
+    totalInterest: number;
+    totalRepayment: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!ocrProcessing) return;
+    setOcrTick(0);
+    const id = setInterval(() => setOcrTick((v) => v + 1), 500);
+    return () => clearInterval(id);
+  }, [ocrProcessing]);
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -766,6 +783,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     const checklistName = pendingChecklistNameRef.current;
     if (checklistName) setUploadingChecklistName(checklistName);
     setUploadingType(pending.documentType);
+    setOcrProcessing({ title: file.name, documentType: pending.documentType, startedAt: Date.now() });
     try {
       const fd = new FormData();
       fd.append('file', file);
@@ -789,7 +807,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         const shouldShowExtraction = dt.includes('id') || dt.includes('passport') || dt.includes('national') || dt.includes('job') || dt.includes('employment');
         if (shouldShowExtraction) {
           const title = best.originalName || best.fileName || 'document';
-          const ex = getDocExtraction(best);
+          let ex = getDocExtraction(best);
           setLastExtraction({
             title,
             documentType: pending.documentType,
@@ -798,6 +816,35 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
             textPreview: ex.textPreview,
             fields: ex.fields,
           });
+          const startedAt = Date.now();
+          for (let i = 0; i < 30; i++) {
+            if (Date.now() - startedAt > 30000) break;
+            if (ex.status === 'ok' || ex.status === 'error') break;
+            await new Promise((r) => setTimeout(r, 1000));
+            const polled = await refreshUi2Docs(conversationId, loan.id);
+            const latest = polled?.find((d) => d.id === created.id) ?? null;
+            if (!latest) continue;
+            const nextEx = getDocExtraction(latest);
+            ex = nextEx;
+            if (nextEx.status !== 'none') {
+              setLastExtraction({
+                title,
+                documentType: pending.documentType,
+                status: nextEx.status,
+                error: nextEx.error,
+                textPreview: nextEx.textPreview,
+                fields: nextEx.fields,
+              });
+              setDocPreview({
+                title,
+                status: nextEx.status,
+                error: nextEx.error,
+                textPreview: nextEx.textPreview,
+                fields: nextEx.fields,
+              });
+              break;
+            }
+          }
         }
       }
     } catch {
@@ -807,6 +854,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       setUploadingChecklistName(null);
       pendingUploadRef.current = null;
       pendingChecklistNameRef.current = null;
+      setOcrProcessing(null);
     }
   };
 
@@ -1069,7 +1117,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     await sendToExisting(conversationId, content);
   };
 
-  const canSend = input.trim().length > 0 && !loading && !bootstrapping;
+  const canSend = input.trim().length > 0 && !loading && !bootstrapping && uploadingType === null && !ocrProcessing;
 
   const bubbleClassForRole = useMemo(() => {
     return {
@@ -1252,7 +1300,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
           collapsible={true}
           defaultOpen={false}
           busyDocumentName={uploadingChecklistName}
-          disableUpload={bootstrapping || loading || uploadingChecklistName !== null}
+          disableUpload={bootstrapping || loading || uploadingChecklistName !== null || uploadingType !== null || ocrProcessing !== null}
           onUpload={(docName) => triggerChecklistUpload(docName)}
         />
       );
@@ -1288,7 +1336,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                 </div>
                 <button
                   type="button"
-                  disabled={bootstrapping || loading || uploadingType !== null}
+                  disabled={bootstrapping || loading || uploadingType !== null || ocrProcessing !== null}
                   onClick={() => {
                     const category = req.type === 'national_id' || req.type === 'passport' || req.type === 'id' ? 'identity' : 'income';
                     triggerInlineUi2Upload(category, req.type);
@@ -1343,7 +1391,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
             <div className="mt-3 flex items-center gap-2">
               <button
                 type="button"
-                disabled={bootstrapping || loading || uploadingType !== null}
+                disabled={bootstrapping || loading || uploadingType !== null || ocrProcessing !== null}
                 onClick={() => {
                   triggerInlineUi2Upload(nextRequiredDoc.categoryKey, nextRequiredDoc.documentType);
                 }}
@@ -1398,42 +1446,54 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       const loanApp = metadata.loanApplication as Record<string, unknown>;
       const snapshot = asRecord(metadata.loanSnapshot) ?? {};
       const recommendation = asRecord(metadata.selectedRecommendation) ?? {};
-      
+      const nextTerms = {
+        loanAmount: typeof loanApp.amount === 'number' ? loanApp.amount : typeof snapshot.loan_amount === 'number' ? snapshot.loan_amount : 0,
+        interestRate:
+          typeof recommendation.interest_rate === 'number'
+            ? recommendation.interest_rate
+            : typeof loanApp.rate === 'number'
+              ? loanApp.rate
+              : 0,
+        tenure:
+          typeof recommendation.tenure_years === 'number'
+            ? recommendation.tenure_years
+            : typeof loanApp.tenure === 'number'
+              ? loanApp.tenure
+              : 0,
+        monthlyEmi: typeof recommendation.monthly_emi === 'number' ? recommendation.monthly_emi : typeof loanApp.emi === 'number' ? loanApp.emi : 0,
+        totalInterest:
+          typeof recommendation.total_interest === 'number'
+            ? recommendation.total_interest
+            : typeof snapshot.total_interest === 'number'
+              ? snapshot.total_interest
+              : 0,
+        totalRepayment:
+          typeof recommendation.total_repayment === 'number'
+            ? recommendation.total_repayment
+            : typeof snapshot.total_repayment === 'number'
+              ? snapshot.total_repayment
+              : 0,
+      };
+
+      const hasPricing =
+        nextTerms.loanAmount > 0 &&
+        nextTerms.interestRate > 0 &&
+        nextTerms.tenure > 0 &&
+        nextTerms.monthlyEmi > 0 &&
+        nextTerms.totalRepayment > 0;
+
+      const effectiveTerms = hasPricing ? nextTerms : termsFallbackRef.current ?? nextTerms;
+      if (hasPricing) termsFallbackRef.current = nextTerms;
+
       cards.push(
         <TermsAcceptanceCard
           key="terms"
-          loanAmount={typeof loanApp.amount === 'number' ? loanApp.amount : typeof snapshot.loan_amount === 'number' ? snapshot.loan_amount : 0}
-          interestRate={
-            typeof recommendation.interest_rate === 'number'
-              ? recommendation.interest_rate
-              : typeof loanApp.rate === 'number'
-                ? loanApp.rate
-                : 0
-          }
-          tenure={
-            typeof recommendation.tenure_years === 'number'
-              ? recommendation.tenure_years
-              : typeof loanApp.tenure === 'number'
-                ? loanApp.tenure
-                : 0
-          }
-          monthlyEmi={
-            typeof recommendation.monthly_emi === 'number' ? recommendation.monthly_emi : typeof loanApp.emi === 'number' ? loanApp.emi : 0
-          }
-          totalInterest={
-            typeof recommendation.total_interest === 'number'
-              ? recommendation.total_interest
-              : typeof snapshot.total_interest === 'number'
-                ? snapshot.total_interest
-                : 0
-          }
-          totalRepayment={
-            typeof recommendation.total_repayment === 'number'
-              ? recommendation.total_repayment
-              : typeof snapshot.total_repayment === 'number'
-                ? snapshot.total_repayment
-                : 0
-          }
+          loanAmount={effectiveTerms.loanAmount}
+          interestRate={effectiveTerms.interestRate}
+          tenure={effectiveTerms.tenure}
+          monthlyEmi={effectiveTerms.monthlyEmi}
+          totalInterest={effectiveTerms.totalInterest}
+          totalRepayment={effectiveTerms.totalRepayment}
           onAccept={() => {
             void handleSend(`I accept the terms and provide my electronic signature`);
           }}
@@ -1616,7 +1676,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                           <div className="text-xs font-extrabold tracking-tight text-slate-800 dark:text-slate-200">Extracted information</div>
                           <div className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-white truncate">{lastExtraction.title}</div>
                           <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                            OCR status: {lastExtraction.status}
+                            OCR status: {ocrProcessing ? 'processing' : lastExtraction.status}
                             {lastExtraction.documentType ? ` • type: ${lastExtraction.documentType}` : ''}
                           </div>
                         </div>
@@ -1671,6 +1731,26 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
         <div className="max-w-2xl mx-auto">
           {/* Attachments panel removed in favor of inline chat document cards */}
 
+          {ocrProcessing ? (
+            <div
+              data-testid="ocr-processing-banner"
+              className="mb-3 rounded-2xl border border-blue-200/60 dark:border-blue-500/20 bg-blue-50/80 dark:bg-blue-900/20 px-4 py-3 shadow-sm"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-4 h-4 rounded-full border-2 border-blue-600 dark:border-blue-400 border-t-transparent animate-spin" />
+                  <div className="text-xs font-extrabold text-blue-900 dark:text-blue-200 truncate">Processing document (OCR)</div>
+                </div>
+                <div className="shrink-0 text-[11px] font-bold text-blue-700 dark:text-blue-300">
+                  {Math.max(1, Math.floor((Date.now() - ocrProcessing.startedAt) / 1000))}s
+                </div>
+              </div>
+              <div className="mt-1 text-[11px] text-blue-800/80 dark:text-blue-300/80 truncate">
+                {ocrProcessing.title}
+              </div>
+            </div>
+          ) : null}
+
           <div className="flex gap-3 items-end">
             <div className="flex-1 relative">
               <textarea
@@ -1717,7 +1797,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                 pendingUploadRef.current = target;
                 ocrFileInputRef.current?.click();
               }}
-              disabled={viewState !== 'chat' || bootstrapping || !conversationId || !loan?.id}
+              disabled={viewState !== 'chat' || bootstrapping || !conversationId || !loan?.id || uploadingType !== null || ocrProcessing !== null}
               className={`rounded-2xl h-12 w-12 shadow-sm transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center ${
                 'bg-white/90 dark:bg-white/[0.06] hover:bg-slate-50 dark:hover:bg-white/[0.09] text-slate-700 dark:text-slate-200 border border-slate-200/60 dark:border-white/[0.06]'
               }`}
