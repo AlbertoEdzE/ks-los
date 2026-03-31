@@ -46,7 +46,7 @@ export function DocumentsCard({
       <div className="space-y-2">
         {documents.map((doc, idx) => (
           <div
-            key={idx}
+            key={doc.name || idx}
             className="flex items-start justify-between p-3 rounded-xl bg-white/60 dark:bg-white/5 border border-slate-200/60 dark:border-white/10"
           >
             <div className="flex-1">

@@ -606,7 +606,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const [uploadingChecklistName, setUploadingChecklistName] = useState<string | null>(null);
   const [dismissedDocPromptId, setDismissedDocPromptId] = useState<string | null>(null);
   const [ocrProcessing, setOcrProcessing] = useState<{ title: string; documentType: string; startedAt: number } | null>(null);
-  const [, setOcrTick] = useState(0);
   const [docPreviewOpen, setDocPreviewOpen] = useState(false);
   const [docPreview, setDocPreview] = useState<{
     title: string;
@@ -635,13 +634,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const pendingUploadRef = useRef<{ category: string; documentType: string } | null>(null);
   const pendingChecklistNameRef = useRef<string | null>(null);
   const autoDocsOpenedRef = useRef(false);
-
-  useEffect(() => {
-    if (!ocrProcessing) return;
-    setOcrTick(0);
-    const id = setInterval(() => setOcrTick((v) => v + 1), 500);
-    return () => clearInterval(id);
-  }, [ocrProcessing]);
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -803,6 +795,18 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     setDocPreviewOpen(true);
   };
 
+  const openLastExtractionPreview = () => {
+    if (!lastExtraction) return;
+    setDocPreview({
+      title: lastExtraction.title,
+      status: lastExtraction.status,
+      error: lastExtraction.error,
+      textPreview: lastExtraction.textPreview,
+      fields: lastExtraction.fields,
+    });
+    setDocPreviewOpen(true);
+  };
+
   const uploadUi2Document = async (file: File) => {
     if (!conversationId || !loan?.id) return;
     const pending = pendingUploadRef.current;
@@ -830,7 +834,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
       await refreshMessages(conversationId);
       if (created && created.id) {
         const best = nextDocs?.find((d) => d.id === created.id) ?? created;
-        openDocPreview(best);
         const dt = (pending.documentType || '').toLowerCase();
         const shouldShowExtraction = dt.includes('id') || dt.includes('passport') || dt.includes('national') || dt.includes('job') || dt.includes('employment');
         if (shouldShowExtraction) {
@@ -858,13 +861,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
               setLastExtraction({
                 title,
                 documentType: pending.documentType,
-                status: nextEx.status,
-                error: nextEx.error,
-                textPreview: nextEx.textPreview,
-                fields: nextEx.fields,
-              });
-              setDocPreview({
-                title,
                 status: nextEx.status,
                 error: nextEx.error,
                 textPreview: nextEx.textPreview,
@@ -1658,13 +1654,23 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                             {lastExtraction.documentType ? ` • type: ${lastExtraction.documentType}` : ''}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setLastExtraction(null)}
-                          className="shrink-0 text-[11px] font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                        >
-                          Dismiss
-                        </button>
+                        <div className="shrink-0 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openLastExtractionPreview()}
+                            disabled={!lastExtraction.textPreview && (!lastExtraction.fields || Object.keys(lastExtraction.fields).length === 0)}
+                            className="text-[11px] font-extrabold text-blue-700 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            View details
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setLastExtraction(null)}
+                            className="text-[11px] font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
                       </div>
 
                       {lastExtraction.status === 'error' ? (
@@ -1719,9 +1725,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
                   <div className="w-4 h-4 rounded-full border-2 border-blue-600 dark:border-blue-400 border-t-transparent animate-spin" />
                   <div className="text-xs font-extrabold text-blue-900 dark:text-blue-200 truncate">Processing document (OCR)</div>
                 </div>
-                <div className="shrink-0 text-[11px] font-bold text-blue-700 dark:text-blue-300">
-                  {Math.max(1, Math.floor((Date.now() - ocrProcessing.startedAt) / 1000))}s
-                </div>
+                <div className="shrink-0 text-[11px] font-bold text-blue-700 dark:text-blue-300">Working…</div>
               </div>
               <div className="mt-1 text-[11px] text-blue-800/80 dark:text-blue-300/80 truncate">
                 {ocrProcessing.title}
