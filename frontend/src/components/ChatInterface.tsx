@@ -5,7 +5,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { LoanSnapshotCard } from './LoanSnapshotCard';
 import { LoanCard } from './LoanCard';
 import { DocumentsCard } from './DocumentsCard';
-import { StpProcessingCard, AffordabilityCard, TermsAcceptanceCard } from './StpCards';
+import { StpProcessingCard, AffordabilityCard } from './StpCards';
 
 interface Props {
   onConversationUpdated?: (conversation: V2Conversation) => void;
@@ -115,16 +115,42 @@ type V2LoanApplicationMeta = {
 };
 
 const getLoanApplicationMeta = (metadata: unknown): V2LoanApplicationMeta | null => {
-  if (!metadata || typeof metadata !== 'object') return null;
-  const la = (metadata as { loanApplication?: unknown }).loanApplication;
-  if (!la || typeof la !== 'object') return null;
-  return la as V2LoanApplicationMeta;
+  const meta = parseMetadata(metadata);
+  if (!meta) return null;
+  const laRaw = meta.loanApplication;
+  const la = laRaw && typeof laRaw === 'object' ? (laRaw as Record<string, unknown>) : null;
+  if (!la) return null;
+  const merged: Record<string, unknown> = { ...la };
+  if (typeof merged.awaitingAcceptance !== 'boolean' && typeof meta.awaitingAcceptance === 'boolean') {
+    merged.awaitingAcceptance = meta.awaitingAcceptance;
+  }
+  if (typeof merged.stpCompleted !== 'boolean' && typeof meta.stpCompleted === 'boolean') {
+    merged.stpCompleted = meta.stpCompleted;
+  }
+  if (typeof merged.stpApproved !== 'boolean' && typeof meta.stpApproved === 'boolean') {
+    merged.stpApproved = meta.stpApproved;
+  }
+  if (typeof merged.loanId !== 'string' && typeof meta.loanId === 'string') {
+    merged.loanId = meta.loanId;
+  }
+  if (typeof merged.success !== 'boolean' && typeof meta.success === 'boolean') {
+    merged.success = meta.success;
+  }
+  return merged as V2LoanApplicationMeta;
 };
 
 const DisbursementConfirmationCard: React.FC<{ loanApplication: V2LoanApplicationMeta }> = ({ loanApplication }) => {
   const d = loanApplication.disbursement;
   if (!d || !loanApplication.stpCompleted) return null;
   const a = loanApplication.approval;
+  const approvalRaw = a && typeof a === 'object' ? (a as unknown as Record<string, unknown>) : null;
+  const approval = approvalRaw
+    ? {
+        rate: approvalRaw.rate ?? approvalRaw.interest_rate ?? approvalRaw.interestRate,
+        tenure: approvalRaw.tenure ?? approvalRaw.tenure_years ?? approvalRaw.tenureYears,
+        emi: approvalRaw.emi ?? approvalRaw.monthly_emi ?? approvalRaw.monthlyEmi,
+      }
+    : null;
   const showTerm = (v: unknown) => {
     if (typeof v === 'number') return v > 0 ? String(v) : 'N/A';
     if (typeof v !== 'string') return 'N/A';
@@ -170,7 +196,7 @@ const DisbursementConfirmationCard: React.FC<{ loanApplication: V2LoanApplicatio
           </div>
         </div>
 
-        {a ? (
+        {approval ? (
           <div className="border-t border-slate-100 dark:border-white/[0.04]">
             <div className="px-4 py-2 bg-slate-50/80 dark:bg-white/[0.02] border-b border-slate-100 dark:border-white/[0.04]">
               <div className="text-[10px] font-extrabold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Approved Loan Terms</div>
@@ -178,15 +204,15 @@ const DisbursementConfirmationCard: React.FC<{ loanApplication: V2LoanApplicatio
             <div className="grid grid-cols-3 divide-x divide-slate-100 dark:divide-white/[0.04]">
               <div className="p-3 text-center">
                 <div className="text-[9px] text-slate-500 dark:text-slate-400">Rate</div>
-                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{showTerm(a.rate)}</div>
+                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{showTerm(approval.rate)}</div>
               </div>
               <div className="p-3 text-center">
                 <div className="text-[9px] text-slate-500 dark:text-slate-400">Tenure</div>
-                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{showTerm(a.tenure)}</div>
+                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{showTerm(approval.tenure)}</div>
               </div>
               <div className="p-3 text-center">
                 <div className="text-[9px] text-slate-500 dark:text-slate-400">Monthly EMI</div>
-                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{showTerm(a.emi)}</div>
+                <div className="mt-0.5 text-xs font-extrabold text-slate-800 dark:text-slate-200">{showTerm(approval.emi)}</div>
               </div>
             </div>
           </div>
@@ -204,7 +230,16 @@ const StpOfferCard: React.FC<{
 }> = ({ loanApplication, conversationId, loanId, onAccepted }) => {
   const a = loanApplication.approval;
   const steps = Array.isArray(loanApplication.stpSteps) ? loanApplication.stpSteps : [];
-  const conditions = Array.isArray(a?.conditions) ? a.conditions : [];
+  const approvalRaw = a && typeof a === 'object' ? (a as unknown as Record<string, unknown>) : null;
+  const approval = approvalRaw
+    ? {
+        rate: approvalRaw.rate ?? approvalRaw.interest_rate ?? approvalRaw.interestRate,
+        tenure: approvalRaw.tenure ?? approvalRaw.tenure_years ?? approvalRaw.tenureYears,
+        emi: approvalRaw.emi ?? approvalRaw.monthly_emi ?? approvalRaw.monthlyEmi,
+        conditions: approvalRaw.conditions,
+      }
+    : null;
+  const conditions = Array.isArray(approval?.conditions) ? approval.conditions : [];
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [sigDrawing, setSigDrawing] = useState(false);
   const [sigHasInk, setSigHasInk] = useState(false);
@@ -230,7 +265,7 @@ const StpOfferCard: React.FC<{
     ...extractFacts('Liability', liabilityComparison),
   ].slice(0, 6);
 
-  if (!loanApplication.awaitingAcceptance || !a) return null;
+  if (!loanApplication.awaitingAcceptance || !approval) return null;
 
   const showTerm = (v: unknown) => {
     if (typeof v === 'number') return v > 0 ? String(v) : '—';
@@ -294,19 +329,19 @@ const StpOfferCard: React.FC<{
             <div className="rounded-xl bg-white/[0.08] px-3 py-2 text-center">
               <div className="text-[9px] text-white/45 uppercase tracking-wider">Rate</div>
               <div className="mt-0.5 text-xs font-extrabold text-white" data-testid="text-offer-rate">
-                {showTerm(a.rate)}
+                {showTerm(approval.rate)}
               </div>
             </div>
             <div className="rounded-xl bg-white/[0.08] px-3 py-2 text-center">
               <div className="text-[9px] text-white/45 uppercase tracking-wider">Tenure</div>
               <div className="mt-0.5 text-xs font-extrabold text-white" data-testid="text-offer-tenure">
-                {showTerm(a.tenure)}
+                {showTerm(approval.tenure)}
               </div>
             </div>
             <div className="rounded-xl bg-white/[0.08] px-3 py-2 text-center">
               <div className="text-[9px] text-white/45 uppercase tracking-wider">Monthly EMI</div>
               <div className="mt-0.5 text-xs font-extrabold text-white" data-testid="text-offer-emi">
-                {showTerm(a.emi)}
+                {showTerm(approval.emi)}
               </div>
             </div>
           </div>
@@ -341,7 +376,7 @@ const StpOfferCard: React.FC<{
         <div className="border-t border-slate-100 dark:border-white/[0.04]">
           <div className="px-4 py-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-xs font-extrabold tracking-tight text-slate-800 dark:text-slate-200">Accept Terms</div>
+              <div className="text-xs font-extrabold tracking-tight text-slate-800 dark:text-slate-200">Accept Loan Terms</div>
               <button
                 type="button"
                 onClick={clearSignature}
@@ -593,20 +628,13 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestGenRef = useRef(0);
+  const sendLockRef = useRef(false);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* removed documents panel ref */
   const ocrFileInputRef = useRef<HTMLInputElement>(null);
   const pendingUploadRef = useRef<{ category: string; documentType: string } | null>(null);
   const pendingChecklistNameRef = useRef<string | null>(null);
   const autoDocsOpenedRef = useRef(false);
-  const termsFallbackRef = useRef<{
-    loanAmount: number;
-    interestRate: number;
-    tenure: number;
-    monthlyEmi: number;
-    totalInterest: number;
-    totalRepayment: number;
-  } | null>(null);
 
   useEffect(() => {
     if (!ocrProcessing) return;
@@ -973,7 +1001,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     try {
       const res = await fetch(`${API_BASE_URL}/api/v3/conversations/${activeConversationId}/messages`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-idempotency-key': userMsg.id },
         body: JSON.stringify({ content }),
       });
 
@@ -1109,12 +1137,22 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const handleSend = async (text: string) => {
     const content = text.trim();
     if (!content || loading || bootstrapping) return;
+    if (sendLockRef.current) return;
+    sendLockRef.current = true;
     if (!conversationId) {
-      await startConversationAndSend(content);
+      try {
+        await startConversationAndSend(content);
+      } finally {
+        sendLockRef.current = false;
+      }
       return;
     }
-    if (viewState !== 'chat') setViewState('chat');
-    await sendToExisting(conversationId, content);
+    try {
+      if (viewState !== 'chat') setViewState('chat');
+      await sendToExisting(conversationId, content);
+    } finally {
+      sendLockRef.current = false;
+    }
   };
 
   const canSend = input.trim().length > 0 && !loading && !bootstrapping && uploadingType === null && !ocrProcessing;
@@ -1439,66 +1477,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
           />
         );
       }
-    }
-
-    // Terms Acceptance Card
-    if (metadata.awaitingAcceptance === true && asRecord(metadata.loanApplication)) {
-      const loanApp = metadata.loanApplication as Record<string, unknown>;
-      const snapshot = asRecord(metadata.loanSnapshot) ?? {};
-      const recommendation = asRecord(metadata.selectedRecommendation) ?? {};
-      const nextTerms = {
-        loanAmount: typeof loanApp.amount === 'number' ? loanApp.amount : typeof snapshot.loan_amount === 'number' ? snapshot.loan_amount : 0,
-        interestRate:
-          typeof recommendation.interest_rate === 'number'
-            ? recommendation.interest_rate
-            : typeof loanApp.rate === 'number'
-              ? loanApp.rate
-              : 0,
-        tenure:
-          typeof recommendation.tenure_years === 'number'
-            ? recommendation.tenure_years
-            : typeof loanApp.tenure === 'number'
-              ? loanApp.tenure
-              : 0,
-        monthlyEmi: typeof recommendation.monthly_emi === 'number' ? recommendation.monthly_emi : typeof loanApp.emi === 'number' ? loanApp.emi : 0,
-        totalInterest:
-          typeof recommendation.total_interest === 'number'
-            ? recommendation.total_interest
-            : typeof snapshot.total_interest === 'number'
-              ? snapshot.total_interest
-              : 0,
-        totalRepayment:
-          typeof recommendation.total_repayment === 'number'
-            ? recommendation.total_repayment
-            : typeof snapshot.total_repayment === 'number'
-              ? snapshot.total_repayment
-              : 0,
-      };
-
-      const hasPricing =
-        nextTerms.loanAmount > 0 &&
-        nextTerms.interestRate > 0 &&
-        nextTerms.tenure > 0 &&
-        nextTerms.monthlyEmi > 0 &&
-        nextTerms.totalRepayment > 0;
-
-      const effectiveTerms = hasPricing ? nextTerms : termsFallbackRef.current ?? nextTerms;
-      if (hasPricing) termsFallbackRef.current = nextTerms;
-
-      cards.push(
-        <TermsAcceptanceCard
-          key="terms"
-          loanAmount={effectiveTerms.loanAmount}
-          interestRate={effectiveTerms.interestRate}
-          tenure={effectiveTerms.tenure}
-          monthlyEmi={effectiveTerms.monthlyEmi}
-          totalInterest={effectiveTerms.totalInterest}
-          totalRepayment={effectiveTerms.totalRepayment}
-          onAccept={() => {
-            void handleSend(`I accept the terms and provide my electronic signature`);
-          }}
-        />
-      );
     }
 
     // Disbursement Confirmation Card

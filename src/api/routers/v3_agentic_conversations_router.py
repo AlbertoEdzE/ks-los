@@ -417,7 +417,12 @@ async def create_conversation(request: V3ConversationRequest, db: Session = Depe
 
 
 @router.post("/{session_id}/messages", response_model=V3MessageResponse)
-async def send_message(session_id: str, request: V3MessageRequest, db: Session = Depends(get_db)):
+async def send_message(
+    session_id: str,
+    request: V3MessageRequest,
+    db: Session = Depends(get_db),
+    idempotency_key: Optional[str] = Header(None, alias="x-idempotency-key"),
+):
     """
     Send a message to the agentic conversation.
     
@@ -429,29 +434,42 @@ async def send_message(session_id: str, request: V3MessageRequest, db: Session =
     """
     # session_id comes from path parameter now
     state = get_or_create_state(session_id)
-    
-    # Add user message to history
-    state.add_message("user", request.content)
+
+    key = (idempotency_key or "").strip() or None
+    is_duplicate = False
+    if key and state.conversation_history:
+        last_hist = state.conversation_history[-1]
+        if (
+            last_hist.role == "assistant"
+            and isinstance(last_hist.metadata, dict)
+            and last_hist.metadata.get("idempotency_key") == key
+        ):
+            is_duplicate = True
+
+    if not is_duplicate:
+        state.add_message("user", request.content)
     
     # ──────────────────────────────────────────────────────────────────────
     # Agentic Processing Pipeline
     # ──────────────────────────────────────────────────────────────────────
     
     # Step 1: Repair Node (handle corrections, digressions)
-    repair_node = RepairNode()
-    state = repair_node.process(state)
+    if not is_duplicate:
+        repair_node = RepairNode()
+        state = repair_node.process(state)
     
     # Step 2: RAG Node (policy-grounded responses)
     # Note: Pass knowledge_base if available
-    rag_node = RAGNode()
-    state = rag_node.process(state)
+    if not is_duplicate:
+        rag_node = RAGNode()
+        state = rag_node.process(state)
     
     # Step 3: Mode-specific processing
-    if state.mode == ConversationMode.ADVISORY:
+    if not is_duplicate and state.mode == ConversationMode.ADVISORY:
         advisory_node = AdvisoryNode()
         state = advisory_node.process(state)
         
-    elif state.mode == ConversationMode.APPLICATION:
+    elif not is_duplicate and state.mode == ConversationMode.APPLICATION:
         def _create_or_update_loan(loan_data: Dict[str, Any]):
             existing = (
                 db.query(Loan)
@@ -499,19 +517,24 @@ async def send_message(session_id: str, request: V3MessageRequest, db: Session =
         application_node = ApplicationNode(create_loan_callback=_create_or_update_loan)
         state = application_node.process(state)
         
-    elif state.mode == ConversationMode.COMPLETION:
+    elif not is_duplicate and state.mode == ConversationMode.COMPLETION:
         completion_node = CompletionNode()
         state = completion_node.process(state)
     
     # Step 4: Escalation Node (check if human handoff needed)
-    escalation_node = EscalationNode()
-    state = escalation_node.process(state)
+    if not is_duplicate:
+        escalation_node = EscalationNode()
+        state = escalation_node.process(state)
     
     # ──────────────────────────────────────────────────────────────────────
     # Extract response
     # ──────────────────────────────────────────────────────────────────────
 
     last_message = state.conversation_history[-1] if state.conversation_history else None
+    if (not is_duplicate) and key and last_message and last_message.role == "assistant":
+        meta = last_message.metadata if isinstance(last_message.metadata, dict) else {}
+        meta["idempotency_key"] = key
+        last_message.metadata = meta
     raw_response_text = last_message.content if last_message else "I'm processing your request..."
 
     # Phase 1: Parse XML tags from LLM response to extract metadata

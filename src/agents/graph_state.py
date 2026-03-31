@@ -125,6 +125,7 @@ class DiscrepancyFlag(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class CapturedContext(BaseModel):
+    model_config = {"validate_assignment": True, "extra": "allow"}
     purpose: Optional[str] = None
     property_value: Optional[float] = None
     property_currency: str = "USD"
@@ -160,7 +161,7 @@ class CapturedContext(BaseModel):
         mode="before",
     )
     @classmethod
-    def _coerce_numeric_money_fields(cls, v):
+    def _coerce_numeric_money_fields(cls, v, info):
         if v is None:
             return None
         if isinstance(v, (int, float)):
@@ -169,6 +170,13 @@ class CapturedContext(BaseModel):
             t = v.strip()
             if not t:
                 return None
+            field_name = getattr(info, "field_name", None)
+            if field_name == "existing_debts":
+                lowered = t.lower()
+                if lowered in {"none", "no", "nil", "n/a", "na", "0", "$0", "0.0"}:
+                    return 0.0
+                if re.search(r"\b(no|none|nil|zero)\b", lowered) and not re.search(r"\d", lowered):
+                    return 0.0
             cleaned = re.sub(r"[^\d.\-]", "", t.replace(",", ""))
             if cleaned in {"", "-", ".", "-.", ".-"}:
                 return None

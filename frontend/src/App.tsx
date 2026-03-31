@@ -557,22 +557,22 @@ function App() {
     }, [conversation?.nextConversationAngle, latestIntentSummary, stickyIntentSummary]);
 
     const seriousnessScore = React.useMemo(() => {
-      const fromConv = conversation?.seriousnessScore;
+      const fromConv = conversation?.seriousnessScore ?? (conversation as unknown as Record<string, unknown> | null)?.seriousness_score;
       if (typeof fromConv === 'number') return fromConv;
       const source = latestIntentSummary ?? stickyIntentSummary;
-      const fromMsg = source?.seriousnessScore;
+      const fromMsg = source?.seriousnessScore ?? (source as unknown as Record<string, unknown> | null)?.seriousness_score;
       if (typeof fromMsg === 'number') return fromMsg;
       return null;
-    }, [conversation?.seriousnessScore, latestIntentSummary, stickyIntentSummary]);
+    }, [conversation, latestIntentSummary, stickyIntentSummary]);
 
     const fitScore = React.useMemo(() => {
-      const fromConv = conversation?.fitScore;
+      const fromConv = conversation?.fitScore ?? (conversation as unknown as Record<string, unknown> | null)?.fit_score;
       if (typeof fromConv === 'number') return fromConv;
       const source = latestIntentSummary ?? stickyIntentSummary;
-      const fromMsg = source?.fitScore;
+      const fromMsg = source?.fitScore ?? (source as unknown as Record<string, unknown> | null)?.fit_score;
       if (typeof fromMsg === 'number') return fromMsg;
       return null;
-    }, [conversation?.fitScore, latestIntentSummary, stickyIntentSummary]);
+    }, [conversation, latestIntentSummary, stickyIntentSummary]);
 
     const approvalTopBlockers = React.useMemo(() => {
       const raw = conversation?.approvalProbability as unknown;
@@ -615,9 +615,65 @@ function App() {
     }, [latestCalculated, stickyCalculated]);
 
     const recommendedProducts = React.useMemo(() => {
-      const raw = conversation?.recommendedProducts as unknown;
-      return Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
-    }, [conversation?.recommendedProducts]);
+      const raw =
+        (conversation as unknown as Record<string, unknown> | null)?.recommendedProducts ??
+        (latestIntentSummary as unknown as Record<string, unknown> | null)?.recommendedProducts ??
+        (stickyIntentSummary as unknown as Record<string, unknown> | null)?.recommendedProducts;
+      if (!Array.isArray(raw)) return [];
+
+      const formatRate = (v: unknown) => {
+        if (typeof v === 'number' && Number.isFinite(v) && v > 0) return `${v.toFixed(2)}%`;
+        if (typeof v !== 'string') return '';
+        const t = v.trim();
+        return t;
+      };
+
+      const formatTenure = (v: unknown) => {
+        if (typeof v === 'number' && Number.isFinite(v) && v > 0) return `${v} yrs`;
+        if (typeof v !== 'string') return '';
+        const t = v.trim();
+        return t;
+      };
+
+      const formatEmi = (v: unknown) => {
+        if (typeof v === 'number' && Number.isFinite(v) && v > 0) return new Intl.NumberFormat('en-US').format(v);
+        if (typeof v !== 'string') return '';
+        const t = v.trim();
+        return t;
+      };
+
+      return raw
+        .map((item, idx) => {
+          const r = item && typeof item === 'object' ? (item as Record<string, unknown>) : null;
+          if (!r) return null;
+          const nameRaw = r.name ?? r.title ?? r.type ?? r.category;
+          const name = typeof nameRaw === 'string' && nameRaw.trim() ? nameRaw.trim() : `Recommendation ${idx + 1}`;
+          const recommendation = typeof r.recommendation === 'string' ? r.recommendation : typeof r.summary === 'string' ? r.summary : '';
+
+          const rate =
+            r.estimatedRate ??
+            r.estimated_rate ??
+            r.interest_rate ??
+            r.baseInterestRate ??
+            r.base_interest_rate ??
+            r.rate;
+          const tenure = r.tenure ?? r.tenure_years ?? r.tenureYears ?? r.term;
+          const emi = r.estimatedEmi ?? r.estimated_emi ?? r.monthly_emi ?? r.emi;
+
+          const estimatedRate = formatRate(rate);
+          const tenureLabel = formatTenure(tenure);
+          const estimatedEmi = formatEmi(emi);
+
+          return {
+            name,
+            recommendation,
+            estimatedRate,
+            tenure: tenureLabel,
+            estimatedEmi,
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+    }, [conversation, latestIntentSummary, stickyIntentSummary]);
 
     const handleNewChat = () => {
       setConversation(null);
@@ -1077,9 +1133,32 @@ function App() {
     }, [selected?.approvalProbability]);
 
     const recommendedProducts = React.useMemo(() => {
-      const raw = selected?.recommendedProducts as unknown;
-      return Array.isArray(raw) ? raw : [];
-    }, [selected?.recommendedProducts]);
+      const raw = (selected as unknown as Record<string, unknown> | null)?.recommendedProducts;
+      if (!Array.isArray(raw)) return [];
+
+      const formatRate = (v: unknown) => {
+        if (typeof v === 'number' && Number.isFinite(v) && v > 0) return `${v.toFixed(2)}%`;
+        if (typeof v !== 'string') return '';
+        return v.trim();
+      };
+
+      return raw
+        .map((item, idx) => {
+          const r = item && typeof item === 'object' ? (item as Record<string, unknown>) : null;
+          if (!r) return null;
+          const nameRaw = r.name ?? r.title ?? r.type ?? r.category;
+          const name = typeof nameRaw === 'string' && nameRaw.trim() ? nameRaw.trim() : `Recommendation ${idx + 1}`;
+          const rate =
+            r.estimatedRate ??
+            r.estimated_rate ??
+            r.interest_rate ??
+            r.baseInterestRate ??
+            r.base_interest_rate ??
+            r.rate;
+          return { ...r, name, estimatedRate: formatRate(rate) };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+    }, [selected]);
 
     return (
       <OfficerChrome>

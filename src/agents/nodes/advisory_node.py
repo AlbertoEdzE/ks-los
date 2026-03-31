@@ -19,6 +19,7 @@ Usage:
 
 from typing import Dict, List, Any, Optional
 import logging
+import re
 
 from langchain_core.messages import HumanMessage, AIMessage
 
@@ -353,6 +354,8 @@ class AdvisoryNode:
         if not state.conversation_history:
             return state
         
+        last_user_text = state.conversation_history[-1].content
+
         # Extract financial details using LLM
         try:
             extraction = self.intent_extractor._run(
@@ -377,6 +380,15 @@ class AdvisoryNode:
         except Exception as e:
             self.logger.warning(f"Financial details extraction failed: {str(e)}")
         
+        if state.captured_context.existing_debts is None:
+            lowered = last_user_text.strip().lower()
+            if lowered in {"none", "no", "nil", "n/a", "na", "0"}:
+                state.captured_context.existing_debts = 0.0
+                state.captured_context.has_existing_debts = False
+            elif re.search(r"\b(no|none|nil|zero)\b", lowered) and not re.search(r"\d", lowered):
+                state.captured_context.existing_debts = 0.0
+                state.captured_context.has_existing_debts = False
+
         # Check if we have enough for snapshot
         context = state.captured_context
         has_amount = bool(context.loan_amount)
@@ -385,19 +397,22 @@ class AdvisoryNode:
         if has_amount and has_debts and bool(context.borrower_name):
             # Ready for snapshot + recommendations
             return self._step4_snapshot_and_recommendations(state)
-        else:
-            # Ask for missing information
-            response_text = (
-                "Thank you for sharing that. To provide you with accurate options, "
-                "I need to know:\n\n"
+
+        if not bool(context.borrower_name):
+            state.add_message("assistant", "Before I calculate options, what’s your full name (first and last)?")
+            return state
+
+        if not has_amount:
+            state.add_message(
+                "assistant",
+                "Thanks — roughly how much are you looking to borrow (and the currency, e.g. USD 50,000)?",
             )
-            
-            if not has_amount:
-                response_text += "• How much are you looking to borrow?\n"
-            if not has_debts:
-                response_text += "• Do you have any existing loan payments or credit card debts?\n"
-            
-            state.add_message("assistant", response_text)
+            return state
+
+        state.add_message(
+            "assistant",
+            "And do you have any current monthly loan repayments, credit cards, or other commitments? If none, just say 'none'.",
+        )
         
         return state
     
