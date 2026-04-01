@@ -254,6 +254,42 @@ class AdvisoryNode:
                 state.captured_context.purpose = result.context.purpose
             if result.context.borrower_name:
                 state.captured_context.borrower_name = result.context.borrower_name
+            if result.context.loan_amount and not state.captured_context.loan_amount:
+                state.captured_context.loan_amount = self._to_float(result.context.loan_amount)
+            if result.context.property_value and not state.captured_context.property_value:
+                state.captured_context.property_value = self._to_float(result.context.property_value)
+            if result.context.down_payment and state.captured_context.down_payment is None:
+                raw_dp = str(result.context.down_payment).strip()
+                if raw_dp.endswith("%") and state.captured_context.loan_amount:
+                    try:
+                        pct = float(raw_dp.rstrip("%").strip())
+                        state.captured_context.down_payment = state.captured_context.loan_amount * (pct / 100.0)
+                    except Exception:
+                        pass
+                else:
+                    state.captured_context.down_payment = self._to_float(raw_dp)
+
+            prev_assistant = None
+            if len(state.conversation_history) >= 2:
+                for m in reversed(state.conversation_history[:-1]):
+                    if m.role == "assistant":
+                        prev_assistant = m.content
+                        break
+
+            if prev_assistant and (state.captured_context.loan_amount is None or state.captured_context.down_payment is None):
+                assistant_lower = prev_assistant.lower()
+                if ("down payment" in assistant_lower or "deposit" in assistant_lower) and (
+                    "loan amount" in assistant_lower or "property value" in assistant_lower
+                ):
+                    user_text = last_message
+                    m = re.search(r"(?P<amount>[\d,]+(?:\.\d+)?)\s*(?:[,/]|\\s)+\s*(?P<pct>\d+(?:\.\d+)?)\s*%", user_text)
+                    if m:
+                        amount = self._to_float(m.group("amount"))
+                        pct = self._to_float(m.group("pct"))
+                        if state.captured_context.loan_amount is None and amount:
+                            state.captured_context.loan_amount = amount
+                        if state.captured_context.down_payment is None and amount and pct:
+                            state.captured_context.down_payment = amount * (pct / 100.0)
 
             # Store confidence scores
             state.confidence_scores.update(result.field_confidence)
@@ -313,11 +349,54 @@ class AdvisoryNode:
             from src.agents.agent_tools.intent_extractor import IntentExtractionResult
             result = IntentExtractionResult.model_validate_json(extraction)
             
-            # Update context
+            last_user_text = state.conversation_history[-1].content
+            prev_assistant = None
+            if len(state.conversation_history) >= 2:
+                for m in reversed(state.conversation_history[:-1]):
+                    if m.role == "assistant":
+                        prev_assistant = m.content
+                        break
+
+            captured_loan_from_message = False
+            if prev_assistant:
+                assistant_lower = prev_assistant.lower()
+                if ("down payment" in assistant_lower or "deposit" in assistant_lower) and (
+                    "loan amount" in assistant_lower or "property value" in assistant_lower
+                ):
+                    m = re.search(r"(?P<amount>[\d,]+(?:\.\d+)?)\s*(?:[,/]|\\s)+\s*(?P<pct>\d+(?:\.\d+)?)\s*%", last_user_text)
+                    if m:
+                        amount = self._to_float(m.group("amount"))
+                        pct = self._to_float(m.group("pct"))
+                        if state.captured_context.loan_amount is None and amount:
+                            state.captured_context.loan_amount = amount
+                        if state.captured_context.down_payment is None and amount and pct:
+                            state.captured_context.down_payment = amount * (pct / 100.0)
+                        captured_loan_from_message = True
+
+            if result.context.loan_amount and state.captured_context.loan_amount is None:
+                state.captured_context.loan_amount = self._to_float(result.context.loan_amount)
+            if result.context.down_payment and state.captured_context.down_payment is None:
+                raw_dp = str(result.context.down_payment).strip()
+                if raw_dp.endswith("%") and state.captured_context.loan_amount:
+                    try:
+                        pct = float(raw_dp.rstrip("%").strip())
+                        state.captured_context.down_payment = state.captured_context.loan_amount * (pct / 100.0)
+                    except Exception:
+                        pass
+                else:
+                    state.captured_context.down_payment = self._to_float(raw_dp)
+
             if result.context.employment_type:
                 state.captured_context.employment_type = result.context.employment_type
-            if result.context.monthly_income:
+
+            if (not captured_loan_from_message) and result.context.monthly_income:
                 state.captured_context.monthly_income = result.context.monthly_income
+            if (not state.captured_context.monthly_income) and prev_assistant:
+                assistant_lower = prev_assistant.lower()
+                if "monthly income" in assistant_lower or "income look like" in assistant_lower or "income" in assistant_lower:
+                    m_income = re.search(r"([\d,]+(?:\.\d+)?)", last_user_text)
+                    if m_income:
+                        state.captured_context.monthly_income = self._to_float(m_income.group(1))
             
             # Update confidence scores
             state.confidence_scores.update(result.field_confidence)

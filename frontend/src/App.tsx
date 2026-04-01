@@ -3610,7 +3610,10 @@ function App() {
           <RequireAuth>
             <RequireRole allow="admin">
               <OfficerChrome>
-                <MetricsPanel />
+                <div className="space-y-6">
+                  <MetricsDashboard isAdmin autoRefresh />
+                  <MetricsPanel />
+                </div>
               </OfficerChrome>
             </RequireRole>
           </RequireAuth>

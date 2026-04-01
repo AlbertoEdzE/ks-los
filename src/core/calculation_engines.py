@@ -192,6 +192,8 @@ def parse_numeric(val: str | int | float | None) -> float:
     
     # Remove currency symbols, commas, whitespace, and percentage signs
     cleaned = re.sub(r'[₹$€£,\s%a-zA-Z]', '', str(val)).strip()
+    if cleaned and re.fullmatch(r"\d{1,3}(\.\d{3})+", cleaned):
+        cleaned = cleaned.replace(".", "")
     try:
         return float(cleaned)
     except ValueError:

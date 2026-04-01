@@ -45,7 +45,9 @@ class RAGNode:
     
     # Policy-related question patterns
     POLICY_PATTERNS = [
-        r"\b(?:what\s+is|what\s+are)\s+(?:the\s+)?(?:minimum|maximum|max|min)\b",
+        r"\b(?:what\s+is|what\s+are|what'?s|what'?re)\s+(?:the\s+)?(?:minimum|maximum|max|min)\b",
+        r"\bminimum\s+income\s+requirement\b",
+        r"\b(?:income\s+requirement|minimum\s+income)\b",
         r"\b(?:eligibility|criteria|requirements)\b",
         r"\b(?:interest\s+rate|rates)\b",
         r"\b(?:loan\s+)?(?:limit|limits|amount)\b",
@@ -96,12 +98,18 @@ class RAGNode:
         """
         if not state.conversation_history:
             return state
-        
-        last_message = state.conversation_history[-1].content
+
+        last_user_message = None
+        for msg in reversed(state.conversation_history):
+            if getattr(msg, "role", None) == "user":
+                last_user_message = getattr(msg, "content", None)
+                break
+        if not last_user_message:
+            return state
         
         # Check if this is a policy question
-        if self._is_policy_question(last_message):
-            state = self._handle_policy_question(state, last_message)
+        if self._is_policy_question(last_user_message):
+            state = self._handle_policy_question(state, last_user_message)
         
         return state
     
@@ -147,11 +155,23 @@ class RAGNode:
             Updated state with grounded response
         """
         self.logger.info(f"Policy question detected: {question[:50]}...")
+
+        q_lower = question.lower()
+        if not getattr(state.captured_context, "employment_type", None):
+            if any(t in q_lower for t in ["salaried", "employed", "employee"]):
+                state.captured_context.employment_type = "salaried"
+            elif any(t in q_lower for t in ["self-employed", "self employed", "business owner", "freelance", "freelancer"]):
+                state.captured_context.employment_type = "self-employed"
+            elif any(t in q_lower for t in ["contractor", "contract"]):
+                state.captured_context.employment_type = "contractor"
         
         # Retrieve relevant policies
         if self.knowledge_base:
             try:
-                retrieved_docs = self.knowledge_base.search(question, k=self.k)
+                if hasattr(self.knowledge_base, "query"):
+                    retrieved_docs = self.knowledge_base.query(question, k=self.k)
+                else:
+                    retrieved_docs = self.knowledge_base.search(question, k=self.k)
                 
                 # Filter by similarity threshold
                 relevant_docs = [

@@ -281,7 +281,7 @@ async def get_portfolio_metrics(
 
     for loan in loans:
         status_value = _loan_to_application_status(None, loan)
-        if status_value == ApplicationStatus.APPROVED:
+        if status_value in {ApplicationStatus.APPROVED, ApplicationStatus.DISBURSED}:
             approved += 1
         elif status_value == ApplicationStatus.REJECTED:
             rejected += 1

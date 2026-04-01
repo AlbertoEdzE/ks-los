@@ -454,16 +454,21 @@ async def send_message(
     key = (idempotency_key or "").strip() or None
     is_duplicate = False
     if key and state.conversation_history:
-        last_hist = state.conversation_history[-1]
+        last_user = None
+        for m in reversed(state.conversation_history):
+            if m.role == "user":
+                last_user = m
+                break
         if (
-            last_hist.role == "assistant"
-            and isinstance(last_hist.metadata, dict)
-            and last_hist.metadata.get("idempotency_key") == key
+            last_user is not None
+            and isinstance(last_user.metadata, dict)
+            and last_user.metadata.get("idempotency_key") == key
+            and (last_user.content or "") == (request.content or "")
         ):
             is_duplicate = True
 
     if not is_duplicate:
-        state.add_message("user", request.content)
+        state.add_message("user", request.content, metadata={"idempotency_key": key} if key else None)
     
     # ──────────────────────────────────────────────────────────────────────
     # Agentic Processing Pipeline
@@ -479,13 +484,19 @@ async def send_message(
     if not is_duplicate:
         rag_node = RAGNode()
         state = rag_node.process(state)
+
+    rag_handled = False
+    if not is_duplicate and state.conversation_history:
+        last_hist = state.conversation_history[-1]
+        if last_hist.role == "assistant" and isinstance(last_hist.metadata, dict):
+            rag_handled = bool(last_hist.metadata.get("rag_used") or last_hist.metadata.get("fallback"))
     
     # Step 3: Mode-specific processing
-    if not is_duplicate and state.mode == ConversationMode.ADVISORY:
+    if not is_duplicate and (not rag_handled) and state.mode == ConversationMode.ADVISORY:
         advisory_node = AdvisoryNode()
         state = advisory_node.process(state)
         
-    elif not is_duplicate and state.mode == ConversationMode.APPLICATION:
+    elif not is_duplicate and (not rag_handled) and state.mode == ConversationMode.APPLICATION:
         def _create_or_update_loan(loan_data: Dict[str, Any]):
             existing = (
                 db.query(Loan)
@@ -533,7 +544,7 @@ async def send_message(
         application_node = ApplicationNode(create_loan_callback=_create_or_update_loan)
         state = application_node.process(state)
         
-    elif not is_duplicate and state.mode == ConversationMode.COMPLETION:
+    elif not is_duplicate and (not rag_handled) and state.mode == ConversationMode.COMPLETION:
         completion_node = CompletionNode()
         state = completion_node.process(state)
     
