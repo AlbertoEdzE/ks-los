@@ -542,6 +542,11 @@ function App() {
       if (latestIntentSummary) setStickyIntentSummary(latestIntentSummary);
     }, [latestIntentSummary]);
 
+    React.useEffect(() => {
+      setStickyCalculated(null);
+      setStickyIntentSummary(null);
+    }, [resetSignal]);
+
     const approvalProbability = React.useMemo(() => {
       const raw = conversation?.approvalProbability as unknown;
       if (typeof raw === 'number') return raw;
@@ -694,6 +699,8 @@ function App() {
       setConversation(null);
       setPhases([]);
       setResetSignal((v) => v + 1);
+      setStickyCalculated(null);
+      setStickyIntentSummary(null);
     };
 
     return (

@@ -158,7 +158,7 @@ class RAGNode:
 
         q_lower = question.lower()
         if not getattr(state.captured_context, "employment_type", None):
-            if any(t in q_lower for t in ["salaried", "employed", "employee"]):
+            if ("salaried" in q_lower) or re.search(r"\bemploy\w*\b", q_lower):
                 state.captured_context.employment_type = "salaried"
             elif any(t in q_lower for t in ["self-employed", "self employed", "business owner", "freelance", "freelancer"]):
                 state.captured_context.employment_type = "self-employed"

@@ -236,6 +236,30 @@ class AdvisoryNode:
 
         # Extract intent from conversation using LLM
         last_message = state.conversation_history[-1].content
+        prev_assistant = None
+        if len(state.conversation_history) >= 2:
+            for m in reversed(state.conversation_history[:-1]):
+                if m.role == "assistant":
+                    prev_assistant = m.content
+                    break
+
+        if prev_assistant and not state.captured_context.borrower_name:
+            assistant_lower = prev_assistant.lower()
+            if "full name" in assistant_lower or "your name" in assistant_lower or "address you" in assistant_lower:
+                candidate = (last_message or "").strip()
+                if candidate and len(candidate) <= 80 and not re.search(r"\d", candidate):
+                    state.captured_context.borrower_name = candidate
+
+        if not state.captured_context.purpose:
+            msg_lower = (last_message or "").lower()
+            if "home" in msg_lower or "house" in msg_lower or "mortgage" in msg_lower or "property" in msg_lower:
+                state.captured_context.purpose = "home_purchase"
+            elif "car" in msg_lower or "auto" in msg_lower or "vehicle" in msg_lower:
+                state.captured_context.purpose = "auto"
+            elif "business" in msg_lower:
+                state.captured_context.purpose = "business"
+            elif "personal" in msg_lower:
+                state.captured_context.purpose = "personal"
 
         try:
             # Use LLM to extract intent (purpose + name + other fields)
@@ -254,12 +278,17 @@ class AdvisoryNode:
                 state.captured_context.purpose = result.context.purpose
             if result.context.borrower_name:
                 state.captured_context.borrower_name = result.context.borrower_name
-            if result.context.loan_amount and not state.captured_context.loan_amount:
-                state.captured_context.loan_amount = self._to_float(result.context.loan_amount)
-            if result.context.property_value and not state.captured_context.property_value:
-                state.captured_context.property_value = self._to_float(result.context.property_value)
-            if result.context.down_payment and state.captured_context.down_payment is None:
-                raw_dp = str(result.context.down_payment).strip()
+            extracted_loan_amount = getattr(result.context, "loan_amount", None)
+            if extracted_loan_amount and not state.captured_context.loan_amount:
+                state.captured_context.loan_amount = self._to_float(extracted_loan_amount)
+
+            extracted_property_value = getattr(result.context, "property_value", None)
+            if extracted_property_value and not state.captured_context.property_value:
+                state.captured_context.property_value = self._to_float(extracted_property_value)
+
+            extracted_down_payment = getattr(result.context, "down_payment", None)
+            if extracted_down_payment and state.captured_context.down_payment is None:
+                raw_dp = str(extracted_down_payment).strip()
                 if raw_dp.endswith("%") and state.captured_context.loan_amount:
                     try:
                         pct = float(raw_dp.rstrip("%").strip())
@@ -268,13 +297,6 @@ class AdvisoryNode:
                         pass
                 else:
                     state.captured_context.down_payment = self._to_float(raw_dp)
-
-            prev_assistant = None
-            if len(state.conversation_history) >= 2:
-                for m in reversed(state.conversation_history[:-1]):
-                    if m.role == "assistant":
-                        prev_assistant = m.content
-                        break
 
             if prev_assistant and (state.captured_context.loan_amount is None or state.captured_context.down_payment is None):
                 assistant_lower = prev_assistant.lower()
@@ -336,6 +358,27 @@ class AdvisoryNode:
         if not state.conversation_history:
             return state
         
+        # Deterministic "slot fill" for the most common failure mode:
+        # when a policy/RAG interruption happens mid-step, the next user message
+        # can be a bare number (e.g. "10000"). We treat it as monthly income
+        # when we're in the employment/income step, instead of re-asking forever.
+        last_user_text = state.conversation_history[-1].content
+        user_lower = last_user_text.lower()
+        if not state.captured_context.employment_type:
+            if ("salaried" in user_lower) or re.search(r"\bemploy\w*\b", user_lower):
+                state.captured_context.employment_type = "salaried"
+            elif any(t in user_lower for t in ["self-employed", "self employed", "business owner", "freelance", "freelancer"]):
+                state.captured_context.employment_type = "self-employed"
+            elif any(t in user_lower for t in ["contractor", "contract"]):
+                state.captured_context.employment_type = "contractor"
+
+        if not state.captured_context.monthly_income:
+            amount_pct = re.search(r"(?P<amount>[\d,]+(?:\.\d+)?)\s*(?:[,/]|\\s)+\s*(?P<pct>\d+(?:\.\d+)?)\s*%", last_user_text)
+            if not amount_pct:
+                m_income = re.search(r"(\d[\d,]*(?:\.\d+)?)", last_user_text)
+                if m_income:
+                    state.captured_context.monthly_income = self._to_float(m_income.group(1))
+
         # Extract employment and income using LLM
         try:
             extraction = self.intent_extractor._run(
@@ -349,7 +392,6 @@ class AdvisoryNode:
             from src.agents.agent_tools.intent_extractor import IntentExtractionResult
             result = IntentExtractionResult.model_validate_json(extraction)
             
-            last_user_text = state.conversation_history[-1].content
             prev_assistant = None
             if len(state.conversation_history) >= 2:
                 for m in reversed(state.conversation_history[:-1]):
@@ -375,8 +417,9 @@ class AdvisoryNode:
 
             if result.context.loan_amount and state.captured_context.loan_amount is None:
                 state.captured_context.loan_amount = self._to_float(result.context.loan_amount)
-            if result.context.down_payment and state.captured_context.down_payment is None:
-                raw_dp = str(result.context.down_payment).strip()
+            extracted_down_payment = getattr(result.context, "down_payment", None)
+            if extracted_down_payment and state.captured_context.down_payment is None:
+                raw_dp = str(extracted_down_payment).strip()
                 if raw_dp.endswith("%") and state.captured_context.loan_amount:
                     try:
                         pct = float(raw_dp.rstrip("%").strip())
@@ -386,15 +429,15 @@ class AdvisoryNode:
                 else:
                     state.captured_context.down_payment = self._to_float(raw_dp)
 
-            if result.context.employment_type:
+            if result.context.employment_type and not state.captured_context.employment_type:
                 state.captured_context.employment_type = result.context.employment_type
 
-            if (not captured_loan_from_message) and result.context.monthly_income:
+            if (not captured_loan_from_message) and result.context.monthly_income and not state.captured_context.monthly_income:
                 state.captured_context.monthly_income = result.context.monthly_income
             if (not state.captured_context.monthly_income) and prev_assistant:
                 assistant_lower = prev_assistant.lower()
                 if "monthly income" in assistant_lower or "income look like" in assistant_lower or "income" in assistant_lower:
-                    m_income = re.search(r"([\d,]+(?:\.\d+)?)", last_user_text)
+                    m_income = re.search(r"(\d[\d,]*(?:\.\d+)?)", last_user_text)
                     if m_income:
                         state.captured_context.monthly_income = self._to_float(m_income.group(1))
             
