@@ -782,19 +782,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     return { status, textPreview, error, fields };
   };
 
-  const openDocPreview = (doc: V2LoanDocument) => {
-    const title = doc.originalName || doc.fileName || 'document';
-    const ex = getDocExtraction(doc);
-    setDocPreview({
-      title,
-      status: ex.status,
-      error: ex.error,
-      textPreview: ex.textPreview,
-      fields: ex.fields,
-    });
-    setDocPreviewOpen(true);
-  };
-
   const openLastExtractionPreview = () => {
     if (!lastExtraction) return;
     setDocPreview({
