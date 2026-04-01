@@ -9,29 +9,32 @@
 // Enums
 // ─────────────────────────────────────────────────────────────────────────────
 
-export enum ApplicationStatus {
-  PENDING = 'pending',
-  PROCESSING = 'processing',
-  APPROVED = 'approved',
-  REJECTED = 'rejected',
-  DISBURSED = 'disbursed',
-  MANUAL_REVIEW = 'manual_review',
-}
+export const ApplicationStatus = {
+  PENDING: 'pending',
+  PROCESSING: 'processing',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+  DISBURSED: 'disbursed',
+  MANUAL_REVIEW: 'manual_review',
+} as const;
+export type ApplicationStatus = typeof ApplicationStatus[keyof typeof ApplicationStatus];
 
-export enum GradeLevel {
-  A = 'A', // Excellent
-  B = 'B', // Good
-  C = 'C', // Fair
-  D = 'D', // Poor
-  E = 'E', // Very Poor
-}
+export const GradeLevel = {
+  A: 'A',
+  B: 'B',
+  C: 'C',
+  D: 'D',
+  E: 'E',
+} as const;
+export type GradeLevel = typeof GradeLevel[keyof typeof GradeLevel];
 
-export enum RiskLevel {
-  LOW = 'low',
-  MODERATE = 'moderate',
-  ELEVATED = 'elevated',
-  HIGH = 'high',
-}
+export const RiskLevel = {
+  LOW: 'low',
+  MODERATE: 'moderate',
+  ELEVATED: 'elevated',
+  HIGH: 'high',
+} as const;
+export type RiskLevel = typeof RiskLevel[keyof typeof RiskLevel];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tier B: Business Metrics Types (Client-Facing)

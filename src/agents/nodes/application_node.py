@@ -187,7 +187,8 @@ class ApplicationNode:
                 conversation_history=[
                     {"role": m.role, "content": m.content}
                     for m in state.conversation_history
-                ]
+                ],
+                session_id=state.session_id,
             )
             
             from src.agents.agent_tools.intent_extractor import IntentExtractionResult

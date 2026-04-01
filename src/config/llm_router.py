@@ -24,6 +24,7 @@ Usage:
 import os
 import time
 import logging
+import contextvars
 from typing import List, Dict, Any, Optional, Literal
 from dataclasses import dataclass, field
 import yaml
@@ -32,6 +33,32 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
+
+_request_llm_calls: contextvars.ContextVar[Optional[List[Dict[str, Any]]]] = contextvars.ContextVar(
+    "ks_los_request_llm_calls",
+    default=None,
+)
+_request_langfuse_trace: contextvars.ContextVar[Optional[Any]] = contextvars.ContextVar(
+    "ks_los_request_langfuse_trace",
+    default=None,
+)
+
+
+def reset_request_llm_calls() -> None:
+    _request_llm_calls.set([])
+
+
+def get_request_llm_calls() -> List[Dict[str, Any]]:
+    calls = _request_llm_calls.get()
+    return list(calls) if calls else []
+
+
+def set_request_langfuse_trace(trace: Any) -> contextvars.Token:
+    return _request_langfuse_trace.set(trace)
+
+
+def get_request_langfuse_trace() -> Optional[Any]:
+    return _request_langfuse_trace.get()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -261,6 +288,9 @@ class LLMRouter:
         self,
         messages: List[Dict[str, str]],
         task_type: str = "simple_chat",
+        session_id: Optional[str] = None,
+        temperature: Optional[float] = None,
+        timeout_seconds: Optional[int] = None,
         **kwargs
     ) -> ChatResponse:
         """
@@ -287,10 +317,10 @@ class LLMRouter:
                 
                 # Select LLM
                 if provider == self.config.primary_provider:
-                    llm = self._get_primary_llm()
+                    llm = self._get_primary_llm() if temperature is None else self._build_primary_llm(temperature)
                     model = self.config.primary_model
                 else:
-                    llm = self._get_fallback_llm()
+                    llm = self._get_fallback_llm() if temperature is None else self._build_fallback_llm(temperature)
                     model = self.config.fallback_model
                 
                 # Convert messages to LangChain format
@@ -307,8 +337,37 @@ class LLMRouter:
                         lc_messages.append(HumanMessage(content=content))
                 
                 # Invoke LLM
+                observer_trace = get_request_langfuse_trace()
+                if observer_trace is None and session_id:
+                    try:
+                        from src.shared.observability import get_langfuse_observer
+
+                        observer = get_langfuse_observer()
+                        observer_trace = observer.start_trace(
+                            name="llm_router",
+                            session_id=session_id,
+                            metadata={"task_type": task_type},
+                        )
+                    except Exception:
+                        observer_trace = None
+
+                span = None
+                if observer_trace is not None:
+                    try:
+                        span = observer_trace.span(
+                            name=task_type,
+                            input_data={"messages": messages},
+                            metadata={"provider": provider, "model": model},
+                        )
+                    except Exception:
+                        span = None
+
+                invoke_config = {}
+                if timeout_seconds is not None:
+                    invoke_config["timeout"] = timeout_seconds
+
                 start_time = time.time()
-                response_obj = llm.invoke(lc_messages, **kwargs)
+                response_obj = llm.invoke(lc_messages, config=invoke_config or None, **kwargs)
                 end_time = time.time()
 
                 # Extract usage metadata (handle None for test LLM)
@@ -326,6 +385,30 @@ class LLMRouter:
                     f"LLM call: provider={provider}, model={model}, "
                     f"latency={latency_ms:.0f}ms, tokens={usage}, cost=${cost_usd:.6f}"
                 )
+
+                call_record = {
+                    "task_type": task_type,
+                    "provider": provider,
+                    "model": model,
+                    "latency_ms": latency_ms,
+                    "usage": usage,
+                    "cost_usd": cost_usd,
+                }
+                existing = _request_llm_calls.get()
+                if existing is None:
+                    _request_llm_calls.set([call_record])
+                else:
+                    existing.append(call_record)
+
+                if span is not None:
+                    try:
+                        span.end(
+                            output={"content": response_obj.content},
+                            usage=usage,
+                            metadata={"cost_usd": cost_usd},
+                        )
+                    except Exception:
+                        pass
 
                 return ChatResponse(
                     content=response_obj.content,
@@ -358,6 +441,33 @@ class LLMRouter:
         
         # All retries exhausted
         raise RuntimeError(f"LLM call failed after {retries} retries: {str(last_error)}")
+
+    def _build_primary_llm(self, temperature: float) -> BaseChatModel:
+        if os.getenv("PYTEST_CURRENT_TEST") or str(os.getenv("LLM_TEST_MODE", "")).strip() in {"1", "true", "yes"}:
+            from src.config.llm import get_llm
+
+            return get_llm(temperature=temperature)
+
+        from langchain_openai import ChatOpenAI
+
+        api_key = os.getenv(self.config.primary_api_key_env)
+        if not api_key:
+            raise RuntimeError(f"API key not found: {self.config.primary_api_key_env}")
+
+        return ChatOpenAI(
+            model=self.config.primary_model,
+            api_key=api_key,
+            temperature=temperature,
+            timeout=self.config.primary_timeout_seconds,
+        )
+
+    def _build_fallback_llm(self, temperature: float) -> BaseChatModel:
+        from src.config.llm import get_llm
+
+        return get_llm(
+            temperature=temperature,
+            model=self.config.fallback_model,
+        )
     
     def generate(
         self,
@@ -428,4 +538,10 @@ __all__ = [
     # Singleton
     "get_llm_router",
     "reset_llm_router",
+
+    # Request-scoped context
+    "reset_request_llm_calls",
+    "get_request_llm_calls",
+    "set_request_langfuse_trace",
+    "get_request_langfuse_trace",
 ]

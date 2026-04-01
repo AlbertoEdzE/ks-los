@@ -24,16 +24,13 @@
  * ```
  */
 
-import {
+import type {
   ApplicationMetrics,
   PortfolioMetrics,
   JourneyStageMetrics,
   AIMetrics,
   AggregateAIMetrics,
   ModelPerformanceMetrics,
-  ApplicationStatus,
-  GradeLevel,
-  RiskLevel,
 } from '../types/metrics';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -51,10 +48,15 @@ export interface AuthToken {
   expiresAt: Date;
 }
 
-export interface ApiError {
+export class MetricsApiError extends Error {
   status: number;
-  message: string;
   detail?: string;
+
+  constructor(status: number, message: string, detail?: string) {
+    super(message);
+    this.status = status;
+    this.detail = detail;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,7 +70,7 @@ export interface MetricsApiClientConfig {
 }
 
 const DEFAULT_CONFIG: MetricsApiClientConfig = {
-  baseUrl: '/api/metrics',
+  baseUrl: (import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/api/metrics` : '/api/metrics'),
   timeout: 30000,
   debug: false,
 };
@@ -100,6 +102,9 @@ export class MetricsApiClient {
 
     if (!response.success || !response.token) {
       throw new Error(response.message || 'Authentication failed');
+    }
+    if (!response.expires_at) {
+      throw new Error('Authentication failed: missing expiry');
     }
 
     this.authToken = {
@@ -213,15 +218,12 @@ export class MetricsApiClient {
    */
   private async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.config.baseUrl}${endpoint}`;
-    
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
+    const headers = new Headers(options.headers);
+    headers.set('Content-Type', 'application/json');
 
     // Add auth token if available
     if (this.authToken) {
-      headers['Authorization'] = `Bearer ${this.authToken.token}`;
+      headers.set('Authorization', `Bearer ${this.authToken.token}`);
     }
 
     this.log(`Fetching ${url}`);
@@ -247,7 +249,7 @@ export class MetricsApiClient {
       this.log(`Successfully fetched ${endpoint}`);
       return data as T;
     } catch (error) {
-      if (error instanceof ApiError) {
+      if (error instanceof MetricsApiError) {
         throw error;
       }
       
@@ -265,12 +267,12 @@ export class MetricsApiClient {
   /**
    * Create API error object
    */
-  private createApiError(status: number, data: Record<string, unknown>): ApiError {
-    return {
+  private createApiError(status: number, data: Record<string, unknown>): MetricsApiError {
+    return new MetricsApiError(
       status,
-      message: (data.message as string) || 'Unknown error',
-      detail: (data.detail as string),
-    };
+      (data.message as string) || 'Unknown error',
+      data.detail ? String(data.detail) : undefined,
+    );
   }
 
   /**

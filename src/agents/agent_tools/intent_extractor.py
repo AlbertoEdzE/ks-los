@@ -6,7 +6,6 @@ Extracts structured borrower intent from conversation history using LLM.
 
 from typing import List, Optional, Type, Dict, Any
 from langchain.tools import BaseTool
-from langchain_ollama import ChatOllama
 from pydantic import BaseModel, Field
 import json
 import re
@@ -14,6 +13,7 @@ import asyncio
 
 from src.agents.prompts import INTENT_EXTRACTION_PROMPT
 from src.agents.structured_parser import IntentAnalysis
+from src.config.llm_router import get_llm_router
 
 
 class IntentExtractionInput(BaseModel):
@@ -91,7 +91,7 @@ class IntentExtractorTool(BaseTool):
         if "temperature" in kwargs:
             self.temperature = kwargs["temperature"]
     
-    def _run(self, conversation_history: List[Dict[str, str]]) -> str:
+    def _run(self, conversation_history: List[Dict[str, str]], session_id: Optional[str] = None) -> str:
         """
         Extract intent from conversation history.
         
@@ -106,7 +106,7 @@ class IntentExtractorTool(BaseTool):
             messages = self._build_messages(conversation_history)
             
             # Call LLM
-            llm_response = self._call_llm(messages)
+            llm_response = self._call_llm(messages, session_id=session_id)
             
             # Parse and validate
             result = self._parse_response(llm_response)
@@ -172,7 +172,7 @@ class IntentExtractorTool(BaseTool):
             lines.append(f"{role.upper()}: {content}")
         return "\n\n".join(lines)
     
-    def _call_llm(self, messages: List[Dict[str, str]]) -> str:
+    def _call_llm(self, messages: List[Dict[str, str]], session_id: Optional[str] = None) -> str:
         """
         Call Ollama LLM for extraction.
 
@@ -186,17 +186,14 @@ class IntentExtractorTool(BaseTool):
             RuntimeError: If LLM call fails or times out
         """
         try:
-            # Initialize ChatOllama
-            llm = ChatOllama(
-                model=self.model_name,
-                base_url=self.ollama_base_url,
+            router = get_llm_router()
+            response = router.chat(
+                messages,
+                task_type="intent_extraction",
+                session_id=session_id,
                 temperature=self.temperature,
-                num_predict=1024,  # Limit response length
+                timeout_seconds=self.timeout_seconds,
             )
-
-            # Call LLM with timeout
-            response = llm.invoke(messages, {"timeout": self.timeout_seconds})
-
             return response.content
 
         except asyncio.TimeoutError:

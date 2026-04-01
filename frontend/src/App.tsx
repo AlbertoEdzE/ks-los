@@ -7,6 +7,7 @@ import { BorrowerJourneyTracker } from './components/chat';
 import './App.css';
 import { ConfigurationPanel } from './components/ConfigurationPanel';
 import { MetricsPanel } from './components/MetricsPanel';
+import MetricsDashboard from './components/MetricsDashboard';
 import { SimulatorPanel } from './components/SimulatorPanel';
 import { SyntheticDataControl } from './components/SyntheticDataControl';
 import { TrainingPanel } from './components/TrainingPanel';
@@ -443,6 +444,7 @@ function App() {
     const routeLocation = useLocation();
     const [designOverlayOpacity, setDesignOverlayOpacity] = useState(0.5);
     const [designOverlayName, setDesignOverlayName] = useState('');
+    const [metricsOpen, setMetricsOpen] = useState(false);
 
     React.useEffect(() => {
       const params = new URLSearchParams(routeLocation.search);
@@ -518,6 +520,19 @@ function App() {
       }
       return null;
     }, [visibleMessages]);
+
+    const metricsApplicationId = React.useMemo(() => {
+      const fromConversation = (conversation as unknown as Record<string, unknown> | null)?.applicationId ?? (conversation as unknown as Record<string, unknown> | null)?.application_id;
+      if (typeof fromConversation === 'string' && fromConversation.trim()) return fromConversation.trim();
+      const msgs = visibleMessages.slice().reverse();
+      for (const m of msgs) {
+        if (m.role !== 'assistant') continue;
+        const meta = parseMeta(m.metadata);
+        const raw = meta?.application_id ?? meta?.applicationId;
+        if (typeof raw === 'string' && raw.trim()) return raw.trim();
+      }
+      return null;
+    }, [conversation, visibleMessages]);
 
     React.useEffect(() => {
       if (latestCalculated) setStickyCalculated(latestCalculated);
@@ -743,6 +758,14 @@ function App() {
             </button>
             <button
               type="button"
+              onClick={() => setMetricsOpen(true)}
+              className="inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold bg-white/80 dark:bg-white/[0.06] border border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 shadow-sm"
+              data-testid="button-show-metrics"
+            >
+              Show metrics
+            </button>
+            <button
+              type="button"
               onClick={handleLogout}
               className="inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold bg-white/80 dark:bg-white/[0.06] border border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 shadow-sm"
             >
@@ -750,6 +773,31 @@ function App() {
             </button>
           </div>
         </header>
+
+        <Dialog.Root open={metricsOpen} onOpenChange={setMetricsOpen}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 bg-black/45 z-[90]" />
+            <Dialog.Content className="fixed left-1/2 top-1/2 w-[96vw] max-w-6xl -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-slate-200/60 dark:border-white/[0.08] bg-white dark:bg-[#111113] p-4 shadow-2xl max-h-[92vh] overflow-y-auto z-[100]">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <Dialog.Title className="text-sm font-extrabold text-slate-900 dark:text-white truncate">Metrics</Dialog.Title>
+                  <Dialog.Description className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    Application and portfolio metrics for this session.
+                  </Dialog.Description>
+                </div>
+                <Dialog.Close asChild>
+                  <button type="button" className="inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold bg-white/80 dark:bg-white/[0.06] border border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 shadow-sm">
+                    Close
+                  </button>
+                </Dialog.Close>
+              </div>
+
+              <div className="mt-4">
+                <MetricsDashboard applicationId={metricsApplicationId ?? undefined} isAdmin={false} autoRefresh />
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
 
         {role === 'user' ? (
           <BorrowerJourneyTracker currentPhaseName={activePhases[currentIndex]?.name || null} messages={visibleMessages} />

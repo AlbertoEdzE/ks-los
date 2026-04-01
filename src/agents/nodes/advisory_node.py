@@ -243,7 +243,7 @@ class AdvisoryNode:
                 {"role": m.role, "content": m.content}
                 for m in state.conversation_history
             ]
-            extraction = self.intent_extractor._run(conversation_history=conv_history)
+            extraction = self.intent_extractor._run(conversation_history=conv_history, session_id=state.session_id)
 
             # Parse extraction result
             from src.agents.agent_tools.intent_extractor import IntentExtractionResult
@@ -306,7 +306,8 @@ class AdvisoryNode:
                 conversation_history=[
                     {"role": m.role, "content": m.content}
                     for m in state.conversation_history
-                ]
+                ],
+                session_id=state.session_id,
             )
             
             from src.agents.agent_tools.intent_extractor import IntentExtractionResult
@@ -362,7 +363,8 @@ class AdvisoryNode:
                 conversation_history=[
                     {"role": m.role, "content": m.content}
                     for m in state.conversation_history
-                ]
+                ],
+                session_id=state.session_id,
             )
             
             from src.agents.agent_tools.intent_extractor import IntentExtractionResult
@@ -436,7 +438,7 @@ class AdvisoryNode:
                 {"role": m.role, "content": m.content}
                 for m in state.conversation_history
             ]
-            extraction = self.intent_extractor._run(conversation_history=conv_history)
+            extraction = self.intent_extractor._run(conversation_history=conv_history, session_id=state.session_id)
             
             from src.agents.agent_tools.intent_extractor import IntentExtractionResult
             result = IntentExtractionResult.model_validate_json(extraction)

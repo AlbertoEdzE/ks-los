@@ -3,6 +3,71 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/infrastructure/docker-compose.yml"
+
+trim_ws() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+load_dotenv() {
+  local dotenv_file="$1"
+  [ -f "$dotenv_file" ] || return 0
+
+  while IFS= read -r raw || [ -n "$raw" ]; do
+    local line
+    line="$(trim_ws "$raw")"
+
+    if [ -z "$line" ]; then
+      continue
+    fi
+    case "$line" in
+      \#*) continue ;;
+    esac
+
+    if [[ "$line" == export\ * ]]; then
+      line="${line#export }"
+      line="$(trim_ws "$line")"
+    fi
+
+    local key value
+    if [[ "$line" == *"="* ]]; then
+      key="$(trim_ws "${line%%=*}")"
+      value="$(trim_ws "${line#*=}")"
+    elif [[ "$line" == *":"* ]]; then
+      key="$(trim_ws "${line%%:*}")"
+      value="$(trim_ws "${line#*:}")"
+    else
+      continue
+    fi
+
+    if [ -z "$key" ]; then
+      continue
+    fi
+
+    if [[ "$key" == "key" || "$key" == "openai_key" || "$key" == "openai.api_key" ]]; then
+      if [ -z "${OPENAI_API_KEY:-}" ]; then
+        key="OPENAI_API_KEY"
+      else
+        continue
+      fi
+    fi
+
+    if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+      value="${value#\"}"
+      value="${value%\"}"
+    elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+      value="${value#\'}"
+      value="${value%\'}"
+    fi
+
+    export "$key=$value"
+  done < "$dotenv_file"
+}
+
+load_dotenv "$ROOT_DIR/.env"
+
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5174}"
 MLFLOW_PORT="${MLFLOW_PORT:-5000}"
@@ -128,7 +193,8 @@ check_and_free_port 6379 "Redis"
 check_and_free_port 5432 "Postgres"
 check_and_free_port "$MLFLOW_PORT" "MLflow"
 check_and_free_port 9090 "Prometheus"
-check_and_free_port 3000 "Grafana"
+check_and_free_port 3000 "LangFuse"
+check_and_free_port 3001 "Grafana"
 check_and_free_port 4317 "Otel Collector"
 check_and_free_port 16686 "Jaeger"
 
@@ -138,31 +204,25 @@ check_and_free_port "$BACKEND_PORT" "Backend API"
 check_and_free_port 5173 "Frontend"
 check_and_free_port "$FRONTEND_PORT" "Frontend"
 
-if lsof -i :"$MLFLOW_PORT" >/dev/null 2>&1; then
-  for p in 5001 5002 5003 5004 5005 5006 5007 5008 5009 5010; do
-    if ! lsof -i :"$p" >/dev/null 2>&1; then
-      MLFLOW_PORT="$p"
-      break
-    fi
-  done
-fi
 export MLFLOW_PORT
-
-# Pick alternate backend port if occupied
-if lsof -i :"$BACKEND_PORT" >/dev/null 2>&1; then
-  for p in 8001 8002 8003 8004 8005 8006 8007 8008 8009 8010; do
-    if ! lsof -i :"$p" >/dev/null 2>&1; then
-      BACKEND_PORT="$p"
-      break
-    fi
-  done
-fi
 export BACKEND_PORT
 
 ensure_docker_running
 
 echo "[KS LOS] Bootstrapping observability stack (Prometheus, Grafana, MLflow)..."
-docker compose -f "$COMPOSE_FILE" up -d postgres redis mlflow prometheus grafana otel-collector jaeger
+docker compose -f "$COMPOSE_FILE" up -d postgres redis postgres_exporter mlflow prometheus grafana otel-collector jaeger langfuse
+
+POSTGRES_USER="${POSTGRES_USER:-ks_los}"
+POSTGRES_DB="${POSTGRES_DB:-ks_los_db}"
+LANGFUSE_DB="${LANGFUSE_DB:-langfuse_db}"
+if command -v docker >/dev/null 2>&1; then
+  if docker ps --format '{{.Names}}' | grep -qx 'ks_los_postgres'; then
+    echo "[KS LOS] Ensuring Postgres database '${LANGFUSE_DB}' exists for LangFuse..."
+    if ! docker exec ks_los_postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -tAc "select 1 from pg_database where datname='${LANGFUSE_DB}'" | grep -q 1; then
+      docker exec ks_los_postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "create database ${LANGFUSE_DB}" >/dev/null 2>&1 || true
+    fi
+  fi
+fi
 
 # Ensure Ollama is installed and serving a model locally (optional but recommended for LLM features)
 ensure_ollama_running() {
@@ -253,7 +313,7 @@ fi
 echo "[KS LOS] Starting FastAPI (backend) on :$BACKEND_PORT..."
 
 export LOG_JSON=1
-export OTLP_URL="localhost:4317"
+export OTLP_URL="http://localhost:4317"
 export ENFORCE_RBAC=0
 export MLFLOW_TRACKING_URI="http://localhost:$MLFLOW_PORT"
 export OLLAMA_MODEL="${OLLAMA_MODEL}"
@@ -261,7 +321,7 @@ export OLLAMA_MODEL="${OLLAMA_MODEL}"
 # Start Backend with nohup
 (
   cd "$ROOT_DIR"
-  nohup "$PYTHON_BIN" -m uvicorn src.main:app --host 0.0.0.0 --port "$BACKEND_PORT" --reload > "$ROOT_DIR/backend.log" 2>&1 &
+  nohup "$PYTHON_BIN" -m uvicorn src.main:app --host 0.0.0.0 --port "$BACKEND_PORT" --reload --reload-dir "src" --reload-exclude "frontend/node_modules/*" > "$ROOT_DIR/backend.log" 2>&1 &
   echo $! > "$ROOT_DIR/.pid_api"
 )
 
@@ -325,5 +385,6 @@ echo "  Metrics:    http://localhost:$BACKEND_PORT/metrics"
 echo "  Observability Summary (Authorization: Bearer ${DEV_OFFICER_TOKEN:-loan-officer-access}): http://localhost:$BACKEND_PORT/observability/summary"
 echo "  MLflow:     http://localhost:$MLFLOW_PORT/"
 echo "  Prometheus: http://localhost:9090/"
-echo "  Grafana:    http://localhost:3000/"
+echo "  LangFuse:   http://localhost:3000/"
+echo "  Grafana:    http://localhost:3001/"
 echo "  Drift Report (Authorization: Bearer ${DEV_OFFICER_TOKEN:-loan-officer-access}): http://localhost:$BACKEND_PORT/training/drift/report"

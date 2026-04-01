@@ -19,16 +19,17 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import {
+import type {
   ApplicationMetrics,
   PortfolioMetrics,
   JourneyStageMetrics,
   AIMetrics,
   AggregateAIMetrics,
-  ApplicationStatus,
-  GradeLevel,
+  ApplicationStatus as ApplicationStatusType,
+  GradeLevel as GradeLevelType,
 } from '../types/metrics';
-import { getMetricsClient, MetricsApiClient } from '../api/metricsClient';
+import { ApplicationStatus, GradeLevel } from '../types/metrics';
+import { getMetricsClient } from '../api/metricsClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component Props
@@ -36,6 +37,7 @@ import { getMetricsClient, MetricsApiClient } from '../api/metricsClient';
 
 interface MetricsDashboardProps {
   applicationId?: string;
+  conversationId?: string;
   isAdmin?: boolean;
   autoRefresh?: boolean;
   refreshInterval?: number;
@@ -73,6 +75,7 @@ interface DashboardState {
 
 export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   applicationId,
+  conversationId,
   isAdmin = false,
   autoRefresh = true,
   refreshInterval = 300000, // 5 minutes
@@ -92,6 +95,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   });
 
   const metricsClient = getMetricsClient({ debug: false });
+  const effectiveConversationId = conversationId || applicationId;
 
   // ───────────────────────────────────────────────────────────────────────────
   // Data Fetching Methods
@@ -127,17 +131,15 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   }, [metricsClient]);
 
   const fetchAIMetrics = useCallback(async () => {
-    if (!applicationId) return;
+    if (!effectiveConversationId) return;
 
     try {
-      // For demo, we'll use the conversation ID derived from application ID
-      const conversationId = `conv-${applicationId.split('-')[1]}`;
-      const data = await metricsClient.getAIMetrics(conversationId);
+      const data = await metricsClient.getAIMetrics(effectiveConversationId);
       setState((prev) => ({ ...prev, aiMetrics: data }));
     } catch (error) {
       console.error('Failed to fetch AI metrics:', error);
     }
-  }, [applicationId, metricsClient]);
+  }, [effectiveConversationId, metricsClient]);
 
   const fetchAggregateAIMetrics = useCallback(async () => {
     try {
@@ -167,7 +169,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       // Fetch AI metrics after authentication
       await fetchAIMetrics();
       await fetchAggregateAIMetrics();
-    } catch (error) {
+    } catch {
       setState((prev) => ({
         ...prev,
         error: 'Invalid admin password',
@@ -196,7 +198,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           await fetchAIMetrics();
           await fetchAggregateAIMetrics();
         }
-      } catch (error) {
+      } catch {
         setState((prev) => ({
           ...prev,
           error: 'Failed to load metrics',
@@ -248,7 +250,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   // Render Helpers
   // ───────────────────────────────────────────────────────────────────────────
 
-  const getStatusColor = (status: ApplicationStatus): string => {
+  const getStatusColor = (status: ApplicationStatusType): string => {
     switch (status) {
       case ApplicationStatus.APPROVED:
       case ApplicationStatus.DISBURSED:
@@ -262,7 +264,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
     }
   };
 
-  const getGradeColor = (grade: GradeLevel | null): string => {
+  const getGradeColor = (grade: GradeLevelType | null): string => {
     switch (grade) {
       case GradeLevel.A:
         return 'text-green-600';

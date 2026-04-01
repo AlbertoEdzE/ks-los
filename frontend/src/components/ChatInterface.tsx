@@ -635,6 +635,7 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
   const pendingChecklistNameRef = useRef<string | null>(null);
   const autoDocsOpenedRef = useRef(false);
 
+
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Good Morning';
@@ -780,19 +781,6 @@ export const ChatInterface: React.FC<Props> = ({ onConversationUpdated, onPhases
     const error = typeof extraction?.error === 'string' ? extraction.error : undefined;
     const fields = extraction?.fields && typeof extraction.fields === 'object' ? (extraction.fields as Record<string, unknown>) : undefined;
     return { status, textPreview, error, fields };
-  };
-
-  const openDocPreview = (doc: V2LoanDocument) => {
-    const title = doc.originalName || doc.fileName || 'document';
-    const ex = getDocExtraction(doc);
-    setDocPreview({
-      title,
-      status: ex.status,
-      error: ex.error,
-      textPreview: ex.textPreview,
-      fields: ex.fields,
-    });
-    setDocPreviewOpen(true);
   };
 
   const openLastExtractionPreview = () => {

@@ -66,7 +66,7 @@ services:
     image: ghcr.io/mlflow/mlflow:v2.10.2
     container_name: ks_los_mlflow
     ports:
-      - "${MLFLOW_PORT:-5001}:5000"
+      - "${MLFLOW_PORT:-5000}:5000"
     environment:
       MLFLOW_BACKEND_STORE_URI: sqlite:///mlflow.db
       MLFLOW_DEFAULT_ARTIFACT_ROOT: /mlflow/artifacts
@@ -87,7 +87,7 @@ services:
     image: grafana/grafana:10.4.2
     container_name: ks_los_grafana
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_AUTH_ANONYMOUS_ENABLED: "true"
@@ -122,6 +122,8 @@ services:
     container_name: ks_los_jaeger
     ports:
       - "16686:16686"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
 
   # LangFuse - AI Observability Platform (Phase 2)
   langfuse:
@@ -139,7 +141,7 @@ services:
     depends_on:
       - postgres
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -8,6 +8,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from langchain.schema import AIMessage
 
+from src.config.llm_router import ChatResponse
 from src.agents.agent_tools.intent_extractor import (
     IntentExtractorTool,
     IntentExtractionInput,
@@ -182,14 +183,15 @@ class TestIntentExtractorTool:
         
         assert extracted == '{"purpose": "home_purchase"}'
     
-    @patch('src.agents.agent_tools.intent_extractor.ChatOllama')
-    def test_call_llm(self, mock_chat_ollama_class):
+    @patch('src.agents.agent_tools.intent_extractor.get_llm_router')
+    def test_call_llm(self, mock_get_llm_router):
         """Test LLM calling (mocked)"""
-        # Setup mock
-        mock_llm = Mock()
-        mock_chat_ollama_class.return_value = mock_llm
-        mock_llm.invoke.return_value = AIMessage(
-            content='{"purpose": "home_purchase", "loan_amount": "$400,000"}'
+        mock_router = Mock()
+        mock_get_llm_router.return_value = mock_router
+        mock_router.chat.return_value = ChatResponse(
+            content='{"purpose": "home_purchase", "loan_amount": "$400,000"}',
+            provider="ollama",
+            model="qwen2.5:7b",
         )
         
         tool = IntentExtractorTool()
@@ -201,7 +203,7 @@ class TestIntentExtractorTool:
         response = tool._call_llm(messages)
         
         assert response == '{"purpose": "home_purchase", "loan_amount": "$400,000"}'
-        mock_chat_ollama_class.assert_called_once()
+        mock_get_llm_router.assert_called_once()
     
     def test_compute_field_confidence_with_values(self):
         """Test confidence computation for fields with values"""
@@ -247,13 +249,12 @@ class TestIntentExtractorTool:
         
         assert confidence["purpose"] == 0.0
     
-    @patch('src.agents.agent_tools.intent_extractor.ChatOllama')
-    def test_run_successful_extraction(self, mock_chat_ollama_class):
+    @patch('src.agents.agent_tools.intent_extractor.get_llm_router')
+    def test_run_successful_extraction(self, mock_get_llm_router):
         """Test successful intent extraction (mocked LLM)"""
-        # Setup mock
-        mock_llm = Mock()
-        mock_chat_ollama_class.return_value = mock_llm
-        mock_llm.invoke.return_value = AIMessage(
+        mock_router = Mock()
+        mock_get_llm_router.return_value = mock_router
+        mock_router.chat.return_value = ChatResponse(
             content='''
             {
                 "purpose": "home_purchase",
@@ -264,6 +265,9 @@ class TestIntentExtractorTool:
                 "fit_score": 80
             }
             '''
+            ,
+            provider="ollama",
+            model="qwen2.5:7b",
         )
         
         tool = IntentExtractorTool()
@@ -280,12 +284,12 @@ class TestIntentExtractorTool:
         assert result.confidence > 0.5
         assert result.parse_errors is None
     
-    @patch('src.agents.agent_tools.intent_extractor.ChatOllama')
-    def test_run_with_markdown_response(self, mock_chat_ollama_class):
+    @patch('src.agents.agent_tools.intent_extractor.get_llm_router')
+    def test_run_with_markdown_response(self, mock_get_llm_router):
         """Test handling of markdown-formatted JSON response"""
-        mock_llm = Mock()
-        mock_chat_ollama_class.return_value = mock_llm
-        mock_llm.invoke.return_value = AIMessage(
+        mock_router = Mock()
+        mock_get_llm_router.return_value = mock_router
+        mock_router.chat.return_value = ChatResponse(
             content='''
             ```json
             {
@@ -294,6 +298,9 @@ class TestIntentExtractorTool:
             }
             ```
             '''
+            ,
+            provider="ollama",
+            model="qwen2.5:7b",
         )
         
         tool = IntentExtractorTool()
@@ -320,13 +327,15 @@ class TestIntentExtractorTool:
         assert result.confidence == 0.0
         assert result.parse_errors is not None
     
-    @patch('src.agents.agent_tools.intent_extractor.ChatOllama')
-    def test_run_with_partial_data(self, mock_chat_ollama_class):
+    @patch('src.agents.agent_tools.intent_extractor.get_llm_router')
+    def test_run_with_partial_data(self, mock_get_llm_router):
         """Test extraction with partial information"""
-        mock_llm = Mock()
-        mock_chat_ollama_class.return_value = mock_llm
-        mock_llm.invoke.return_value = AIMessage(
-            content='{"purpose": "personal_loan", "loan_amount": null, "monthly_income": null}'
+        mock_router = Mock()
+        mock_get_llm_router.return_value = mock_router
+        mock_router.chat.return_value = ChatResponse(
+            content='{"purpose": "personal_loan", "loan_amount": null, "monthly_income": null}',
+            provider="ollama",
+            model="qwen2.5:7b",
         )
         
         tool = IntentExtractorTool()
@@ -371,12 +380,12 @@ class TestConvenienceFunction:
 class TestIntegration:
     """Integration tests with realistic conversation scenarios"""
     
-    @patch('src.agents.agent_tools.intent_extractor.ChatOllama')
-    def test_full_conversation_extraction(self, mock_chat_ollama_class):
+    @patch('src.agents.agent_tools.intent_extractor.get_llm_router')
+    def test_full_conversation_extraction(self, mock_get_llm_router):
         """Test extraction from multi-turn conversation"""
-        mock_llm = Mock()
-        mock_chat_ollama_class.return_value = mock_llm
-        mock_llm.invoke.return_value = AIMessage(
+        mock_router = Mock()
+        mock_get_llm_router.return_value = mock_router
+        mock_router.chat.return_value = ChatResponse(
             content='''
             {
                 "purpose": "home_purchase",
@@ -393,6 +402,9 @@ class TestIntegration:
                 "next_conversation_angle": "Proceed to application"
             }
             '''
+            ,
+            provider="ollama",
+            model="qwen2.5:7b",
         )
         
         conversation = [

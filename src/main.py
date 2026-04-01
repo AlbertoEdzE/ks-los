@@ -16,6 +16,7 @@ from opentelemetry import trace
 from src.api.routers.scdg_router import router as scdg_router
 from src.api.routers.training_router import router as training_router
 from src.api.routers.metrics_router import router as metrics_router
+from src.api.routers.metrics import router as phase2_metrics_router
 from src.api.routers.observability_router import router as observability_router
 from src.api.routers.explain_router import router as explain_router
 from src.api.routers.admin_synthetic_router import router as admin_synthetic_router
@@ -40,9 +41,10 @@ logger = logging.getLogger(__name__)
 # OpenTelemetry exporter initialization (optional via OTLP_URL)
 OTLP_URL = os.getenv("OTLP_URL")
 if OTLP_URL:
+    endpoint = OTLP_URL if "://" in OTLP_URL else f"http://{OTLP_URL}"
     resource = Resource(attributes={"service.name": "ks-los-api", "environment": os.getenv("ENV", "local")})
     provider = TracerProvider(resource=resource)
-    exporter = OTLPSpanExporter(endpoint=OTLP_URL, insecure=True)
+    exporter = OTLPSpanExporter(endpoint=endpoint, insecure=True)
     processor = BatchSpanProcessor(exporter)
     provider.add_span_processor(processor)
     trace.set_tracer_provider(provider)
@@ -53,6 +55,14 @@ app = FastAPI(
     description="AI-Driven Agentic System for Loan Prequalification and Financial Advisory",
     version="1.0.0"
 )
+
+if OTLP_URL:
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        FastAPIInstrumentor.instrument_app(app)
+    except Exception as e:
+        logger.warning(f"OpenTelemetry FastAPI instrumentation disabled: {e}")
 
 # CORS Middleware (Allow all for development, restrict for production)
 env = os.getenv("ENV", "local").strip().lower()
@@ -104,6 +114,7 @@ app.add_middleware(
 app.include_router(scdg_router)
 app.include_router(training_router)
 app.include_router(metrics_router)
+app.include_router(phase2_metrics_router, prefix="/api/metrics")
 app.include_router(observability_router)
 app.include_router(explain_router)
 app.include_router(admin_synthetic_router)

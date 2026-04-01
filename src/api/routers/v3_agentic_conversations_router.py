@@ -435,6 +435,22 @@ async def send_message(
     # session_id comes from path parameter now
     state = get_or_create_state(session_id)
 
+    from src.config.llm_router import reset_request_llm_calls, get_request_llm_calls, set_request_langfuse_trace
+    from src.shared.observability import get_langfuse_observer
+
+    reset_request_llm_calls()
+    trace_token = None
+    try:
+        observer = get_langfuse_observer()
+        trace = observer.start_trace(
+            name="borrower_conversation",
+            session_id=session_id,
+            metadata={"route": "v3_agentic_conversations_router.send_message"},
+        )
+        trace_token = set_request_langfuse_trace(trace)
+    except Exception:
+        trace_token = None
+
     key = (idempotency_key or "").strip() or None
     is_duplicate = False
     if key and state.conversation_history:
@@ -531,9 +547,13 @@ async def send_message(
     # ──────────────────────────────────────────────────────────────────────
 
     last_message = state.conversation_history[-1] if state.conversation_history else None
-    if (not is_duplicate) and key and last_message and last_message.role == "assistant":
+    llm_calls = get_request_llm_calls()
+    if (not is_duplicate) and last_message and last_message.role == "assistant":
         meta = last_message.metadata if isinstance(last_message.metadata, dict) else {}
-        meta["idempotency_key"] = key
+        if key:
+            meta["idempotency_key"] = key
+        if llm_calls:
+            meta["llm_calls"] = llm_calls
         last_message.metadata = meta
     raw_response_text = last_message.content if last_message else "I'm processing your request..."
 

@@ -169,6 +169,10 @@ class RAGNode:
                     state.add_message("assistant", response_text, metadata={
                         "rag_used": True,
                         "policies_retrieved": len(relevant_docs),
+                        "rag_contexts": [
+                            (getattr(doc, "page_content", "") or "")[:1200]
+                            for doc in relevant_docs
+                        ],
                         "citations": [
                             getattr(doc, 'metadata', {}).get('source', 'Unknown')
                             for doc in relevant_docs
