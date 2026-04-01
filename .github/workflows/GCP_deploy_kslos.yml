@@ -55,6 +55,7 @@ jobs:
 
       - name: Build and push image
         run: |
+          cd frontend/
           IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$SERVICE_NAME:${{ github.sha }}"
 
           docker build -f $DOCKERFILE -t "$IMAGE" .
