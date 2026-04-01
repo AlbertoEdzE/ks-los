@@ -123,6 +123,30 @@ services:
     ports:
       - "16686:16686"
 
+  # LangFuse - AI Observability Platform (Phase 2)
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: ks_los_langfuse
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://ks_los:secure_password@ks_los_postgres:5432/langfuse_db
+      NEXTAUTH_SECRET: ${LANGFUSE_SECRET:-langfuse_secret_key_min_32_chars_for_dev}
+      NEXTAUTH_URL: http://localhost:3000
+      SALT: ${LANGFUSE_SALT:-langfuse_salt_key_min_32_chars_for_dev}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      TELEMETRY_ENABLED: false
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "ks-los.component=observability"
+      - "ks-los.phase=2"
+
 volumes:
   postgres_data:
   redis_data:

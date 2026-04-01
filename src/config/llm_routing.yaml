@@ -1,0 +1,74 @@
+# LLM Routing Configuration for KS-LOS Phase 2
+# 
+# This configuration enables hybrid LLM routing between OpenAI and Ollama.
+# The system automatically detects if OPENAI_API_KEY is set and routes accordingly:
+# - If OPENAI_API_KEY is set: Complex tasks → OpenAI, Simple tasks → Ollama
+# - If OPENAI_API_KEY is not set: All tasks → Ollama (local fallback)
+#
+# No code changes required to switch providers - just set/unset the environment variable.
+
+llm_routing:
+  # Primary provider (OpenAI) - used when API key is available
+  primary:
+    provider: openai
+    model: gpt-4.1-mini
+    api_key_env: "OPENAI_API_KEY"
+    # Alternative models:
+    # - For complex reasoning: o3-mini
+    # - For chat: gpt-4.1-mini
+    # - For cost optimization: gpt-4.1-nano
+  
+  # Fallback provider (Ollama local) - always available
+  fallback:
+    provider: ollama
+    model: qwen2.5:7b
+    base_url: "http://localhost:11434"
+    # Alternative models:
+    # - llama3.1:8b
+    # - mistral:7b
+  
+  # Routing rules: determine which provider to use based on task type
+  routing_rules:
+    # Simple chat tasks always use fallback (cost optimization)
+    - task: "simple_chat"
+      use: "fallback"
+    
+    # Intent extraction uses fallback (fast, good enough)
+    - task: "intent_extraction"
+      use: "fallback"
+    
+    # Complex reasoning uses primary if available
+    - task: "complex_reasoning"
+      use: "primary"
+    
+    # Hallucination checking uses primary if available (higher accuracy)
+    - task: "hallucination_check"
+      use: "primary"
+    
+    # RAG responses use fallback (policy-grounded, less creative needed)
+    - task: "rag_response"
+      use: "fallback"
+    
+    # Evaluation uses fallback (cost optimization for bulk scoring)
+    - task: "evaluation"
+      use: "fallback"
+  
+  # Fallback behavior when primary provider fails
+  fallback_behavior:
+    # Automatically retry with fallback provider on error
+    retry_on_error: true
+    # Timeout for primary provider (seconds)
+    primary_timeout_seconds: 30
+    # Max retries before switching to fallback
+    max_retries: 2
+  
+  # Cost tracking (for analytics)
+  cost_tracking:
+    enabled: true
+    # Approximate costs per 1K tokens (USD)
+    rates:
+      openai/gpt-4.1-mini: 0.002
+      openai/gpt-4.1-nano: 0.0005
+      openai/o3-mini: 0.01
+      ollama/qwen2.5:7b: 0.0  # Free (local)
+      ollama/llama3.1:8b: 0.0  # Free (local)
