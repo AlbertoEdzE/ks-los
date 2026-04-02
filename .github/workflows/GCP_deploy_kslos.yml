@@ -83,3 +83,55 @@ jobs:
           
           echo "Cloud Run URL:"
           echo "$URL"
+
+##############
+
+deploy-backend:
+    runs-on: ubuntu-latest
+
+    env:
+      SERVICE_NAME: ${{ vars.CLIENT_CLOUD_RUN_SERVICE }}-be-${{ env.ENV_NAME }}
+      DOCKERFILE: Dockerfile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ vars.GCP_SA_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker $REGION-docker.pkg.dev
+
+      - name: Ensure Artifact Registry exists
+        run: |
+          gcloud artifacts repositories describe $REPO --location=$REGION --project=$PROJECT_ID || \
+          gcloud artifacts repositories create $REPO \
+            --repository-format=docker \
+            --location=$REGION \
+            --project=$PROJECT_ID
+
+      - name: Build and push image (root)
+        run: |
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$SERVICE_NAME:${{ github.sha }}"
+
+          docker build -f $DOCKERFILE -t "$IMAGE" .
+          docker tag "$IMAGE" "$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$SERVICE_NAME:$ENV_NAME-latest"
+
+          docker push "$IMAGE"
+          docker push "$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$SERVICE_NAME:$ENV_NAME-latest"
+
+          echo "IMAGE_URI=$IMAGE" >> $GITHUB_ENV
+
+      - name: Deploy to Cloud Run (root)
+        run: |
+          gcloud run deploy "$SERVICE_NAME" \
+            --image "$IMAGE_URI" \
+            --region "$REGION" \
+            --platform managed \
+            --allow-unauthenticated \
+            --service-account ${{ vars.GCP_SERVICE_ACCOUNT }}
