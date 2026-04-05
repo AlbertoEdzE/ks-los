@@ -31,6 +31,7 @@ from src.api.routers.v2_catalog_products_router import router as catalog_product
 from src.api.routers.v2_documents_router import router as documents_router
 from src.api.routers.v2_loan_acceptance_router import router as loan_acceptance_router
 from src.api.routers.v2_conversations_router import router as conversations_router, borrower_router as borrower_conversations_router
+from src.api.routers.officer_agentic_router import router as officer_agentic_router
 
 # Configure logging
 if os.getenv("LOG_JSON", "1") == "1":
@@ -129,6 +130,7 @@ app.include_router(documents_router)
 app.include_router(loan_acceptance_router)
 app.include_router(conversations_router)
 app.include_router(borrower_conversations_router)
+app.include_router(officer_agentic_router)
 
 # NEW: V3 Agentic Conversations Router (uses LangGraph agentic workflow)
 app.include_router(v3_agentic_router)

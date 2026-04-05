@@ -376,11 +376,22 @@ export const TrainingPanel: React.FC = () => {
       </button>
 
       {plan && (
-        <div style={{ marginTop: '24px', padding: '16px', backgroundColor: '#f7fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-          <h4 style={{ fontWeight: '600', marginBottom: '12px' }}>Proposed Plan</h4>
-          <pre style={{ fontSize: '0.875rem', overflow: 'auto', maxHeight: '200px' }}>
-            {JSON.stringify(plan, null, 2)}
-          </pre>
+        <div className="mt-6 rounded-3xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] p-5">
+          <h4 className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">Proposed Plan</h4>
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {Object.entries(plan as unknown as Record<string, unknown>).slice(0, 10).map(([k, v]) => (
+              <div key={k} className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] px-4 py-3">
+                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider break-all">{k}</div>
+                <div className="mt-1 text-sm text-slate-800 dark:text-slate-200 break-words">{typeof v === 'object' ? 'View details below' : String(v)}</div>
+              </div>
+            ))}
+          </div>
+          <details className="mt-4">
+            <summary className="cursor-pointer text-xs font-semibold text-slate-600 dark:text-slate-300">View raw JSON</summary>
+            <pre className="mt-3 whitespace-pre-wrap text-[12px] leading-relaxed text-slate-700 dark:text-slate-200 bg-white/60 dark:bg-black/20 border border-slate-200/60 dark:border-white/[0.06] rounded-2xl p-4 max-h-[240px] overflow-auto">
+              {JSON.stringify(plan, null, 2)}
+            </pre>
+          </details>
           <button 
             onClick={startTraining}
             style={{ marginTop: '16px', padding: '10px 20px', backgroundColor: '#38a169', color: 'white', borderRadius: '6px', border: 'none', cursor: 'pointer' }}
@@ -600,49 +611,39 @@ export const TrainingPanel: React.FC = () => {
   );
 
   return (
-    <div style={{ padding: '32px', maxWidth: '1200px', margin: '0 auto' }}>
-      <header style={{ marginBottom: '32px' }}>
-        <h2 style={{ fontSize: '1.875rem', fontWeight: '800', color: '#1a202c' }}>ML Model Training Pipeline</h2>
-        <p style={{ color: '#718096' }}>End-to-end workflow for training, evaluating, and deploying the Credit Risk Model.</p>
+    <div className="max-w-6xl mx-auto px-4 md:px-6 py-6">
+      <header className="mb-6">
+        <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">ML Model Training Pipeline</h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">End-to-end workflow for training, evaluating, and deploying the Credit Risk Model.</p>
       </header>
 
       {/* Tab Navigation */}
-      <div style={{ display: 'flex', borderBottom: '2px solid #e2e8f0', marginBottom: '32px' }}>
-         <button
-            onClick={() => setActiveTab('current')}
-            style={{
-                padding: '12px 24px',
-                border: 'none',
-                backgroundColor: 'transparent',
-                borderBottom: activeTab === 'current' ? '3px solid #3182ce' : '3px solid transparent',
-                color: activeTab === 'current' ? '#3182ce' : '#718096',
-                fontWeight: 'bold',
-                fontSize: '1rem',
-                cursor: 'pointer',
-                marginBottom: '-2px'
-            }}
-         >
-            Current Model Metrics
-         </button>
-         <button
-            onClick={() => setActiveTab('train')}
-            style={{
-                padding: '12px 24px',
-                border: 'none',
-                backgroundColor: 'transparent',
-                borderBottom: activeTab === 'train' ? '3px solid #3182ce' : '3px solid transparent',
-                color: activeTab === 'train' ? '#3182ce' : '#718096',
-                fontWeight: 'bold',
-                fontSize: '1rem',
-                cursor: 'pointer',
-                marginBottom: '-2px'
-            }}
-         >
-            Training Workflow
-         </button>
+      <div className="flex flex-wrap gap-2 mb-6">
+        <button
+          type="button"
+          onClick={() => setActiveTab('current')}
+          className={`inline-flex items-center rounded-2xl px-3 py-2 text-xs font-semibold border transition-colors ${
+            activeTab === 'current'
+              ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-200/70 dark:border-blue-500/20 text-blue-800 dark:text-blue-200'
+              : 'bg-white/70 dark:bg-white/[0.04] border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 hover:bg-white/90 dark:hover:bg-white/[0.06]'
+          }`}
+        >
+          Current Model Metrics
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('train')}
+          className={`inline-flex items-center rounded-2xl px-3 py-2 text-xs font-semibold border transition-colors ${
+            activeTab === 'train'
+              ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-200/70 dark:border-blue-500/20 text-blue-800 dark:text-blue-200'
+              : 'bg-white/70 dark:bg-white/[0.04] border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 hover:bg-white/90 dark:hover:bg-white/[0.06]'
+          }`}
+        >
+          Training Workflow
+        </button>
       </div>
 
-      <div style={{ backgroundColor: 'white', padding: '32px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
+      <div className="rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-lg shadow-black/[0.04] dark:shadow-black/40 p-6">
         {activeTab === 'current' && renderCurrentMetrics()}
         
         {activeTab === 'train' && (

@@ -97,6 +97,14 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   const metricsClient = getMetricsClient({ debug: false });
   const effectiveConversationId = conversationId || applicationId;
 
+  // Keep UI auth state in sync with the singleton client (so auth done on /metrics
+  // also enables AI metrics when the dashboard is embedded elsewhere).
+  useEffect(() => {
+    if (metricsClient.isAuthenticated() && !state.adminAuthenticated) {
+      setState((prev) => ({ ...prev, adminAuthenticated: true }));
+    }
+  }, [metricsClient, state.adminAuthenticated]);
+
   // ───────────────────────────────────────────────────────────────────────────
   // Data Fetching Methods
   // ───────────────────────────────────────────────────────────────────────────
@@ -305,21 +313,21 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       <div className="space-y-6">
         {/* Status Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white p-4 rounded-lg shadow">
+          <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
             <h3 className="text-sm font-medium text-gray-500">Status</h3>
             <p className={`mt-2 text-lg font-semibold ${getStatusColor(metrics.status)}`}>
               {metrics.status.replace('_', ' ').toUpperCase()}
             </p>
           </div>
 
-          <div className="bg-white p-4 rounded-lg shadow">
+          <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
             <h3 className="text-sm font-medium text-gray-500">Processing Time</h3>
             <p className="mt-2 text-lg font-semibold text-gray-900">
               {metrics.processing_time_seconds.toFixed(1)}s
             </p>
           </div>
 
-          <div className="bg-white p-4 rounded-lg shadow">
+          <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
             <h3 className="text-sm font-medium text-gray-500">Loan Amount</h3>
             <p className="mt-2 text-lg font-semibold text-gray-900">
               {formatCurrency(metrics.loan_amount)}
@@ -328,7 +336,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
         </div>
 
         {/* Credit Metrics */}
-        <div className="bg-white p-4 rounded-lg shadow">
+        <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Credit Metrics</h3>
           <div className="space-y-4">
             {metrics.bureau_score && (
@@ -388,7 +396,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
         </div>
 
         {/* Journey Progress */}
-        <div className="bg-white p-4 rounded-lg shadow">
+        <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Journey Progress</h3>
           <div className="mb-4">
             <div className="flex justify-between mb-2">
@@ -456,26 +464,26 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       <div className="space-y-6">
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-white p-4 rounded-lg shadow">
+          <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
             <h3 className="text-sm font-medium text-gray-500">Total Applications</h3>
             <p className="mt-2 text-2xl font-bold text-gray-900">{metrics.total_applications}</p>
           </div>
 
-          <div className="bg-white p-4 rounded-lg shadow">
+          <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
             <h3 className="text-sm font-medium text-gray-500">Approval Rate</h3>
             <p className="mt-2 text-2xl font-bold text-green-600">
               {metrics.approval_rate.toFixed(1)}%
             </p>
           </div>
 
-          <div className="bg-white p-4 rounded-lg shadow">
+          <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
             <h3 className="text-sm font-medium text-gray-500">Avg Processing Time</h3>
             <p className="mt-2 text-2xl font-bold text-gray-900">
               {metrics.average_processing_time.toFixed(1)}s
             </p>
           </div>
 
-          <div className="bg-white p-4 rounded-lg shadow">
+          <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
             <h3 className="text-sm font-medium text-gray-500">Avg Loan Amount</h3>
             <p className="mt-2 text-2xl font-bold text-gray-900">
               {formatCurrency(metrics.average_loan_amount)}
@@ -485,7 +493,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
 
         {/* Rejection Breakdown */}
         {Object.keys(metrics.rejection_reasons).length > 0 && (
-          <div className="bg-white p-4 rounded-lg shadow">
+          <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Rejection Breakdown</h3>
             <div className="space-y-2">
               {Object.entries(metrics.rejection_reasons).map(([reason, count]) => (
@@ -501,7 +509,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
         )}
 
         {/* Risk Distribution */}
-        <div className="bg-white p-4 rounded-lg shadow">
+        <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Risk Distribution</h3>
           <div className="space-y-2">
             {Object.entries(metrics.risk_distribution).map(([risk, count]) => (
@@ -574,7 +582,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       <div className="space-y-6">
         {/* Quality Summary */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white p-4 rounded-lg shadow">
+          <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
             <h3 className="text-sm font-medium text-gray-500">Hallucination Rate</h3>
             <p className={`mt-2 text-2xl font-bold ${
               metrics.average_hallucination_rate < 0.05 ? 'text-green-600' :
@@ -584,7 +592,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
             </p>
           </div>
 
-          <div className="bg-white p-4 rounded-lg shadow">
+          <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
             <h3 className="text-sm font-medium text-gray-500">RAGAS Overall</h3>
             <p className="mt-2 text-2xl font-bold text-blue-600">
               {metrics.average_ragas_overall
@@ -593,7 +601,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
             </p>
           </div>
 
-          <div className="bg-white p-4 rounded-lg shadow">
+          <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
             <h3 className="text-sm font-medium text-gray-500">Avg Latency (p95)</h3>
             <p className="mt-2 text-2xl font-bold text-gray-900">
               {(metrics.average_latency_p95 / 1000).toFixed(2)}s
@@ -602,7 +610,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
         </div>
 
         {/* Model Distribution */}
-        <div className="bg-white p-4 rounded-lg shadow">
+        <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Model Distribution</h3>
           <div className="space-y-2">
             {Object.entries(metrics.model_distribution).map(([model, percentage]) => (
@@ -623,7 +631,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
         </div>
 
         {/* Cost Summary */}
-        <div className="bg-white p-4 rounded-lg shadow">
+        <div className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-xl shadow-sm shadow-black/[0.04] dark:shadow-black/40 p-4">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Cost Summary</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -669,26 +677,26 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   // ───────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="metrics-dashboard bg-gray-50 rounded-lg shadow-lg overflow-hidden">
+    <div className="metrics-dashboard rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-lg shadow-black/[0.04] dark:shadow-black/40 overflow-hidden">
       {/* Tab Navigation */}
-      <div className="bg-white border-b border-gray-200">
-        <nav className="flex space-x-8 px-6" aria-label="Tabs">
+      <div className="bg-white/70 dark:bg-white/[0.03] border-b border-slate-200/60 dark:border-white/[0.06]">
+        <nav className="flex gap-2 px-4 md:px-6 py-2 overflow-x-auto scrollbar-hide" aria-label="Tabs">
           <button
             onClick={() => setState((prev) => ({ ...prev, activeTab: 'application' }))}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`shrink-0 rounded-2xl px-3 py-2 text-xs font-semibold border transition-colors ${
               state.activeTab === 'application'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-200/70 dark:border-blue-500/20 text-blue-800 dark:text-blue-200'
+                : 'bg-white/70 dark:bg-white/[0.04] border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 hover:bg-white/90 dark:hover:bg-white/[0.06]'
             }`}
           >
             Your Application
           </button>
           <button
             onClick={() => setState((prev) => ({ ...prev, activeTab: 'portfolio' }))}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`shrink-0 rounded-2xl px-3 py-2 text-xs font-semibold border transition-colors ${
               state.activeTab === 'portfolio'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-200/70 dark:border-blue-500/20 text-blue-800 dark:text-blue-200'
+                : 'bg-white/70 dark:bg-white/[0.04] border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 hover:bg-white/90 dark:hover:bg-white/[0.06]'
             }`}
           >
             Portfolio Insights
@@ -696,10 +704,10 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
           {isAdmin && (
             <button
               onClick={() => setState((prev) => ({ ...prev, activeTab: 'ai' }))}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+              className={`shrink-0 rounded-2xl px-3 py-2 text-xs font-semibold border transition-colors ${
                 state.activeTab === 'ai'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-200/70 dark:border-blue-500/20 text-blue-800 dark:text-blue-200'
+                  : 'bg-white/70 dark:bg-white/[0.04] border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 hover:bg-white/90 dark:hover:bg-white/[0.06]'
               }`}
             >
               AI Quality 🔒
@@ -709,11 +717,11 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       </div>
 
       {/* Tab Content */}
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         {state.isLoading && !state.applicationMetrics ? (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto" />
-            <p className="mt-4 text-gray-500">Loading metrics...</p>
+            <p className="mt-4 text-slate-500 dark:text-slate-400">Loading metrics...</p>
           </div>
         ) : (
           <>

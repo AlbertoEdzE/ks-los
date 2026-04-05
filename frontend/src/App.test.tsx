@@ -3,6 +3,18 @@ import App from './App';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+function renderApp(initialEntries: string[]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={initialEntries}>
+        <App />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
 
 describe('App', () => {
   beforeEach(() => {
@@ -16,11 +28,7 @@ describe('App', () => {
 
   it('renders login screen initially', () => {
     try {
-      render(
-        <MemoryRouter initialEntries={['/login']}>
-          <App />
-        </MemoryRouter>
-      );
+      renderApp(['/login']);
       expect(screen.getByText('Welcome to LoanAssist')).toBeInTheDocument();
     } catch (error) {
       console.error('App render failed:', error);
@@ -68,6 +76,13 @@ describe('App', () => {
       if (url.endsWith('/api/conversations') && method === 'GET') {
         return new Response(JSON.stringify([baseLead]), { status: 200 });
       }
+      // Dashboard view also loads loans/phases in the background for cross-linking.
+      if (url.endsWith('/api/loans') && method === 'GET') {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      if (url.endsWith('/api/phases') && method === 'GET') {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
       if (url.endsWith(`/api/conversations/${leadId}`) && method === 'PATCH') {
         return new Response(JSON.stringify(updatedLead), { status: 200 });
       }
@@ -75,35 +90,30 @@ describe('App', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(
-      <MemoryRouter initialEntries={['/dashboard']}>
-        <App />
-      </MemoryRouter>
-    );
+    renderApp(['/dashboard']);
 
     fireEvent.change(await screen.findByLabelText('Username'), { target: { value: 'officer' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Password123!' } });
     fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
 
-    await screen.findByTestId('text-leads-title');
+    await screen.findByRole('heading', { name: 'Dashboard' });
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/conversations'), expect.anything());
     });
 
-    fireEvent.click(await screen.findByTestId(`lead-row-${leadId}`));
-    expect(screen.getByTestId('text-approval-probability-title')).toBeInTheDocument();
-    expect(screen.getByTestId('text-approval-probability-score')).toHaveTextContent('60%');
-    expect(screen.getByTestId('approval-navigator-officer')).toBeInTheDocument();
-    expect(screen.getByTestId('approval-blocker-officer-0')).toHaveTextContent('Missing credit score');
-    expect(screen.getByTestId('approval-action-officer-0')).toHaveTextContent('Share credit score range');
+    fireEvent.click(await screen.findByTestId(`officer-hold-row-${leadId}`));
+    expect(await screen.findByText('Approval Probability')).toBeInTheDocument();
+    expect(screen.getByText('Top blockers')).toBeInTheDocument();
+    expect(screen.getByText('Missing credit score')).toBeInTheDocument();
+    expect(screen.getByText('Share credit score range')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByTestId('input-borrower-name'), { target: { value: 'Jane Doe' } });
-    fireEvent.change(screen.getByTestId('input-assigned-officer'), { target: { value: 'officer-1' } });
-    fireEvent.change(screen.getByTestId('select-lead-status'), { target: { value: 'reviewing' } });
-    fireEvent.click(screen.getByTestId('button-save-lead'));
+    fireEvent.change(screen.getByTestId('lead-borrower-name-input'), { target: { value: 'Jane Doe' } });
+    fireEvent.change(screen.getByTestId('lead-assigned-officer-input'), { target: { value: 'officer-1' } });
+    fireEvent.change(screen.getByTestId('lead-status-select'), { target: { value: 'reviewing' } });
+    fireEvent.click(screen.getByTestId('lead-save-button'));
 
-    await screen.findByTestId('text-save-ok');
-    expect(screen.getByText('Jane Doe')).toBeInTheDocument();
+    await screen.findByText('Saved');
+    expect(screen.getAllByText('Jane Doe').length).toBeGreaterThan(0);
   });
 
   it('allows officer to generate underwriting memo in pipeline', async () => {
@@ -112,6 +122,7 @@ describe('App', () => {
     const baseLoan = {
       id: loanId,
       borrowerName: 'Memo Borrower',
+      conversationId: null,
       loanType: 'Home Loan',
       loanAmount: '250000',
       catalogProductCode: 'HL-PUR-001',
@@ -149,6 +160,10 @@ describe('App', () => {
       if (url.endsWith('/api/loans') && method === 'GET') {
         return new Response(JSON.stringify([baseLoan]), { status: 200 });
       }
+      // Pipeline view also loads conversations in the background for cross-linking.
+      if (url.endsWith('/api/conversations') && method === 'GET') {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
       if (url.endsWith(`/api/loans/${loanId}/underwriting-memo`) && method === 'POST') {
         return new Response(JSON.stringify(loanWithMemo), { status: 200 });
       }
@@ -156,24 +171,18 @@ describe('App', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(
-      <MemoryRouter initialEntries={['/pipeline']}>
-        <App />
-      </MemoryRouter>
-    );
+    renderApp(['/pipeline']);
 
     fireEvent.change(await screen.findByLabelText('Username'), { target: { value: 'officer' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Password123!' } });
     fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
 
-    await screen.findByRole('heading', { name: 'Loans' });
-    await screen.findByTestId(`loan-row-${loanId}`);
+    await screen.findByRole('heading', { name: 'Pipeline' });
+    await screen.findByTestId(`officer-hold-row-${loanId}`);
 
-    fireEvent.click(screen.getByTestId(`loan-row-${loanId}`));
-    expect(await screen.findByTestId('text-underwriting-memo-title')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId('button-generate-underwriting-memo'));
-    await screen.findByTestId('underwriting-memo');
-    expect(screen.getByTestId('underwriting-memo-disclaimer')).toHaveTextContent('not a credit decision');
+    fireEvent.click(screen.getByTestId(`officer-hold-row-${loanId}`));
+    fireEvent.click(screen.getByTestId('loan-generate-memo-button'));
+    await screen.findByText('Underwriting memo');
+    expect(screen.getByText(/not a credit decision/i)).toBeInTheDocument();
   });
 });

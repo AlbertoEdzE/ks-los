@@ -168,10 +168,12 @@ export const SyntheticDataControl: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: '24px', backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-      <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1a202c', marginBottom: '24px' }}>Synthetic Data Generator</h2>
+    <div className="max-w-6xl mx-auto px-4 md:px-6 py-6">
+      <div className="rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-lg shadow-black/[0.04] dark:shadow-black/40 p-6">
+        <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Synthetic Data Generator</h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Generate reproducible credit profiles and stream progress.</p>
       
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginTop: '20px' }}>
         <InputGroup label="Count">
           <input 
             type="number" 
@@ -227,37 +229,14 @@ export const SyntheticDataControl: React.FC = () => {
       <div style={{ display: 'flex', gap: '16px', marginTop: '24px' }}>
         <button 
           onClick={startGeneration} 
-          style={{ 
-            padding: '10px 24px', 
-            backgroundColor: '#3182ce', 
-            color: '#fff', 
-            border: 'none', 
-            borderRadius: '6px', 
-            fontWeight: '600',
-            cursor: 'pointer',
-            transition: 'background-color 0.2s',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#2b6cb0'}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#3182ce'}
+          className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-[#0078D4] to-[#005EA6] px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-[#0078D4]/20"
         >
           Start Generation
         </button>
         
         <button 
           onClick={validateOutput} 
-          style={{ 
-            padding: '10px 24px', 
-            backgroundColor: '#edf2f7', 
-            color: '#4a5568', 
-            border: '1px solid #e2e8f0', 
-            borderRadius: '6px', 
-            fontWeight: '600',
-            cursor: 'pointer',
-            transition: 'all 0.2s'
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#e2e8f0'}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#edf2f7'}
+          className="inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold bg-white/80 dark:bg-white/[0.06] border border-slate-200/60 dark:border-white/[0.06] text-slate-700 dark:text-slate-200 shadow-sm hover:bg-white/90 dark:hover:bg-white/[0.08]"
         >
           Validate Output
         </button>
@@ -266,6 +245,7 @@ export const SyntheticDataControl: React.FC = () => {
       {(status !== 'idle' || progress > 0) && (
         <ProgressBar progress={progress} status={`${status === 'running' ? 'Generating...' : status} ${message ? `— ${message}` : ''}`} />
       )}
+      </div>
     </div>
   );
 };

@@ -65,23 +65,26 @@ const SuggestionsToggle: React.FC = () => {
 
 export const ConfigurationPanel: React.FC = () => {
     return (
-        <div style={{ padding: '24px', backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1a202c', marginBottom: '24px' }}>System Configuration</h2>
+        <div className="max-w-6xl mx-auto px-4 md:px-6 py-6">
+          <div className="rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-lg shadow-black/[0.04] dark:shadow-black/40 p-6">
+          <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">System Configuration</h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Feature flags and governance controls for the assistant.</p>
           
-          <div style={{ padding: '24px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: '600', color: '#2d3748', marginBottom: '20px' }}>AI Assistant</h3>
+          <div className="mt-6 rounded-3xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] p-6">
+            <h3 className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white mb-4">AI Assistant</h3>
             
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-               <div style={{ maxWidth: '600px' }}>
-                  <div style={{ fontWeight: '600', color: '#2d3748', marginBottom: '4px' }}>Smart Suggestions</div>
-                  <div style={{ fontSize: '0.9rem', color: '#718096', lineHeight: '1.5' }}>
+            <div className="flex items-center justify-between gap-6">
+               <div className="min-w-0 max-w-2xl">
+                  <div className="font-extrabold text-slate-900 dark:text-white mb-1">Smart Suggestions</div>
+                  <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
                     When enabled, the system will provide contextual hints, next-step recommendations, and automated insights throughout the application workflow.
                   </div>
                </div>
-               <div style={{ marginLeft: '24px' }}>
+               <div className="shrink-0">
                  <SuggestionsToggle />
                </div>
             </div>
+          </div>
           </div>
         </div>
     );

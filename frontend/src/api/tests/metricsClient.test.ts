@@ -9,18 +9,19 @@
  * - Token management
  */
 
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MetricsApiClient, getMetricsClient, resetMetricsClient } from '../metricsClient';
 import { ApplicationStatus, GradeLevel } from '../../types/metrics';
 
-// Mock fetch globally
-global.fetch = jest.fn();
+// Mock fetch globally (vitest)
+global.fetch = vi.fn();
 
 describe('MetricsApiClient', () => {
   let client: MetricsApiClient;
 
   beforeEach(() => {
     client = new MetricsApiClient({ baseUrl: '/api/metrics', debug: false });
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -36,7 +37,7 @@ describe('MetricsApiClient', () => {
         message: 'Authentication successful',
       };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => mockResponse,
       });
@@ -53,7 +54,7 @@ describe('MetricsApiClient', () => {
         message: 'Invalid password',
       };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => mockResponse,
       });
@@ -69,7 +70,7 @@ describe('MetricsApiClient', () => {
 
     it('should logout and clear token', async () => {
       // First authenticate
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           success: true,
@@ -107,7 +108,7 @@ describe('MetricsApiClient', () => {
         decision_reason: 'All STP checks passed',
       };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => mockMetrics,
       });
@@ -138,7 +139,7 @@ describe('MetricsApiClient', () => {
         risk_distribution: { low: 15, moderate: 20, elevated: 10, high: 2 },
       };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => mockMetrics,
       });
@@ -162,7 +163,7 @@ describe('MetricsApiClient', () => {
         },
       ];
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => mockMetrics,
       });
@@ -184,7 +185,7 @@ describe('MetricsApiClient', () => {
 
     it('should fetch AI metrics after authentication', async () => {
       // Authenticate first
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           success: true,
@@ -221,7 +222,7 @@ describe('MetricsApiClient', () => {
         updated_at: new Date().toISOString(),
       };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => mockAIMetrics,
       });
@@ -234,7 +235,7 @@ describe('MetricsApiClient', () => {
 
     it('should fetch aggregate AI metrics', async () => {
       // Authenticate first
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           success: true,
@@ -268,7 +269,7 @@ describe('MetricsApiClient', () => {
         high_hallucination_conversations: 0,
       };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         json: async () => mockAggregateMetrics,
       });
@@ -282,7 +283,7 @@ describe('MetricsApiClient', () => {
 
   describe('Error Handling', () => {
     it('should handle 404 errors', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as any).mockResolvedValueOnce({
         ok: false,
         status: 404,
         json: async () => ({ message: 'Not found' }),
@@ -292,7 +293,7 @@ describe('MetricsApiClient', () => {
     });
 
     it('should handle timeout errors', async () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(() => {
+      (global.fetch as any).mockImplementationOnce(() => {
         return new Promise((_, reject) => {
           setTimeout(() => reject(new Error('AbortError')), 100);
         });
@@ -304,7 +305,7 @@ describe('MetricsApiClient', () => {
     });
 
     it('should handle network errors', async () => {
-      (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
+      (global.fetch as any).mockRejectedValueOnce(new Error('Network error'));
 
       await expect(client.getApplicationMetrics('APP-123')).rejects.toThrow();
     });

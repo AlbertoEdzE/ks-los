@@ -3,6 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/infrastructure/docker-compose.yml"
+SKIP_DOCKER="${SKIP_DOCKER:-0}"
+INSTALL_BACKEND_DEPS="${INSTALL_BACKEND_DEPS:-1}"
+INSTALL_FRONTEND_DEPS="${INSTALL_FRONTEND_DEPS:-1}"
+
+if command -v git >/dev/null 2>&1 && [ -d "$ROOT_DIR/.git" ]; then
+  echo "[KS LOS] Repo: $ROOT_DIR (git $(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo 'unknown'))"
+else
+  echo "[KS LOS] Repo: $ROOT_DIR"
+fi
 
 trim_ws() {
   local s="$1"
@@ -149,6 +158,14 @@ free_docker_port() {
 
 # Function to ensure Docker is running
 ensure_docker_running() {
+    if [ "$SKIP_DOCKER" = "1" ]; then
+        return 0
+    fi
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "[KS LOS] Warning: docker not found. Skipping observability stack."
+        SKIP_DOCKER=1
+        return 0
+    fi
     if ! docker info > /dev/null 2>&1; then
         echo "[KS LOS] Docker is not running."
         if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -162,15 +179,17 @@ ensure_docker_running() {
                 retries=$((retries+1))
                 if [ $retries -gt 60 ]; then
                     echo ""
-                    echo "[KS LOS] Error: Timed out waiting for Docker to start."
-                    exit 1
+                    echo "[KS LOS] Warning: Timed out waiting for Docker to start. Continuing without Docker services."
+                    SKIP_DOCKER=1
+                    return 0
                 fi
             done
             echo ""
             echo "[KS LOS] Docker started successfully."
         else
-            echo "[KS LOS] Error: Docker is not running. Please start it manually."
-            exit 1
+            echo "[KS LOS] Warning: Docker is not running. Continuing without Docker services."
+            SKIP_DOCKER=1
+            return 0
         fi
     fi
 }
@@ -180,7 +199,7 @@ ensure_docker_running
 echo "[KS LOS] Cleaning up previous session..."
 
 # 1. Stop Docker services
-if [ -f "$COMPOSE_FILE" ]; then
+if [ "$SKIP_DOCKER" != "1" ] && [ -f "$COMPOSE_FILE" ]; then
     echo "[KS LOS] Stopping Docker containers..."
     docker compose -f "$COMPOSE_FILE" down --remove-orphans || true
     echo "[KS LOS] Pulling latest Docker images..."
@@ -199,7 +218,9 @@ check_and_free_port 4317 "Otel Collector"
 check_and_free_port 16686 "Jaeger"
 
 # App ports
-free_docker_port "$BACKEND_PORT" "Backend API"
+if [ "$SKIP_DOCKER" != "1" ]; then
+  free_docker_port "$BACKEND_PORT" "Backend API"
+fi
 check_and_free_port "$BACKEND_PORT" "Backend API"
 check_and_free_port 5173 "Frontend"
 check_and_free_port "$FRONTEND_PORT" "Frontend"
@@ -209,17 +230,23 @@ export BACKEND_PORT
 
 ensure_docker_running
 
-echo "[KS LOS] Bootstrapping observability stack (Prometheus, Grafana, MLflow)..."
-docker compose -f "$COMPOSE_FILE" up -d postgres redis postgres_exporter mlflow prometheus grafana otel-collector jaeger langfuse
+if [ "$SKIP_DOCKER" != "1" ]; then
+  echo "[KS LOS] Bootstrapping observability stack (Prometheus, Grafana, MLflow)..."
+  docker compose -f "$COMPOSE_FILE" up -d postgres redis postgres_exporter mlflow prometheus grafana otel-collector jaeger langfuse
+else
+  echo "[KS LOS] Skipping observability stack (Docker disabled)."
+fi
 
-POSTGRES_USER="${POSTGRES_USER:-ks_los}"
-POSTGRES_DB="${POSTGRES_DB:-ks_los_db}"
-LANGFUSE_DB="${LANGFUSE_DB:-langfuse_db}"
-if command -v docker >/dev/null 2>&1; then
-  if docker ps --format '{{.Names}}' | grep -qx 'ks_los_postgres'; then
-    echo "[KS LOS] Ensuring Postgres database '${LANGFUSE_DB}' exists for LangFuse..."
-    if ! docker exec ks_los_postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -tAc "select 1 from pg_database where datname='${LANGFUSE_DB}'" | grep -q 1; then
-      docker exec ks_los_postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "create database ${LANGFUSE_DB}" >/dev/null 2>&1 || true
+if [ "$SKIP_DOCKER" != "1" ]; then
+  POSTGRES_USER="${POSTGRES_USER:-ks_los}"
+  POSTGRES_DB="${POSTGRES_DB:-ks_los_db}"
+  LANGFUSE_DB="${LANGFUSE_DB:-langfuse_db}"
+  if command -v docker >/dev/null 2>&1; then
+    if docker ps --format '{{.Names}}' | grep -qx 'ks_los_postgres'; then
+      echo "[KS LOS] Ensuring Postgres database '${LANGFUSE_DB}' exists for LangFuse..."
+      if ! docker exec ks_los_postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -tAc "select 1 from pg_database where datname='${LANGFUSE_DB}'" | grep -q 1; then
+        docker exec ks_los_postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c "create database ${LANGFUSE_DB}" >/dev/null 2>&1 || true
+      fi
     fi
   fi
 fi
@@ -266,7 +293,13 @@ open_url() {
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [ -z "$PYTHON_BIN" ]; then
   if [ -x "$ROOT_DIR/venv/bin/python" ]; then
-    PYTHON_BIN="$ROOT_DIR/venv/bin/python"
+    # Guard against a copied/broken venv (e.g. symlinks to a different machine).
+    if "$ROOT_DIR/venv/bin/python" -c "import sys; print(sys.executable)" >/dev/null 2>&1; then
+      PYTHON_BIN="$ROOT_DIR/venv/bin/python"
+    else
+      echo "[KS LOS] Warning: existing venv looks broken. Removing $ROOT_DIR/venv ..."
+      rm -rf "$ROOT_DIR/venv" || true
+    fi
   elif command -v python3 >/dev/null 2>&1; then
     PYTHON_BIN="$(command -v python3)"
   elif command -v python >/dev/null 2>&1; then
@@ -287,15 +320,29 @@ if [ "$REQ_OK" -ne 1 ]; then
 fi
 
 if [ ! -x "$ROOT_DIR/venv/bin/python" ]; then
-  "$PYTHON_BIN" -m venv "$ROOT_DIR/venv" || true
+  echo "[KS LOS] Creating python venv at $ROOT_DIR/venv ..."
+  if ! "$PYTHON_BIN" -m venv "$ROOT_DIR/venv"; then
+    echo "[KS LOS] Warning: failed to create venv. Continuing with system python: $PYTHON_BIN"
+  fi
 fi
 if [ -x "$ROOT_DIR/venv/bin/python" ]; then
   PYTHON_BIN="$ROOT_DIR/venv/bin/python"
 fi
-"$PYTHON_BIN" -m pip install -U pip "wheel<0.46" setuptools >/dev/null 2>&1 || true
-if [ -f "$ROOT_DIR/requirements.txt" ]; then
+
+# Optional pip flags (avoid breaking on macOS; needed on some Linux system pythons)
+declare -a PIP_FLAGS
+PIP_FLAGS=()
+if [[ "$(uname -s)" == "Linux" ]] && [[ "$PYTHON_BIN" != "$ROOT_DIR/venv/bin/python" ]]; then
+  PIP_FLAGS+=(--break-system-packages)
+fi
+
+"$PYTHON_BIN" -m pip install -U pip "wheel<0.46" setuptools ${PIP_FLAGS[@]+"${PIP_FLAGS[@]}"} >/dev/null 2>&1 || true
+if [ "$INSTALL_BACKEND_DEPS" = "1" ] && [ -f "$ROOT_DIR/requirements.txt" ]; then
   echo "[KS LOS] Installing backend dependencies..."
-  "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
+  "$PYTHON_BIN" -m pip install ${PIP_FLAGS[@]+"${PIP_FLAGS[@]}"} -r "$ROOT_DIR/requirements.txt"
+elif [ "$INSTALL_BACKEND_DEPS" != "1" ]; then
+  echo "[KS LOS] Installing minimal backend dependencies (INSTALL_BACKEND_DEPS=0)..."
+  "$PYTHON_BIN" -m pip install ${PIP_FLAGS[@]+"${PIP_FLAGS[@]}"} fastapi "uvicorn[standard]" >/dev/null 2>&1 || true
 fi
 
 if ! "$PYTHON_BIN" -c "import uvicorn" >/dev/null 2>&1; then
@@ -355,11 +402,15 @@ if [ -f "$FRONT_DIR/package.json" ]; then
   # Start Frontend with nohup
   (
     cd "$FRONT_DIR"
-    echo "[KS LOS] Installing frontend dependencies (this may take a moment)..."
-    if [ -f "package-lock.json" ]; then
-      npm ci || npm install
+    if [ "$INSTALL_FRONTEND_DEPS" = "1" ]; then
+      echo "[KS LOS] Installing frontend dependencies (this may take a moment)..."
+      if [ -f "package-lock.json" ]; then
+        npm ci || npm install
+      else
+        npm install
+      fi
     else
-      npm install
+      echo "[KS LOS] Skipping frontend dependency install (INSTALL_FRONTEND_DEPS=0)."
     fi
     
     echo "[KS LOS] Starting frontend dev server..."

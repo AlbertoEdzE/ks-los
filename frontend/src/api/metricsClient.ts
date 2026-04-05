@@ -70,7 +70,13 @@ export interface MetricsApiClientConfig {
 }
 
 const DEFAULT_CONFIG: MetricsApiClientConfig = {
-  baseUrl: (import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/api/metrics` : '/api/metrics'),
+  baseUrl: (
+    import.meta.env.VITE_API_URL
+      ? `${String(import.meta.env.VITE_API_URL).replace(/\/$/, '')}/api/metrics`
+      : import.meta.env.DEV
+        ? 'http://localhost:8000/api/metrics'
+        : '/api/metrics'
+  ),
   timeout: 30000,
   debug: false,
 };

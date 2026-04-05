@@ -125,6 +125,7 @@ test.describe('UI parity vs design attached_assets', () => {
   const routes: Array<{ key: string; path: string }> = [
     { key: 'borrower', path: '/' },
     { key: 'dashboard', path: '/dashboard' },
+    { key: 'officer-hold', path: '/officer-hold' },
     { key: 'pipeline', path: '/pipeline' },
     { key: 'products', path: '/loan-products' },
     { key: 'officer-chat', path: '/officer-chat' },

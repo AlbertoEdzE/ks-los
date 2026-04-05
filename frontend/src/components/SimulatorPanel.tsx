@@ -3,27 +3,77 @@ import React, { useState, useEffect } from 'react';
 const ADMIN_HEADERS = { Authorization: 'Bearer admin-access' };
 
 const MetricCard: React.FC<{ label: string; value: string | number | React.ReactNode }> = ({ label, value }) => (
-  <div style={{ padding: '16px', backgroundColor: '#f7fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-    <div style={{ fontSize: '0.875rem', color: '#718096', marginBottom: '4px', fontWeight: '500' }}>{label}</div>
-    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#2d3748' }}>{value}</div>
+  <div className="rounded-3xl border border-slate-200/60 dark:border-white/[0.06] bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl shadow-lg shadow-black/[0.04] dark:shadow-black/40 p-5">
+    <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{label}</div>
+    <div className="mt-1 text-2xl font-black tracking-tight text-slate-900 dark:text-white">{value}</div>
   </div>
 );
 
-const JsonView: React.FC<{ data: unknown }> = ({ data }) => (
-  <pre style={{ 
-    backgroundColor: '#f8fafc', 
-    padding: '12px', 
-    borderRadius: '6px', 
-    border: '1px solid #e2e8f0', 
-    fontSize: '0.85rem', 
-    fontFamily: 'Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-    color: '#4a5568',
-    overflowX: 'auto',
-    margin: 0
-  }}>
-    {data ? JSON.stringify(data, null, 2) : 'Loading...'}
-  </pre>
-);
+function prettyJson(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+const KeyValueGrid: React.FC<{ data: Record<string, unknown> }> = ({ data }) => {
+  const entries = Object.entries(data).slice(0, 16);
+  return (
+    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+      {entries.map(([k, v]) => (
+        <div key={k} className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-3">
+          <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider break-all">{k}</div>
+          <div className="mt-1 text-sm text-slate-800 dark:text-slate-200 break-words">
+            {v === null || v === undefined ? '—' : typeof v === 'object' ? (Array.isArray(v) ? `Array(${v.length})` : `Object(${Object.keys(v as any).length})`) : String(v)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const BarList: React.FC<{ title: string; data: Record<string, number> }> = ({ title, data }) => {
+  const rows = Object.entries(data)
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .slice(0, 12);
+  const max = rows.reduce((m, [, v]) => Math.max(m, Math.abs(v)), 0) || 1;
+  return (
+    <div className="rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-lg shadow-black/[0.04] dark:shadow-black/40 p-6">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">{title}</h3>
+        <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{rows.length} shown</span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="mt-3 text-sm text-slate-500 dark:text-slate-400">No data.</div>
+      ) : (
+        <div className="mt-4 grid gap-2">
+          {rows.map(([k, v]) => {
+            const w = `${Math.round((Math.abs(v) / max) * 100)}%`;
+            const tone = v >= 0 ? 'bg-emerald-500/70' : 'bg-red-500/70';
+            return (
+              <div key={k} className="rounded-2xl border border-slate-200/60 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.03] px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[12px] font-semibold text-slate-700 dark:text-slate-200 break-all">{k}</div>
+                  <div className="text-[12px] font-black text-slate-900 dark:text-white">{v.toFixed(4)}</div>
+                </div>
+                <div className="mt-2 h-2 rounded-full bg-slate-100 dark:bg-white/[0.06] overflow-hidden">
+                  <div className={`h-full ${tone}`} style={{ width: w }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <details className="mt-4">
+        <summary className="cursor-pointer text-xs font-semibold text-slate-600 dark:text-slate-300">View raw JSON</summary>
+        <pre className="mt-3 whitespace-pre-wrap text-[12px] leading-relaxed text-slate-700 dark:text-slate-200 bg-white/60 dark:bg-black/20 border border-slate-200/60 dark:border-white/[0.06] rounded-2xl p-4 max-h-[320px] overflow-auto">
+          {prettyJson(data)}
+        </pre>
+      </details>
+    </div>
+  );
+};
 
 const InputGroup: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div style={{ marginBottom: '16px' }}>
@@ -150,10 +200,11 @@ export const SimulatorPanel: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
       {/* Header Section */}
-      <div style={{ padding: '24px', backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-        <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1a202c', marginBottom: '20px' }}>Model Simulator</h2>
+      <div className="rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-lg shadow-black/[0.04] dark:shadow-black/40 p-6">
+        <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Model Simulator</h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Run controlled feature perturbations and view model explanations.</p>
         
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
           
@@ -223,9 +274,9 @@ export const SimulatorPanel: React.FC = () => {
       </div>
 
       {/* Results Section */}
-      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '24px' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
         {/* Left Column: Score & Summary */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div className="flex flex-col gap-6">
           <MetricCard 
             label="Prediction Score" 
             value={score !== null ? (
@@ -235,22 +286,48 @@ export const SimulatorPanel: React.FC = () => {
             ) : '-'} 
           />
           
-          <div style={{ padding: '20px', backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: '600', color: '#2d3748', marginBottom: '12px' }}>Observability Status</h3>
-            <JsonView data={summary} />
+          <div className="rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-lg shadow-black/[0.04] dark:shadow-black/40 p-6">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">Observability Status</h3>
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">local</span>
+            </div>
+            {summary ? (
+              <>
+                <KeyValueGrid data={summary} />
+                <details className="mt-4">
+                  <summary className="cursor-pointer text-xs font-semibold text-slate-600 dark:text-slate-300">View raw JSON</summary>
+                  <pre className="mt-3 whitespace-pre-wrap text-[12px] leading-relaxed text-slate-700 dark:text-slate-200 bg-white/60 dark:bg-black/20 border border-slate-200/60 dark:border-white/[0.06] rounded-2xl p-4 max-h-[320px] overflow-auto">
+                    {prettyJson(summary)}
+                  </pre>
+                </details>
+              </>
+            ) : (
+              <div className="mt-3 text-sm text-slate-500 dark:text-slate-400">No summary available.</div>
+            )}
           </div>
         </div>
 
         {/* Right Column: Explainability */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div style={{ padding: '20px', backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: '600', color: '#2d3748', marginBottom: '12px' }}>Feature Importance (SHAP Proxy)</h3>
-            <JsonView data={Object.keys(importances).length ? importances : null} />
-          </div>
-
-          <div style={{ padding: '20px', backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: '600', color: '#2d3748', marginBottom: '12px' }}>Input Features</h3>
-            <JsonView data={Object.keys(featureValues).length ? featureValues : null} />
+        <div className="flex flex-col gap-6">
+          <BarList title="Feature importance (SHAP proxy)" data={importances} />
+          <div className="rounded-3xl bg-white/80 dark:bg-white/[0.04] backdrop-blur-2xl border border-slate-200/60 dark:border-white/[0.06] shadow-lg shadow-black/[0.04] dark:shadow-black/40 p-6">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white">Input features</h3>
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{Object.keys(featureValues).length} fields</span>
+            </div>
+            {Object.keys(featureValues).length ? (
+              <>
+                <KeyValueGrid data={featureValues as Record<string, unknown>} />
+                <details className="mt-4">
+                  <summary className="cursor-pointer text-xs font-semibold text-slate-600 dark:text-slate-300">View raw JSON</summary>
+                  <pre className="mt-3 whitespace-pre-wrap text-[12px] leading-relaxed text-slate-700 dark:text-slate-200 bg-white/60 dark:bg-black/20 border border-slate-200/60 dark:border-white/[0.06] rounded-2xl p-4 max-h-[320px] overflow-auto">
+                    {prettyJson(featureValues)}
+                  </pre>
+                </details>
+              </>
+            ) : (
+              <div className="mt-3 text-sm text-slate-500 dark:text-slate-400">No features available.</div>
+            )}
           </div>
         </div>
       </div>

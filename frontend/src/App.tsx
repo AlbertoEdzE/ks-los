@@ -11,11 +11,13 @@ import MetricsDashboard from './components/MetricsDashboard';
 import { SimulatorPanel } from './components/SimulatorPanel';
 import { SyntheticDataControl } from './components/SyntheticDataControl';
 import { TrainingPanel } from './components/TrainingPanel';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CheckCircle2 } from 'lucide-react';
 import { DocumentsCard } from './components/DocumentsCard';
+import OfficerHoldPage from './pages/OfficerHoldPage';
+import OfficerAgenticConsolePage from './pages/OfficerAgenticConsolePage';
 
 type LoginPageProps = {
   mode: 'select' | 'borrower-login' | 'officer-login' | 'borrower-register' | 'officer-register' | 'borrower-forgot' | 'officer-forgot';
@@ -321,6 +323,8 @@ function App() {
     if (!next) {
       const adminRoutes = new Set([
         '/dashboard',
+        '/officer-hold',
+        '/agentic-console',
         '/pipeline',
         '/loan-products',
         '/officer-chat',
@@ -338,6 +342,8 @@ function App() {
     }
     const adminRoutes = new Set([
       '/dashboard',
+      '/officer-hold',
+      '/agentic-console',
       '/pipeline',
       '/loan-products',
       '/officer-chat',
@@ -364,6 +370,8 @@ function App() {
 
       if (
         fromPath === '/dashboard' ||
+        fromPath === '/officer-hold' ||
+        fromPath === '/agentic-console' ||
         fromPath === '/pipeline' ||
         fromPath === '/loan-products' ||
         fromPath === '/officer-chat' ||
@@ -1046,40 +1054,72 @@ function App() {
     );
   };
 
-  const OfficerChrome: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <div>
-      <div
-        style={{
-          padding: '12px 16px',
-          borderBottom: '1px solid #e5e7eb',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <div style={{ fontWeight: 900 }}>Officer</div>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <Link to="/dashboard">Dashboard</Link>
-          <Link to="/pipeline">Pipeline</Link>
-          <Link to="/loan-products">Loan Products</Link>
-          <Link to="/officer-chat">Officer Chat</Link>
-          <Link to="/synthetic-data">Synthetic Data</Link>
-          <Link to="/training">ML Training</Link>
-          <Link to="/metrics">Metrics</Link>
-          <Link to="/simulator">Simulator</Link>
-          <Link to="/configuration">Configuration</Link>
-          <button type="button" onClick={handleLogout} style={{ padding: '6px 10px' }}>
-            Logout
-          </button>
-        </div>
+  const OfficerChrome: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const linkBase =
+      'shrink-0 inline-flex items-center rounded-2xl px-3 py-2 text-xs font-semibold border transition-colors no-underline';
+    const linkInactive =
+      'bg-white/70 dark:bg-white/[0.04] border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 hover:bg-white/90 dark:hover:bg-white/[0.06]';
+    const linkActive =
+      'bg-blue-50 dark:bg-blue-500/10 border-blue-200/70 dark:border-blue-500/20 text-blue-800 dark:text-blue-200';
+
+    const navItems: Array<{ to: string; label: string }> = [
+      { to: '/dashboard', label: 'Dashboard' },
+      { to: '/pipeline', label: 'Pipeline' },
+      { to: '/loan-products', label: 'Loan Products' },
+      { to: '/officer-chat', label: 'Officer Chat' },
+      { to: '/officer-hold', label: 'Officer Hold' },
+      { to: '/agentic-console', label: 'Agentic Console' },
+      { to: '/synthetic-data', label: 'Synthetic Data' },
+      { to: '/training', label: 'ML Training' },
+      { to: '/metrics', label: 'Metrics' },
+      { to: '/simulator', label: 'Simulator' },
+      { to: '/configuration', label: 'Configuration' },
+    ];
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30 dark:from-[#0d0d0d] dark:via-[#111] dark:to-[#0d0d0d]">
+        <header className="sticky top-0 z-50 border-b border-slate-200/40 dark:border-white/[0.04] bg-white/70 dark:bg-[#141414]/80 backdrop-blur-xl">
+          <div className="px-4 md:px-6 py-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-11 h-11 rounded-2xl bg-white dark:bg-white/10 flex items-center justify-center shadow-sm border border-slate-200/60 dark:border-white/[0.06]">
+                <span className="text-sm font-black tracking-tight text-slate-900 dark:text-white">KS</span>
+              </div>
+              <div className="min-w-0">
+                <div className="font-black tracking-tight text-slate-900 dark:text-white leading-tight truncate">Officer Console</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 truncate">Operational tools · AI oversight · Loan workflow</div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold bg-white/80 dark:bg-white/[0.06] border border-slate-200/60 dark:border-white/[0.06] text-slate-600 dark:text-slate-300 shadow-sm"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+
+          <div className="px-4 md:px-6 pb-3">
+            <nav className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
+              {navItems.map((it) => (
+                <NavLink key={it.to} to={it.to} className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}>
+                  {it.label}
+                </NavLink>
+              ))}
+            </nav>
+          </div>
+        </header>
+        <main>{children}</main>
       </div>
-      {children}
-    </div>
-  );
+    );
+  };
 
-  type LeadStatus = 'active' | 'reviewing' | 'qualified' | 'closed';
-  type DocumentStatus = 'missing' | 'submitted' | 'verified' | 'rejected';
-
+  // Legacy officer pages (rough UI) have been removed from the active build.
+  // They are kept here only as a comment block for historical reference.
+  /*
   const DashboardPage = () => {
     const officerHeaders = React.useMemo<Record<string, string>>(() => ({ Authorization: 'Bearer loan-officer-access' }), []);
     const [loading, setLoading] = useState(false);
@@ -2196,6 +2236,7 @@ function App() {
       </OfficerChrome>
     );
   };
+  */
 
   const LoanProductsPage = () => {
     const [loading, setLoading] = useState(false);
@@ -3552,7 +3593,15 @@ function App() {
         element={
           <RequireAuth>
             <RequireRole allow="admin">
-              <DashboardPage />
+              <OfficerChrome>
+                <OfficerHoldPage
+                  title="Dashboard"
+                  subtitle="All leads with approval signals, recommended products, and cross-links into loans, chat, and agentic state."
+                  defaultKind="lead"
+                  leadFilter="all"
+                  loanFilter="holds"
+                />
+              </OfficerChrome>
             </RequireRole>
           </RequireAuth>
         }
@@ -3562,7 +3611,39 @@ function App() {
         element={
           <RequireAuth>
             <RequireRole allow="admin">
-              <PipelinePage />
+              <OfficerChrome>
+                <OfficerHoldPage
+                  title="Pipeline"
+                  subtitle="All loans with document workflows, STP hold resolution, and underwriting memo generation."
+                  defaultKind="loan"
+                  leadFilter="holds"
+                  loanFilter="all"
+                />
+              </OfficerChrome>
+            </RequireRole>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/officer-hold"
+        element={
+          <RequireAuth>
+            <RequireRole allow="admin">
+              <OfficerChrome>
+                <OfficerHoldPage />
+              </OfficerChrome>
+            </RequireRole>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/agentic-console"
+        element={
+          <RequireAuth>
+            <RequireRole allow="admin">
+              <OfficerChrome>
+                <OfficerAgenticConsolePage />
+              </OfficerChrome>
             </RequireRole>
           </RequireAuth>
         }

@@ -1,0 +1,283 @@
+
+[00:00:00.000 --> 00:00:06.040]   That is actually building content for you, that is, let's say, in our case, it is trying
+[00:00:06.040 --> 00:00:11.780]   to fetch the information, you know, calculate, you know, respond back to the person and put
+[00:00:11.780 --> 00:00:16.240]   out some reasoning or, you know, suggestions, right, like, say, one agent is actually doing
+[00:00:16.240 --> 00:00:17.240]   that.
+[00:00:17.240 --> 00:00:18.240]   That's it.
+[00:00:18.240 --> 00:00:19.240]   Whatever it is, responding back, isn't it?
+[00:00:19.240 --> 00:00:24.320]   Now, every response that is going back to the agent, like that is going back to the
+[00:00:24.320 --> 00:00:29.960]   user, from any of the agents, like, particularly agents today, right?
+[00:00:29.960 --> 00:00:34.900]   Multiple agents are catering to different, different responses, isn't it?
+[00:00:34.900 --> 00:00:39.200]   Now, this particular agent, which is LLM as a judge, you know, that's a pattern, which
+[00:00:39.200 --> 00:00:44.560]   is calling it as LLM as a judge pattern, but honestly speaking, it's just another, it's
+[00:00:44.560 --> 00:00:51.120]   just an isolated LLM, you know, which just has compliance rules, which is written in
+[00:00:51.120 --> 00:00:52.120]   its system prompt.
+[00:00:52.120 --> 00:00:53.120]   Okay.
+[00:00:53.120 --> 00:00:59.840]   It can be somewhere around 300 to 400 lines, that's fine, because, I have implemented
+[00:00:59.840 --> 00:01:06.160]   a similar thing, like, you know, compliance, validate an agent, which has extreme, which
+[00:01:06.160 --> 00:01:11.320]   has, so around 400 lines of compliance rules or so, for my previous example.
+[00:01:11.320 --> 00:01:12.320]   Okay.
+[00:01:12.320 --> 00:01:19.520]   Now, what I'm saying is this agent, in simple sense, this agent will just take the response
+[00:01:19.520 --> 00:01:25.880]   that is going back to the user from every agent and it will validate and it will put out
+[00:01:25.880 --> 00:01:31.520]   in its logs, okay, or a dashboard, like, what you've shown to me once, previously, you've
+[00:01:31.520 --> 00:01:37.360]   shown me an accuracy, kind of a dashboard, a similar dashboard, like that, it will put
+[00:01:37.360 --> 00:01:41.560]   out all its logs, and it will say that, you know, this agent has not hallucinated.
+[00:01:41.560 --> 00:01:47.120]   Like, you know, it has, it has, it has, it has to all the compliance rules of the organization
+[00:01:47.120 --> 00:01:52.880]   because one thing first, all the compliance rules, which are major in terms of, you know,
+[00:01:52.880 --> 00:01:59.480]   the way it responds, the way, you know, the, you know, the domain construct, it is following
+[00:01:59.480 --> 00:02:00.480]   all the rules.
+[00:02:00.480 --> 00:02:06.120]   I say, it is, it is, it is responding based on the compliance rules written on the system
+[00:02:06.120 --> 00:02:07.120]   prompt.
+[00:02:07.120 --> 00:02:14.000]   And second thing, there might be some, there might be some documents, which could, in
+[00:02:14.000 --> 00:02:19.680]   a knowledge base and connected as a tool to only this particular agent and that, and
+[00:02:19.680 --> 00:02:26.960]   that partition or, let's say, partition or tags, I would say, let's say, I'm just thinking
+[00:02:26.960 --> 00:02:32.760]   out loud because now what I did previously was, I created a set of documents, which are
+[00:02:32.760 --> 00:02:39.880]   just compliance rules, and I attached all of those to this particular LLM agent, okay,
+[00:02:39.880 --> 00:02:46.000]   and I told it, like, any time, whenever a response comes in, whenever a response is going
+[00:02:46.000 --> 00:02:51.960]   out from any agent, validate that response to all the compliance rules and all the organizational
+[00:02:51.960 --> 00:02:52.960]   documents.
+[00:02:52.960 --> 00:02:57.440]   Like, you know, if it's following all those documents, rules, regulatory, rules and all,
+[00:02:57.440 --> 00:03:02.160]   and then you determine whether the response is correct or not, I mean, correct innocence,
+[00:03:02.160 --> 00:03:07.240]   whether it is, whether it's not hallucinating, it falls within the purview of the organization
+[00:03:07.240 --> 00:03:12.360]   and the compliance rules and you put, put those metrics right, you give those metrics
+[00:03:12.360 --> 00:03:16.680]   in your logs and that gets shown in your dashboard, you with me.
+[00:03:16.680 --> 00:03:21.680]   So this, this brings up the high trust, see, but at the very same time, there is no latency
+[00:03:21.680 --> 00:03:26.120]   because this would be done in parallel, parallel processing, like the agent would automatically
+[00:03:26.120 --> 00:03:32.440]   see, yeah, from, to the UI, obviously, the agent would be responding, but from the backend,
+[00:03:32.440 --> 00:03:36.640]   each response would be going to this particular agent and agent would be validating it and putting
+[00:03:36.640 --> 00:03:41.360]   it as a log in our dashboard, like a open search or something like that, right?
+[00:03:41.360 --> 00:03:45.840]   Some information where, where are, like, let's not complicate it, the existing dashboard
+[00:03:45.840 --> 00:03:49.720]   that you have, accuracy dashboard that you are showing to me, it will be log that information.
+[00:03:49.720 --> 00:03:54.640]   So at that point of time, we can say that, hey, guys, we have multiple agents.
+[00:03:54.640 --> 00:04:00.860]   None of these agents are going beyond the hallucination metrics of, let's say, like, some
+[00:04:00.860 --> 00:04:05.580]   90% or 80% because they are following, majorly, they're following almost all the compliance
+[00:04:05.580 --> 00:04:13.660]   rooms of the organization that you have written. Am I sounding, am I, am I sounding okay?
+[00:04:13.660 --> 00:04:18.200]   Like, does this look okay for you? Because I was just researching and there is a concept
+[00:04:18.200 --> 00:04:24.300]   called LLM as a judge, which I did not know, I used to just include validate regions and
+[00:04:24.300 --> 00:04:29.020]   I used to just make sure that every, let's say, for example, I would say, okay, I built
+[00:04:29.020 --> 00:04:32.140]   the code generator for my previous organization.
+[00:04:32.140 --> 00:04:37.380]   And the code generator, it tried several thousand lines of code. And after that, that entire code
+[00:04:37.380 --> 00:04:45.220]   is again validated by a validator agent. And it sees, it has all the style of my previous
+[00:04:45.220 --> 00:04:52.040]   company, all the white listed packages, white listed functions, only, and where it's using
+[00:04:52.040 --> 00:04:57.100]   it that is at using all the error handling, all those things. And then it used to say, yes,
+[00:04:57.100 --> 00:05:02.780]   the compliance is somewhere around 95% and so on and so on. Because not always 100, right?
+[00:05:02.780 --> 00:05:08.960]   Because it's an agent that's generated. So somewhere 95 to 92% there is accuracy. And
+[00:05:08.960 --> 00:05:12.020]   the high hallucination is like this. And it used to give out a matrix and that used to
+[00:05:12.020 --> 00:05:19.100]   get logged. So what I've done with previous organization is just popped up to me. So because
+[00:05:19.100 --> 00:05:23.820]   I was researching and I understood that LLM as a judge is a pattern like whatever we have
+[00:05:23.820 --> 00:05:28.920]   implemented. So just to you, I would like to like, you know, more than me, you would know
+[00:05:28.920 --> 00:05:33.260]   more of all these things with your experience. So I just wanted you to, yeah, I just wanted
+[00:05:33.260 --> 00:05:37.940]   you to put this as well, a very simple, small thing like this. And we can also put it to
+[00:05:37.940 --> 00:05:42.820]   them because yesterday, if you remember, like, you know, with that list, those folks were
+[00:05:42.820 --> 00:05:48.740]   also saying LLM as a judge, it's nothing but another LLM, which is just validating that
+[00:05:48.740 --> 00:05:54.180]   it with the compliance. So can we, can we do this algorithm? Like, you know, just at least
+[00:05:54.180 --> 00:05:58.460]   on a small level, we can just, I'm not asking for all the agents, but at least for the major
+[00:05:58.460 --> 00:06:04.660]   agents, which are responding back, all the rules, all the validations are actually, sorry,
+[00:06:04.660 --> 00:06:09.540]   all the responses are within the compliance rules that we have kept for the organization.
+[00:06:09.540 --> 00:06:16.680]   And can we do that? A simple, a simple LLM with the prompt and few, maybe a knowledge
+[00:06:16.680 --> 00:06:20.660]   base, which is attached to it. That's it. And this will be in parallel processing, where
+[00:06:20.660 --> 00:06:25.420]   it'll be updating another dashboard, which will not be available to the user. It'll, we'll
+[00:06:25.420 --> 00:06:34.540]   just show it to the folks. That's it. Yeah. Yes. We call that a meta evaluator. So I will
+[00:06:34.540 --> 00:06:42.280]   implement it. I will try it. But now, yes, I love the idea. I want to make that. So I
+[00:06:42.280 --> 00:06:49.880]   give you a, had it here, please call you again to write it down into the chat. So because I
+[00:06:49.880 --> 00:06:55.360]   have many things now in the head. So when I finish, I will retake this last one. I love
+[00:06:55.360 --> 00:07:02.700]   it. Yes, yes, definitely. See, this is a very small thing. It hardly would take you, like,
+[00:07:02.700 --> 00:07:08.000]   hardly would take you some 30 minutes because the reason is, it's just another LLM, which
+[00:07:08.000 --> 00:07:13.160]   is where I'll put off output of here. I don't know how it's working by assuming that every
+[00:07:13.160 --> 00:07:19.480]   agent's response is going out. It's going out as a variable today. And it's going out. It's
+[00:07:19.480 --> 00:07:22.760]   stored in a way. Well, I'm that variable is then again sent to the main orchestrator and
+[00:07:22.760 --> 00:07:27.440]   main orchestrator is putting out to you. I mean, I'm assuming that this is what is happening.
+[00:07:27.440 --> 00:07:33.080]   So every from every variable that is like the final response variable from each agent
+[00:07:33.080 --> 00:07:39.440]   just needs to go into LLM, like for tomorrow's demonstration, that's not keep all agents.
+[00:07:39.440 --> 00:07:44.280]   Maybe the main orchestrator, that response, we can just send it to the, that final response
+[00:07:44.280 --> 00:07:50.040]   that's going to the UI, we can send that response to LLM as an agent, LLM as a judge. And
+[00:07:50.040 --> 00:07:55.520]   that that judge would just have a system prompt, which would say, okay, like, you know, make
+[00:07:55.520 --> 00:08:02.040]   sure it's grounded within a loan origination system process. The response is, is permitted
+[00:08:02.040 --> 00:08:07.000]   to, you know, something like that, like, you know, a few rules with respect to loan origination,
+[00:08:07.000 --> 00:08:13.360]   right? And also, I hope, you know, any suggestions, metrics that it is actually putting out, right?
+[00:08:13.360 --> 00:08:18.520]   You're, you have loan origination system, it must be putting out these metrics, like EMI
+[00:08:18.520 --> 00:08:23.800]   and all those things. So all those things are actually adhering to the regulatory, regulatory
+[00:08:23.800 --> 00:08:30.320]   principles of a company. Okay. That is also there. Like, you know, it's, it's not breaching
+[00:08:30.320 --> 00:08:35.560]   the threshold. Like, how do we say that? See, how is it determining that it's a low risk?
+[00:08:35.560 --> 00:08:42.360]   Okay. So it is saying the UI, in the UI, the chatbot is saying, it's a low risk, but are
+[00:08:42.360 --> 00:08:46.920]   we very sure that it's a low risk? For that, we check out logs and we see that, yes, the
+[00:08:46.920 --> 00:08:53.280]   validator agent actually, actually validated it. And it is actually a low risk because
+[00:08:53.280 --> 00:08:59.040]   of so and so on. And so reason, because we had all these formulas and it did cater to
+[00:08:59.040 --> 00:09:05.120]   it and the validator agent actually validated the response of the main agent. And it told
+[00:09:05.120 --> 00:09:09.840]   that, yes, the main agent is not bluffing. It's not putting fluff. It is actually a low
+[00:09:09.840 --> 00:09:14.240]   risk. So this is what I want to just show tomorrow. That's just just a very small thing.
+[00:09:14.240 --> 00:09:19.440]   That's okay. Okay. I'll put it down. I'll put it down. I'll put it down. Yes, please. I'll
+[00:09:19.440 --> 00:09:26.280]   put it down. Yeah. Just more than any other evaluation things, please, first priority
+[00:09:26.280 --> 00:09:31.640]   is this one, because this is a sure short winner for tomorrow. Okay. Because this is sure
+[00:09:31.640 --> 00:09:38.440]   short winner. And because this does not require any third party service, third party service
+[00:09:38.440 --> 00:09:43.360]   like Langfews, Langsmith and Alberto. Okay. This will be a sure short winning, you know,
+[00:09:43.360 --> 00:09:46.960]   framework, which we can just say that yes, this is a pattern also and we have implemented
+[00:09:46.960 --> 00:09:52.240]   such kind of patterns that industry does practice. Right. After that, we can we can check
+[00:09:52.240 --> 00:09:57.960]   on with for observability. For just for observability. For tomorrow, like if it's possible, can we go
+[00:09:57.960 --> 00:10:03.680]   with it? I don't know if you know, Langfews is something. It's an open source. Okay. But I
+[00:10:03.680 --> 00:10:10.200]   don't know if just just a tomorrow demonstration because it's a big company rather than, you
+[00:10:10.200 --> 00:10:14.760]   know, some other open sources. Can you can we go with Langfews? Can we go with Langfews? Can
+[00:10:14.760 --> 00:10:22.600]   you just just few things show that, you know, yes, you know, every LLM call, every LLM call,
+[00:10:22.600 --> 00:10:28.840]   every API call to the LLM is actually going like this. How much tokens have been utilized,
+[00:10:28.840 --> 00:10:33.200]   that observability can we just show it in Langfews? Just just those few metrics saying that,
+[00:10:33.200 --> 00:10:40.040]   you know, okay, we are making sure that every call is being logged. We know how much token
+[00:10:40.040 --> 00:10:44.000]   consumption is there. The alerts are being also pushed out. Whenever, you know, there are
+[00:10:44.000 --> 00:10:49.840]   huge amount of rate, I mean, API calls something like that. So that, you know, we know that we have
+[00:10:49.840 --> 00:10:55.800]   developed something and enterprise grade and not just a small POC. That's the two things
+[00:10:55.800 --> 00:11:00.960]   that I'm asking. One, LLM has a judge, one, this one, Langfews. Langfews are Langfews, anything
+[00:11:00.960 --> 00:11:05.480]   is fine. Just for tomorrow's demonstration, we quickly show these things. Okay. That's
+[00:11:05.480 --> 00:11:10.520]   possible. Main these two things, Albert. So apart from your application submission, right?
+[00:11:10.520 --> 00:11:15.560]   Some submission, let that be borrower, anyway, we can see. Okay. I'm assuming that we can
+[00:11:15.560 --> 00:11:21.080]   see the borrower. Okay. I'll again connect back with you at, like, let's say, between now
+[00:11:21.080 --> 00:11:29.200]   it's 11 o'clock for me at night. I'll connect back at 4 o'clock. Let's say 11, 4 a lot. Okay.
+[00:11:29.200 --> 00:11:34.400]   Within 5 hours, I'll connect back. Okay. Okay. I would, would that be an appropriate
+[00:11:34.400 --> 00:11:38.680]   time for you or would it be very late for you? It's fine. It's fine. It's fine. It's fine.
+[00:11:38.680 --> 00:11:47.360]   Yes, it is fine. I'm sorry. I'm sorry. I apologize because it's a very, it's a very,
+[00:11:47.360 --> 00:11:53.600]   very, very, uh, opportunity to have a lot of things. Yes, that's really, yeah. Please, let's
+[00:11:53.600 --> 00:12:02.840]   make this, let's be professional in this thing. But after that, we have to talk about this
+[00:12:02.840 --> 00:12:09.400]   hurry up because I want to deliver the most professional and high-level code that I can't
+[00:12:09.400 --> 00:12:17.880]   construct every time. But if I is still working at this velocity, I cannot guarantee all these
+[00:12:17.880 --> 00:12:26.440]   rehor and robustness on my deployment. I can do it. Yes. And I want to do it. I am accustomed
+[00:12:26.440 --> 00:12:35.720]   to work at this velocity. I have not any problem, but I need time. I need time as much as possible
+[00:12:35.720 --> 00:12:42.360]   to make this kind of review scientifically, correctly, kind of things. That's what I want
+[00:12:42.360 --> 00:12:51.560]   to do. But, uh, yeah, let's talk later if you want, but let's complete this. Yes. Yeah,
+[00:12:51.560 --> 00:12:56.280]   understood. See, I'll be very frank with you. Honestly, when I don't want to give out any
+[00:12:56.280 --> 00:13:02.880]   kind of, you know, any kinds of, uh, how do I say that? You know, I don't want to compromise
+[00:13:02.880 --> 00:13:08.160]   on quality algorithm. Okay. But the thing what's happening is, uh, ideally, I wouldn't have
+[00:13:08.160 --> 00:13:13.480]   disturbed you when it comes to this. You know, I only wanted to, ideally, I communicate
+[00:13:13.480 --> 00:13:18.200]   with you when it comes to a huge amount of, you know, industry standard, you know, quality
+[00:13:18.200 --> 00:13:24.840]   based work. Okay. So these kind of POCs, we ideally have another person or whatever, but unfortunately,
+[00:13:24.840 --> 00:13:30.280]   that person, if you know it, you might be included in a Baptist health as well. That person,
+[00:13:30.280 --> 00:13:37.720]   I actually went off to a surgery. So for that reason, I, I have no one else to bank on. Apparently,
+[00:13:37.720 --> 00:13:43.720]   because, uh, I am, I'm currently putting my hands into pre-sales into this as well. So that
+[00:13:43.720 --> 00:13:48.760]   is the reason. Yeah, that's, it's just a small request this time, but from next time, I'll
+[00:13:48.760 --> 00:13:52.520]   not compromise on the quality when it comes to your delivery. Okay. No, no hurry from your
+[00:13:52.520 --> 00:13:59.400]   end. Please don't misunderstand me, uh, Aditya. No, don't tell you something personal. I think,
+[00:13:59.400 --> 00:14:06.920]   I want to think I am a high level worker. So I am a scientist. I like this kind of work.
+[00:14:07.560 --> 00:14:14.360]   I love to do this. Right. But, but if we have a little more time, it will be better. That is what
+[00:14:14.360 --> 00:14:19.640]   I am saying. I will complete. I'm the sort of. Yes. That's, that's it. That's it. Listen.
+[00:14:19.640 --> 00:14:27.000]   Yeah. Yeah. Okay. From my end, from my end, I'll promise that next time, these kind of are you,
+[00:14:27.000 --> 00:14:33.160]   you know, you know, situations would want to be there. I'll make sure of it. Okay. I'll,
+[00:14:33.160 --> 00:14:37.720]   I'll, we'll hire it. We are with prior information. I'll come to you because the reason is the center
+[00:14:37.720 --> 00:14:42.760]   of the week has been kind of hectic for me. A lot of customers today. We had Hilton coming up here
+[00:14:42.760 --> 00:14:48.120]   and it was also another game changer. Hilton actually loved the customer. I actually loved
+[00:14:48.120 --> 00:14:55.400]   our, your code and he gave us more information how to build your code into a much better way. I mean,
+[00:14:55.400 --> 00:15:01.240]   with much more time. So I'll be strategizing more on that. But apologies. Again, uh, say,
+[00:15:01.240 --> 00:15:06.040]   that is, especially when it comes to you, I respect your experience. Yeah. And then from next time,
+[00:15:06.040 --> 00:15:10.280]   I'll be sure that, you know, everything is streamlined well. Okay. Yeah. Another problem. You know,
+[00:15:10.280 --> 00:15:15.880]   I'm going to hurry up. Let's just work. Let's keep working. Uh, DTS. So we are a team. So let's,
+[00:15:15.880 --> 00:15:22.760]   let's complete this in the best way. Yeah. Okay. Please. Yeah. I'm done. Please see. And write it down.
+[00:15:22.760 --> 00:15:29.480]   Write it down because I am just kind of full of things in my head. I will retake this as soon
+[00:15:29.480 --> 00:15:34.840]   as I finish this. Okay. Yeah. Please. Okay. Let me, let me, one more thing, one more thing. Let me,
+[00:15:34.840 --> 00:15:42.360]   let me try to make it much simpler. Okay. One thing, changing Lama to open AI. Uh, that is a must,
+[00:15:42.360 --> 00:15:49.480]   Alberto. I'm just, I'm just again, reprioritizing on that. If it's done. Yes. Wonderful. Okay. It's done.
+[00:15:49.480 --> 00:15:54.280]   Okay. Full STP application use case. I think it's already there. Right? Yes. Yes. Like, you know,
+[00:15:54.280 --> 00:16:00.040]   it's right through processing. Fantastic. That's also there. And I, the commission, this is already
+[00:16:00.040 --> 00:16:03.880]   there, I guess. Like, you know, you go to a loan officer and you just see, this is already there.
+[00:16:03.880 --> 00:16:13.560]   Fantastic. AI observability. I would say, uh, just for tomorrow, one station to make it much easier,
+[00:16:13.560 --> 00:16:19.560]   just connect the elements to landsmith. Okay. Take off, take a free trial. I mean, I, I've seen from
+[00:16:19.560 --> 00:16:25.080]   your, see, it is again, just a suggestion from my end. I know because we are short on time. I
+[00:16:25.080 --> 00:16:31.960]   do not want to at all, you know, push you. But when it comes to quality, uh, and also enterprise
+[00:16:31.960 --> 00:16:38.040]   grade level, I only see landsmith, which, which comes to my mind, which can easily integrate and,
+[00:16:38.040 --> 00:16:43.000]   you know, you can actually show it to customers on a dashboard when it comes to landsmith. And I
+[00:16:43.000 --> 00:16:48.440]   provide you, I guess. Okay. Just just to see again, it's a, it's a, it's a thought which I have because I want
+[00:16:48.440 --> 00:16:54.120]   to decrease the amount of work. Um, you know, I mean, I want to decrease that I want to upload, which
+[00:16:54.120 --> 00:17:00.440]   unnecessarily came up on our team. That is the reason. Okay. See, if it's easy, do you agree that
+[00:17:00.440 --> 00:17:04.920]   landsmith is a quick integrator and you can just show it in the dashboard? Do you agree on that?
+[00:17:04.920 --> 00:17:12.360]   Yes. I agree. I agree. Okay. So we go with landsmith. Okay. Just take off on free trial,
+[00:17:12.360 --> 00:17:19.160]   connect it and all the agent calls would be going to it and it'll be showing the logs and all the metrics.
+[00:17:19.160 --> 00:17:24.200]   Okay. We're good with that observing, right? So the observability is achieved and hallucination
+[00:17:24.200 --> 00:17:30.760]   engine, we have our LLM as a judge. Okay. A very simple, I'll, I'll write it down again here.
+[00:17:30.760 --> 00:17:35.960]   So our LLM as a judge model would be our hallucination engine and evaluation metrics as well.
+[00:17:36.840 --> 00:17:42.440]   Okay. Evaluation metrics as well. I think panties will do a LLM as an engine for evaluation metrics as well.
+[00:17:42.440 --> 00:17:47.560]   Okay. I'm just thinking that groundedness, uh, there are a couple of things that I was thinking,
+[00:17:47.560 --> 00:17:55.240]   like you know, faithfulness, groundedness, all these things, uh, relevance, uh, land use. Okay.
+[00:17:55.240 --> 00:18:02.760]   I think see, uh, can't be just, uh, say, uh, okay, that's conversation with you. So LLM as a judge,
+[00:18:02.760 --> 00:18:09.720]   obviously can say that, you know, the retrieval that, uh, how, how good, sorry, how good is, uh, the answer
+[00:18:09.720 --> 00:18:14.600]   and the hallucination and all these things. But can it also, like it also gives you the confidence
+[00:18:14.600 --> 00:18:20.680]   as well, like that, the relevance and, uh, correctness, it gives all these metrics. Okay.
+[00:18:20.680 --> 00:18:26.760]   Because we might have, we keep, the end of things will keep our scoring, you know, threshold.
+[00:18:26.760 --> 00:18:31.400]   But apart from that, is there anything else that I'm missing out when it comes to evaluation metrics
+[00:18:31.400 --> 00:18:37.880]   from your level? See, just on, uh, just on, there's just, uh, from the third experience, we're just saying.
+[00:18:37.880 --> 00:18:42.120]   Yeah. Uh, is there anything that you're missing when it comes to evaluation?
+[00:18:42.120 --> 00:18:51.800]   Yeah. I included, I am using long fuse. I included, uh, number of tokens, uh, estimated value
+[00:18:51.800 --> 00:19:04.280]   of the request. Uh, I put that also, um, latency, latency in both sides is you are using local, local,
+[00:19:04.280 --> 00:19:13.400]   or, uh, pre-rate. So this boat is working and the hallucination detection, by means,
+[00:19:13.400 --> 00:19:22.280]   these kind of metrics and, um, the quality, the quality evaluation, this means, uh, how the quality
+[00:19:22.280 --> 00:19:30.360]   of their retrieval of the information. Yeah. Okay. Then you have already done it. I'll go through.
+[00:19:30.360 --> 00:19:35.880]   Okay. Fine. See, you've already integrated long fuse. And then I think it's good.
+[00:19:37.400 --> 00:19:44.120]   Yeah, yeah, yeah, yeah. Let me shoot another album. This is more of an image.
+[00:19:44.120 --> 00:19:51.720]   You know, some compliance, uh, rules and incidents subfound, but we have good, then, I'll go to,
+[00:19:51.720 --> 00:19:56.920]   yeah, I'll go to the, uh, AI observability, language, quality evaluation. So you're, you've already,
+[00:19:56.920 --> 00:20:03.080]   okay, you've already taken all those things. Oh, fantastic. Okay, I'll go to like, you know, um,
+[00:20:03.080 --> 00:20:08.840]   apologies. I thought I was trying to, because I, some reason I was thinking, you know, I might have,
+[00:20:08.840 --> 00:20:12.520]   unnecessarily kept a lot of burden on trying to keep, you know, thinking to make it easier.
+[00:20:12.520 --> 00:20:17.000]   Okay. Fantastic. You've already done everything. Very nice. You're very good.
+[00:20:17.000 --> 00:20:23.960]   You're good. You're good. Okay. Cool. So just, um, yeah, if all this is done, then it's already
+[00:20:23.960 --> 00:20:33.320]   like maybe it's, oh, okay. So I have to say, I have to say, uh, it is done. It is implemented.
+[00:20:33.320 --> 00:20:38.520]   Now, the next phase is the integration. I am just started with the integration to put it,
+[00:20:38.520 --> 00:20:45.080]   everything in full. So in order to make the whole test as a client. So I had to make this,
+[00:20:45.080 --> 00:20:50.520]   perhaps this is the most difficult phase, but I will start the just right now. So after that,
+[00:20:50.520 --> 00:20:57.160]   I will retake this last task that you are mentioning. So I will put it in there and I will tell you
+[00:20:57.160 --> 00:21:04.040]   when everything is done. I hope in a couple of hours, it's going to be finished, but I am not sure,
+[00:21:04.040 --> 00:21:13.160]   if the deployment will be ready. I'm not sure. I am just talking. That's okay. Okay. Okay. Good.
+[00:21:13.160 --> 00:21:18.840]   That's okay. The reason why I'm saying it's okay is, uh, I understand. So see, just the thing,
+[00:21:18.840 --> 00:21:26.920]   because tomorrow, I think the call is at, uh, uh, uh, the call is at 630. Okay. The call is at 630
+[00:21:26.920 --> 00:21:35.640]   with Demaro. 630 PM of six 30 PM of IISC. See, last time, you guys, uh, you and Gaby, you guys
+[00:21:35.640 --> 00:21:41.800]   attended with Burma and Sunnyride at time on the last Friday. So, uh, what is that time for you?
+[00:21:41.800 --> 00:21:50.600]   8 AM. What time? 8 AM. So what, what time is it right now for you? Uh, now is 11, almost
+[00:21:50.600 --> 00:22:00.680]   noon, 11, 49. Yes. Okay. So I'm just, I'm just thinking. So, uh, see, because it will be in your local,
+[00:22:00.680 --> 00:22:08.120]   and I'm just thinking. So, um, let's, let's not do LLN as a judge. Okay. I, I'll, I'll, I'll say it off,
+[00:22:08.120 --> 00:22:12.440]   or rather, you know, when, when we are having a conversation, you know, when I'm presenting, when,
+[00:22:12.440 --> 00:22:19.640]   when we are going through it, I, I'll say that we have used LLN as a judge behind the scenes,
+[00:22:19.640 --> 00:22:24.520]   because no one will be able to, no one would be seeing our code. Okay. So right now, let's not do it.
+[00:22:24.520 --> 00:22:29.000]   I have the context. I'll say that, you know, what are we are doing? We are using LLN as a judge pattern.
+[00:22:29.000 --> 00:22:33.560]   We are using Raga's and all this information that you have given. I'll, I'll put it out. Okay.
+[00:22:34.520 --> 00:22:38.840]   You know, you would be, uh, because it would be in your local, uh, please present, like, you know,
+[00:22:38.840 --> 00:22:44.200]   I would need you to present. And anyway, where I would be, you know, it's at all. I would be,
+[00:22:44.200 --> 00:22:53.240]   I would not be at a position to respond that, respond act. You can, you can, you can tell me that,
+[00:22:53.240 --> 00:22:57.720]   well, this year, I think this is done on something like that. I'll, I'll come back to you on that.
+[00:22:57.720 --> 00:23:03.320]   Yes. Okay. But you know what? I think, yeah, honestly, I think we have to make a kind of,
+[00:23:04.520 --> 00:23:13.560]   um, pre-presentation, you and me in order to show you what exactly happened in my site before
+[00:23:13.560 --> 00:23:21.720]   the real presentation. So I will try this. As soon as I finished and I will read it like a presentation,
+[00:23:21.720 --> 00:23:28.920]   I will send you a text message. If you are available, we can join and I can show you
+[00:23:29.560 --> 00:23:35.480]   what I want to show to the real meeting. So we can do this cues or whatever to be prepared for the
+[00:23:35.480 --> 00:23:44.040]   real one. Do you like that idea? Sure. Okay. Yes. I like this idea. Okay. Yeah. So I'm, from my end,
+[00:23:44.040 --> 00:23:50.680]   I'll join back. So within five hours or so, I'll join back. Okay. I'll not, I'll not ask you to go
+[00:23:50.680 --> 00:23:56.600]   beyond because, uh, yeah, I'll make sure that I come back and I'm within that time. And you can
+[00:23:56.600 --> 00:24:02.840]   let me know what you are, what you're done. I'll take a note of it. And, um, you know, the presentation
+[00:24:02.840 --> 00:24:08.200]   anyway will be drafted by Lakshman and me. So once that is done, you know, see, either I say the
+[00:24:08.200 --> 00:24:13.800]   presentation and I leave, uh, leave it to you where you can actually, uh, uh, you know, showcase the
+[00:24:13.800 --> 00:24:20.440]   demonstration, which would be much easier because it's a last sprint and because it's on the last minute
+[00:24:20.440 --> 00:24:26.600]   that we have done this right. I'm going forward, maybe from next time, going forward, uh, like whatever,
+[00:24:26.600 --> 00:24:33.000]   because it'll be a much streamlined process. See, it's a mistake from that. Then it happens because,
+[00:24:33.000 --> 00:24:37.640]   you know, we're just quickly trying to expand right. It happens. So from next time, what I would do
+[00:24:37.640 --> 00:24:44.680]   is anything that you, that we develop. Okay. I'll take a proper understanding of the code and also,
+[00:24:44.680 --> 00:24:48.520]   I would meet the code because it needs to be pushed into GitHub. I'll take it. I'll analyze it.
+[00:24:49.480 --> 00:24:53.800]   I'll have a call with you. What has been done. So once all those things are done, once I'm clear,
+[00:24:53.800 --> 00:24:58.200]   I'll give the presentation. Obviously, for any kind of, you know, in depth, technical question,
+[00:24:58.200 --> 00:25:04.520]   I would be requiring your, uh, your, your, your expertise. Okay. We have a plan. Next time onwards,
+[00:25:04.520 --> 00:25:09.880]   we'll do that. Nice. Yeah. We have a plan. For tomorrow, you go and, uh, you go and give the
+[00:25:09.880 --> 00:25:14.280]   demonstration, uh, so that, you know, it's, it's not a big problem. From my end, I'll give the
+[00:25:14.280 --> 00:25:20.120]   presentation. I'll put out as to what we have done. And once, uh, once, from my end, I'm, I'm clear
+[00:25:20.120 --> 00:25:24.840]   with the architecture. I put it out into them with, with respect to it. And then you can show the
+[00:25:24.840 --> 00:25:29.320]   demonstration where we can put out, you know, it can just show the straight through processing and
+[00:25:29.320 --> 00:25:34.440]   any other question we can handle. Okay. Sure. Sure. Sure. Yeah. Please, please don't forget right
+[00:25:34.440 --> 00:25:43.160]   down the last requirement. I just, uh, don't, though, you don't have to, you don't have to develop it.
+[00:25:43.160 --> 00:25:49.320]   You don't have to develop it. Don't, don't do it. Okay. I'll be, uh, it's my mistake. You see, the
+[00:25:49.320 --> 00:25:54.040]   reason is, uh, at times what's happening is, you know, because I've been in this, you know,
+[00:25:54.040 --> 00:26:01.240]   hustle kind of a thing. I, you know, I'm kind of, uh, there are a few changes that I have to do
+[00:26:01.240 --> 00:26:07.000]   if it comes to my processes as well. Allow me to be a bit more, uh, you know, to modify myself
+[00:26:07.000 --> 00:26:11.560]   as well when it comes to these processes. Uh, I'll make sure that the next time things are not
+[00:26:11.560 --> 00:26:15.640]   hustled in this manner. If there is anything, we're, thank you for pointing this out as well. I'll
+[00:26:15.640 --> 00:26:19.560]   make sure that, you know, the team is not going through a rigorous thing like this. Like, what's
+[00:26:19.560 --> 00:26:25.640]   happening today? Don't implement LLM as a judge. Okay. Okay. Just do what is done. That is it,
+[00:26:25.640 --> 00:26:30.360]   Alberto. I'll speak LLM as a judge pattern. If it is required, you know, when it comes to it,
+[00:26:30.360 --> 00:26:35.320]   I'll say it because no one will be able to comprehend the code. After the meeting, we'll go with
+[00:26:35.320 --> 00:26:40.040]   with Alan as a judge in almost all of our agentic platforms.
+[00:26:40.040 --> 00:26:42.360]   Perfect, perfect, perfect.
+[00:26:42.360 --> 00:26:44.080]   Thank you, thank you, I love you.
+[00:26:44.080 --> 00:26:45.080]   Thank you so much.
+[00:26:45.080 --> 00:26:46.080]   Bye.
+[00:26:46.080 --> 00:26:47.080]   Yeah.
+[00:26:47.080 --> 00:26:48.080]   Bye bye.
